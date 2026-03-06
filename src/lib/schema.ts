@@ -1,7 +1,9 @@
 import { z } from "zod";
 
 export const requestTemplateSchema = z.object({
-  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+  id: z.string(),
+  name: z.string(),
+  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "QUERY"]),
   url: z.string().min(1, "URL is required"),
   headers: z.array(
     z.object({
@@ -20,6 +22,16 @@ export const requestTemplateSchema = z.object({
 
 export type RequestTemplate = z.infer<typeof requestTemplateSchema>;
 
+export type StepResult = {
+  stepId: string;
+  stepName: string;
+  statusCode: number;
+  responseTimeMs: number;
+  requestBody: Record<string, any> | string | null;
+  responseBody: any;
+  error?: string;
+};
+
 export type ExecutionResult = {
   rowId: number;
   status: "pending" | "success" | "error";
@@ -27,5 +39,6 @@ export type ExecutionResult = {
   responseTimeMs: number;
   requestBody: Record<string, any> | string | null;
   responseBody: any;
+  steps: StepResult[];
   error?: string;
 };

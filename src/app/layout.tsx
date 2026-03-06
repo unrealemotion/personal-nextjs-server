@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "API Orchestrator Next.js",
-  description: "High-performance bulk API execution mapping tool",
+  title: "Surge API | High-Performance Orchestrator",
+  description: "Enterprise-grade mass API execution, sequential chains, and dynamic mapping.",
 };
 
 export default function RootLayout({

@@ -112,7 +112,7 @@ export function generateCurl(template: RequestTemplate): string {
         }
     });
 
-    if (template.body && ["POST", "PUT", "PATCH"].includes(template.method)) {
+    if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
         // Escape single quotes in body if we wrap with single quotes
         const escapedBody = template.body.replace(/'/g, "'\\''");
         command += ` \\\n  --data '${escapedBody}'`;

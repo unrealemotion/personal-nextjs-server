@@ -13,14 +13,14 @@ import { Progress } from "@/components/ui/progress";
 
 export function ExecutionPanel() {
     const fileData = useStore(store, (state) => state.fileData);
-    const template = useStore(store, (state) => state.template);
-    const [concurrency, setConcurrency] = useState(5);
+    const templates = useStore(store, (state) => state.templates);
+    const [concurrency, setConcurrency] = useState(2);
     const [isRunning, setIsRunning] = useState(false);
     const [progress, setProgress] = useState(0);
     const abortControllerRef = useRef<AbortController | null>(null);
 
     const totalRows = fileData.length;
-    const canRun = totalRows > 0 && template.url.trim().length > 0;
+    const canRun = totalRows > 0 && templates.some(t => t.url.trim().length > 0);
 
     const handleRun = async () => {
         if (!canRun) return;

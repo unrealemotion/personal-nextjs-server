@@ -17,9 +17,60 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Download, Plus, Trash2, Eye } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Download, Plus, Trash2, Eye, ChevronsUpDown, Check } from "lucide-react";
 import * as xlsx from "xlsx";
 import Editor from "@monaco-editor/react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
+
+function SearchableSelect({ value, onChange, options, placeholder, className }: {
+    value: string;
+    onChange: (val: string) => void;
+    options: { label: string; value: string }[];
+    placeholder?: string;
+    className?: string;
+}) {
+    const [open, setOpen] = useState(false);
+    const selected = options.find(o => o.value === value);
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    className={cn("justify-between font-mono text-xs truncate", className)}
+                >
+                    <span className="truncate">{selected?.label || placeholder || "Select..."}</span>
+                    <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[220px] p-0" align="start">
+                <Command>
+                    <CommandInput placeholder="Search..." className="h-8 text-xs" />
+                    <CommandList>
+                        <CommandEmpty>No match.</CommandEmpty>
+                        <CommandGroup>
+                            {options.map((opt) => (
+                                <CommandItem
+                                    key={opt.value}
+                                    value={opt.label}
+                                    onSelect={() => { onChange(opt.value); setOpen(false); }}
+                                    className="text-xs font-mono"
+                                >
+                                    <Check className={cn("mr-1.5 h-3 w-3", value === opt.value ? "opacity-100" : "opacity-0")} />
+                                    {opt.label}
+                                </CommandItem>
+                            ))}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
 
 function getByDotNotation(obj: any, path: string): string {
     if (!obj || !path) return "";
@@ -37,12 +88,19 @@ export function ResultsTable() {
     const results = useStore(store, (state) => state.results);
     const fileData = useStore(store, (state) => state.fileData);
     const originalHeaders = useStore(store, (state) => state.headers);
+    const templates = useStore(store, (state) => state.templates);
 
     const [selectedDetailId, setSelectedDetailId] = useState<number | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-    // Mappings: e.g., { "User ID": { source: "response", path: "data.id" } }
-    const [columnMappings, setColumnMappings] = useState<Array<{ name: string; source: "request" | "response" | "status" | "error"; path: string }>>([
+    type ColumnMapping = {
+        name: string;
+        source: "variable" | "request_body" | "request_param" | "response" | "status" | "error";
+        path: string;
+        stepId?: string; // for response: which step to read from
+    };
+
+    const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>([
         { name: "Status Code", source: "status", path: "" },
         { name: "Error", source: "error", path: "" },
     ]);
@@ -55,16 +113,32 @@ export function ResultsTable() {
             columnMappings.forEach((col) => {
                 if (col.source === "status") {
                     rowMap[col.name] = res.status === "pending" ? "Pending" : res.statusCode;
-                }
-                else if (col.source === "error") rowMap[col.name] = res.error || "";
-                else if (col.source === "request") {
-                    rowMap[col.name] = rowData[col.path] || "";
+                } else if (col.source === "error") {
+                    rowMap[col.name] = res.error || "";
+                } else if (col.source === "variable") {
+                    rowMap[col.name] = rowData[col.path] ?? "";
+                } else if (col.source === "request_body") {
+                    // From the first step's interpolated request body via dot notation
+                    const steps = res.steps || [];
+                    const step = col.stepId
+                        ? steps.find(s => s.stepId === col.stepId)
+                        : steps[0];
+                    rowMap[col.name] = step?.requestBody
+                        ? getByDotNotation(step.requestBody, col.path)
+                        : "";
+                } else if (col.source === "request_param") {
+                    // Param values are just variable lookups
+                    rowMap[col.name] = rowData[col.path] ?? "";
                 } else if (col.source === "response") {
-                    rowMap[col.name] = res.status === "pending" ? "..." : getByDotNotation(res.responseBody, col.path);
+                    const steps = res.steps || [];
+                    const step = col.stepId
+                        ? steps.find(s => s.stepId === col.stepId)
+                        : steps[steps.length - 1];
+                    const body = step?.responseBody ?? res.responseBody;
+                    rowMap[col.name] = res.status === "pending" ? "..." : getByDotNotation(body, col.path);
                 }
             });
             rowMap.__status = res.status;
-            // Attach internal hidden ID for Actions
             rowMap.__id = res.rowId;
             return rowMap;
         });
@@ -136,7 +210,7 @@ export function ResultsTable() {
     };
 
     const addColumnMapping = () => {
-        setColumnMappings([...columnMappings, { name: `Column ${columnMappings.length + 1}`, source: "request", path: originalHeaders[0] || "" }]);
+        setColumnMappings([...columnMappings, { name: `Column ${columnMappings.length + 1}`, source: "variable", path: originalHeaders[0] || "" }]);
     };
 
     const updateColumnMapping = (index: number, updates: Partial<typeof columnMappings[0]>) => {
@@ -174,33 +248,81 @@ export function ResultsTable() {
                     <h4 className="text-sm font-semibold">Column Mappings</h4>
                     <div className="space-y-3">
                         {columnMappings.map((col, idx) => (
-                            <div key={idx} className="flex space-x-2 items-center">
+                            <div key={idx} className="flex space-x-2 items-center flex-wrap gap-y-2">
                                 <Input
                                     value={col.name}
                                     onChange={(e) => updateColumnMapping(idx, { name: e.target.value })}
                                     placeholder="Column Name"
-                                    className="w-[200px]"
+                                    className="w-[180px]"
                                 />
-                                <Select value={col.source} onValueChange={(val: any) => updateColumnMapping(idx, { source: val })}>
-                                    <SelectTrigger className="w-[140px]">
+                                <Select value={col.source} onValueChange={(val: any) => updateColumnMapping(idx, { source: val, path: "", stepId: undefined })}>
+                                    <SelectTrigger className="w-[150px]">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="request">Request Row</SelectItem>
+                                        <SelectItem value="variable">Variable (Row)</SelectItem>
+                                        <SelectItem value="request_body">Request Body</SelectItem>
+                                        <SelectItem value="request_param">Request Param</SelectItem>
                                         <SelectItem value="response">Response JSON</SelectItem>
                                         <SelectItem value="status">Status Code</SelectItem>
                                         <SelectItem value="error">Error Message</SelectItem>
                                     </SelectContent>
                                 </Select>
-                                {(col.source === "request" || col.source === "response") && (
-                                    <Input
-                                        value={col.path}
-                                        onChange={(e) => updateColumnMapping(idx, { path: e.target.value })}
-                                        placeholder={col.source === "request" ? "e.g. Email" : "e.g. data.user.id"}
-                                        className="flex-1 font-mono text-sm"
+                                {col.source === "variable" && (
+                                    <SearchableSelect
+                                        value={col.path || ""}
+                                        onChange={(val) => updateColumnMapping(idx, { path: val })}
+                                        options={originalHeaders.map(h => ({ label: h, value: h }))}
+                                        placeholder="Select variable"
+                                        className="w-[160px]"
                                     />
                                 )}
-                                {!(col.source === "request" || col.source === "response") && (
+                                {col.source === "request_param" && (() => {
+                                    // Gather all unique param keys from all templates
+                                    const allParams = Array.from(
+                                        new Set(templates.flatMap(t => (t.params || []).map(p => p.key).filter(Boolean)))
+                                    );
+                                    return (
+                                        <>
+                                            {templates.length > 1 && (
+                                                <SearchableSelect
+                                                    value={col.stepId || ""}
+                                                    onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
+                                                    options={[{ label: "All", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
+                                                    placeholder="All steps"
+                                                    className="w-[140px]"
+                                                />
+                                            )}
+                                            <SearchableSelect
+                                                value={col.path || ""}
+                                                onChange={(val) => updateColumnMapping(idx, { path: val })}
+                                                options={allParams.map(p => ({ label: p, value: p }))}
+                                                placeholder="Select param"
+                                                className="w-[160px]"
+                                            />
+                                        </>
+                                    );
+                                })()}
+                                {(col.source === "request_body" || col.source === "response") && (
+                                    <>
+                                        {templates.length > 1 && (
+                                            <SearchableSelect
+                                                value={col.stepId || ""}
+                                                onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
+                                                options={[{ label: "All (Last)", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
+                                                placeholder="All / Last"
+                                                className="w-[140px]"
+                                            />
+                                        )}
+                                        <Input
+                                            value={col.path}
+                                            onChange={(e) => updateColumnMapping(idx, { path: e.target.value })}
+                                            placeholder={col.source === "request_body" ? "e.g. name" : "e.g. data.id"}
+                                            className="flex-1 font-mono text-sm min-w-[120px]"
+                                        />
+                                    </>
+                                )}
+                                {(col.source === "status" || col.source === "error") && (
                                     <div className="flex-1 text-sm text-muted-foreground flex items-center px-3 border border-transparent">
                                         Automatic Value
                                     </div>
@@ -289,8 +411,20 @@ export function ResultsTable() {
                         >
                             Previous
                         </Button>
-                        <div className="text-sm text-muted-foreground min-w-[3rem] text-center">
-                            {table.getState().pagination.pageIndex + 1} / {table.getPageCount() || 1}
+                        <div className="flex items-center gap-1 text-sm text-muted-foreground w-auto">
+                            Page
+                            <Input
+                                type="number"
+                                min={1}
+                                max={table.getPageCount() || 1}
+                                value={table.getState().pagination.pageIndex + 1}
+                                onChange={(e) => {
+                                    const page = e.target.value ? Number(e.target.value) - 1 : 0;
+                                    table.setPageIndex(page);
+                                }}
+                                className="h-7 w-12 px-2 py-0 text-center font-medium bg-background border-muted-foreground/30 focus-visible:ring-1 focus-visible:ring-primary/50"
+                            />
+                            of {table.getPageCount() || 1}
                         </div>
                         <Button
                             variant="outline"
@@ -298,6 +432,7 @@ export function ResultsTable() {
                             onClick={() => table.nextPage()}
                             disabled={!table.getCanNextPage()}
                         >
+                            Next
                         </Button>
                     </div>
                 </div>
@@ -305,53 +440,115 @@ export function ResultsTable() {
 
             {/* View Details Dialog */}
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogContent className="max-w-4xl h-[80vh] flex flex-col overflow-hidden">
+                <DialogContent className="w-[95vw] max-w-[95vw] sm:!max-w-[95vw] h-[90vh] flex flex-col overflow-hidden">
                     <DialogHeader>
                         <DialogTitle>Raw Execution Details</DialogTitle>
                         <DialogDescription>
                             Comparing the final interpolated JSON Request sent alongside the raw Response received.
                         </DialogDescription>
                     </DialogHeader>
-                    {selectedDetailId !== null && (
-                        <div className="flex-1 min-h-0 grid grid-cols-2 gap-4 mt-4">
-                            <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
-                                <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
-                                    Interpolated Request Body
-                                </div>
-                                <div className="flex-1 min-h-0 relative">
-                                    <Editor
-                                        height="100%"
-                                        defaultLanguage="json"
-                                        theme="vs-dark"
-                                        value={
-                                            results.find(r => r.rowId === selectedDetailId)?.requestBody
-                                                ? JSON.stringify(results.find(r => r.rowId === selectedDetailId)?.requestBody, null, 2)
-                                                : "No Request Body Content"
-                                        }
-                                        options={{ readOnly: true, minimap: { enabled: false } }}
-                                    />
-                                </div>
-                            </div>
-                            <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
-                                <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
-                                    Response Body
-                                </div>
-                                <div className="flex-1 min-h-0 relative">
-                                    <Editor
-                                        height="100%"
-                                        defaultLanguage="json"
-                                        theme="vs-dark"
-                                        value={
-                                            results.find(r => r.rowId === selectedDetailId)?.responseBody
-                                                ? JSON.stringify(results.find(r => r.rowId === selectedDetailId)?.responseBody, null, 2)
-                                                : "No Response Body Content"
-                                        }
-                                        options={{ readOnly: true, minimap: { enabled: false } }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                    {selectedDetailId !== null && (() => {
+                        const result = results.find(r => r.rowId === selectedDetailId);
+                        const steps = result?.steps || [];
+                        // Fallback for single-step results without steps array
+                        const hasSteps = steps.length > 0;
+                        return (
+                            <Tabs defaultValue={hasSteps ? steps[0]?.stepId : "legacy"} className="flex-1 flex flex-col min-h-0 mt-4">
+                                {hasSteps && steps.length > 1 && (
+                                    <TabsList className="bg-muted/50 w-full justify-start rounded-none border-b pb-0 px-2 h-auto flex flex-wrap shrink-0">
+                                        {steps.map((step, idx) => (
+                                            <TabsTrigger
+                                                key={step.stepId}
+                                                value={step.stepId}
+                                                className="data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-2 text-xs"
+                                            >
+                                                Step {idx + 1}: {step.stepName}
+                                            </TabsTrigger>
+                                        ))}
+                                    </TabsList>
+                                )}
+                                {hasSteps ? steps.map((step) => (
+                                    <TabsContent key={step.stepId} value={step.stepId} className="flex-1 min-h-0 grid grid-cols-2 gap-4 data-[state=active]:flex data-[state=active]:grid">
+                                        <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
+                                            <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
+                                                Request Body — {step.stepName}
+                                            </div>
+                                            <div className="flex-1 min-h-0 relative">
+                                                <Editor
+                                                    height="100%"
+                                                    defaultLanguage="json"
+                                                    theme="vs-dark"
+                                                    value={
+                                                        step.requestBody
+                                                            ? JSON.stringify(step.requestBody, null, 2)
+                                                            : "No Request Body Content"
+                                                    }
+                                                    options={{ readOnly: true, minimap: { enabled: false } }}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
+                                            <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
+                                                Response ({step.statusCode}) — {step.responseTimeMs}ms
+                                            </div>
+                                            <div className="flex-1 min-h-0 relative">
+                                                <Editor
+                                                    height="100%"
+                                                    defaultLanguage="json"
+                                                    theme="vs-dark"
+                                                    value={
+                                                        step.responseBody
+                                                            ? JSON.stringify(step.responseBody, null, 2)
+                                                            : step.error || "No Response Body Content"
+                                                    }
+                                                    options={{ readOnly: true, minimap: { enabled: false } }}
+                                                />
+                                            </div>
+                                        </div>
+                                    </TabsContent>
+                                )) : (
+                                    <TabsContent value="legacy" className="flex-1 min-h-0 grid grid-cols-2 gap-4">
+                                        <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
+                                            <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
+                                                Interpolated Request Body
+                                            </div>
+                                            <div className="flex-1 min-h-0 relative">
+                                                <Editor
+                                                    height="100%"
+                                                    defaultLanguage="json"
+                                                    theme="vs-dark"
+                                                    value={
+                                                        result?.requestBody
+                                                            ? JSON.stringify(result.requestBody, null, 2)
+                                                            : "No Request Body Content"
+                                                    }
+                                                    options={{ readOnly: true, minimap: { enabled: false } }}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
+                                            <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
+                                                Response Body
+                                            </div>
+                                            <div className="flex-1 min-h-0 relative">
+                                                <Editor
+                                                    height="100%"
+                                                    defaultLanguage="json"
+                                                    theme="vs-dark"
+                                                    value={
+                                                        result?.responseBody
+                                                            ? JSON.stringify(result.responseBody, null, 2)
+                                                            : "No Response Body Content"
+                                                    }
+                                                    options={{ readOnly: true, minimap: { enabled: false } }}
+                                                />
+                                            </div>
+                                        </div>
+                                    </TabsContent>
+                                )}
+                            </Tabs>
+                        );
+                    })()}
                 </DialogContent>
             </Dialog>
         </Card>
