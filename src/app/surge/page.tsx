@@ -64,9 +64,6 @@ export default function SurgePage() {
             <header className="border-b border-border/40 bg-background/50 backdrop-blur-xl sticky top-0 z-50">
                 <div className="container mx-auto max-w-7xl px-4 h-16 flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                        <div className="bg-gradient-to-tr from-primary to-primary/60 p-2 rounded-xl shadow-lg shadow-primary/20">
-                            <Layers className="w-5 h-5 text-primary-foreground" />
-                        </div>
                         <h1 className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
                             Surge API
                         </h1>
@@ -133,10 +130,6 @@ export default function SurgePage() {
                             </Dialog>
                         </div>
 
-                        <div className="hidden sm:flex items-center space-x-2 text-xs font-medium text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-full border border-border/50 backdrop-blur-sm">
-                            <Sparkles className="w-3.5 h-3.5 text-primary" />
-                            <span>Premium Workspace</span>
-                        </div>
                     </div>
                 </div>
             </header>

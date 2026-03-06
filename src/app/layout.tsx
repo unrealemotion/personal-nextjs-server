@@ -13,9 +13,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Surge API | High-Performance Orchestrator",
-  description: "Enterprise-grade mass API execution, sequential chains, and dynamic mapping.",
+  title: "UnrealEmo's Tools",
+  description: "A meticulously crafted collection of utilities for modern web development.",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
+
+import { Header } from "@/components/layout/Header";
+import { Footer } from "@/components/layout/Footer";
 
 export default function RootLayout({
   children,
@@ -25,9 +31,13 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
       >
-        {children}
+        <Header />
+        <main className="flex-grow">
+          {children}
+        </main>
+        <Footer />
       </body>
     </html>
   );
