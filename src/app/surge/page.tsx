@@ -152,7 +152,7 @@ export default function SurgePage() {
                         <FileUploader />
                     </div>
 
-                    <div className="lg:col-span-8 h-[700px] sm:h-[600px] lg:h-full flex min-h-0">
+                    <div className="lg:col-span-8 h-[80vh] sm:h-[600px] lg:h-full flex min-h-0">
                         <RequestDesigner />
                     </div>
                 </div>

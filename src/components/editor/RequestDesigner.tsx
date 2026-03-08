@@ -379,7 +379,7 @@ export function RequestDesigner() {
                 </div>
 
                 {/* Active template editor */}
-                <div className="flex-1 p-3 sm:p-6 space-y-4 overflow-y-auto sm:overflow-hidden flex flex-col min-w-0 min-h-0">
+                <div className="flex-1 p-3 sm:p-6 space-y-4 overflow-hidden flex flex-col min-w-0 min-h-0">
                     {/* Step Name */}
                     <div className="shrink-0">
                         <Input
@@ -411,8 +411,8 @@ export function RequestDesigner() {
                         />
                     </div>
 
-                    <Tabs defaultValue="params" className="flex-1 flex flex-col min-h-[250px] sm:min-h-0 min-w-0">
-                        <TabsList className="bg-muted/50 w-full justify-start rounded-none border-b pb-0 px-2 h-auto flex flex-wrap">
+                    <Tabs defaultValue="params" className="flex-1 flex flex-col min-h-0 min-w-0">
+                        <TabsList className="bg-muted/50 w-full justify-start rounded-none border-b pb-0 px-2 h-auto flex flex-wrap shrink-0">
                             <TabsTrigger
                                 value="params"
                                 className="data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-2"
@@ -433,58 +433,62 @@ export function RequestDesigner() {
                             </TabsTrigger>
                         </TabsList>
 
-                        <TabsContent value="body" className="flex-1 p-0 mt-0 min-h-0 min-w-0 border border-muted-foreground/20 rounded-b-md focus-within:ring-1 ring-ring flex flex-col rounded-t-none overflow-hidden relative data-[state=active]:flex shadow-inner bg-[#1e1e1e]">
-                            <div className="flex items-center justify-end gap-1 px-2 py-1 bg-[#252526] border-b border-muted-foreground/10 shrink-0">
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                                    onClick={() => {
-                                        try {
-                                            const parsed = JSON.parse(template.body || "");
-                                            updateTemplate({ body: JSON.stringify(parsed, null, 2) });
-                                        } catch { }
-                                    }}
-                                >
-                                    <Braces className="w-3 h-3 mr-1" />
-                                    Beautify
-                                </Button>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                                    onClick={() => {
-                                        try {
-                                            const parsed = JSON.parse(template.body || "");
-                                            updateTemplate({ body: JSON.stringify(parsed) });
-                                        } catch { }
-                                    }}
-                                >
-                                    <Minimize2 className="w-3 h-3 mr-1" />
-                                    Minify
-                                </Button>
+                        <TabsContent value="body" className="flex-1 mt-0 min-h-0 min-w-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-hidden relative shadow-inner bg-[#1e1e1e] focus-within:ring-1 ring-ring">
+                            <div className="absolute inset-0 flex flex-col">
+                                <div className="flex items-center justify-end gap-1 px-2 py-1 bg-[#252526] border-b border-muted-foreground/10 shrink-0">
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                                        onClick={() => {
+                                            try {
+                                                const parsed = JSON.parse(template.body || "");
+                                                updateTemplate({ body: JSON.stringify(parsed, null, 2) });
+                                            } catch { }
+                                        }}
+                                    >
+                                        <Braces className="w-3 h-3 mr-1" />
+                                        Beautify
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                                        onClick={() => {
+                                            try {
+                                                const parsed = JSON.parse(template.body || "");
+                                                updateTemplate({ body: JSON.stringify(parsed) });
+                                            } catch { }
+                                        }}
+                                    >
+                                        <Minimize2 className="w-3 h-3 mr-1" />
+                                        Minify
+                                    </Button>
+                                </div>
+                                <div className="flex-1 min-h-0">
+                                    <Editor
+                                        key={template.id}
+                                        height="100%"
+                                        defaultLanguage="json"
+                                        value={template.body}
+                                        onChange={(val) => updateTemplate({ body: val || "" })}
+                                        theme="vs-dark"
+                                        onMount={handleEditorDidMount}
+                                        options={{
+                                            minimap: { enabled: false },
+                                            fontSize: 14,
+                                            formatOnPaste: true,
+                                            formatOnType: true,
+                                            scrollBeyondLastLine: false,
+                                            tabSize: 2,
+                                        }}
+                                    />
+                                </div>
                             </div>
-                            <Editor
-                                key={template.id}
-                                height="100%"
-                                defaultLanguage="json"
-                                value={template.body}
-                                onChange={(val) => updateTemplate({ body: val || "" })}
-                                theme="vs-dark"
-                                onMount={handleEditorDidMount}
-                                options={{
-                                    minimap: { enabled: false },
-                                    fontSize: 14,
-                                    formatOnPaste: true,
-                                    formatOnType: true,
-                                    scrollBeyondLastLine: false,
-                                    tabSize: 2,
-                                }}
-                            />
                         </TabsContent>
 
-                        <TabsContent value="params" className="flex-1 p-0 mt-0 min-h-0 overflow-y-auto border border-muted-foreground/20 rounded-b-md rounded-t-none data-[state=active]:flex flex-col bg-muted/10 p-4 space-y-4">
-                            <div className="space-y-3">
+                        <TabsContent value="params" className="flex-1 mt-0 min-h-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-y-auto bg-muted/10 relative">
+                            <div className="p-4 space-y-3 pb-16 min-h-full flex flex-col">
                                 {(template.params || []).map((param, idx) => (
                                     <div key={idx} className="flex space-x-2 items-center group">
                                         <Input
@@ -504,6 +508,8 @@ export function RequestDesigner() {
                                         </Button>
                                     </div>
                                 ))}
+                            </div>
+                            <div className="sticky bottom-0 p-3 border-t border-muted-foreground/10 bg-muted/80 backdrop-blur-sm">
                                 <Button variant="outline" size="sm" onClick={addParam} className="w-full border-dashed border-muted-foreground/30 hover:border-primary/50 hover:bg-primary/5 transition-colors">
                                     <Plus className="w-4 h-4 mr-2" />
                                     Add Param
@@ -511,8 +517,8 @@ export function RequestDesigner() {
                             </div>
                         </TabsContent>
 
-                        <TabsContent value="headers" className="flex-1 p-0 mt-0 min-h-0 overflow-y-auto border border-muted-foreground/20 rounded-b-md rounded-t-none data-[state=active]:flex flex-col bg-muted/10 p-4 space-y-4">
-                            <div className="space-y-3">
+                        <TabsContent value="headers" className="flex-1 mt-0 min-h-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-y-auto bg-muted/10 relative">
+                            <div className="p-4 space-y-3 pb-16 min-h-full flex flex-col">
                                 {template.headers.map((header, idx) => (
                                     <div key={idx} className="flex space-x-2 items-center group">
                                         <Input
@@ -532,6 +538,8 @@ export function RequestDesigner() {
                                         </Button>
                                     </div>
                                 ))}
+                            </div>
+                            <div className="sticky bottom-0 p-3 border-t border-muted-foreground/10 bg-muted/80 backdrop-blur-sm">
                                 <Button variant="outline" size="sm" onClick={addHeader} className="w-full border-dashed border-muted-foreground/30 hover:border-primary/50 hover:bg-primary/5 transition-colors">
                                     <Plus className="w-4 h-4 mr-2" />
                                     Add Header
