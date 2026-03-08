@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Wrench, Zap, ChevronRight, Github, Code2 } from "lucide-react";
+import { Wrench, Zap, ChevronRight, Github, Code2, BookOpen } from "lucide-react";
 
 export default function Home() {
   return (
@@ -65,6 +65,13 @@ export default function Home() {
                   <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs text-white/60 font-medium">Orchestration</span>
                   <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs text-white/60 font-medium">API Testing</span>
                   <span className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-400 font-medium">Active</span>
+                  <Link
+                    href="/surge/docs"
+                    className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-white/60 font-medium hover:bg-white/10 hover:text-white/90 transition-colors inline-flex items-center gap-1"
+                  >
+                    <BookOpen className="w-3 h-3" />
+                    Docs
+                  </Link>
                 </div>
               </div>
             </Link>

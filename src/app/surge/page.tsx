@@ -5,9 +5,10 @@ import { FileUploader } from "@/components/uploader/FileUploader";
 import { RequestDesigner } from "@/components/editor/RequestDesigner";
 import { ExecutionPanel } from "@/components/execution/ExecutionPanel";
 import { ResultsTable } from "@/components/results/ResultsTable";
-import { Layers, Sparkles, Download, Upload, Trash2, AlertTriangle } from "lucide-react";
+import { Layers, Sparkles, Download, Upload, Trash2, AlertTriangle, BookOpen } from "lucide-react";
 import { exportState, importState, resetStore, hydrateStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import {
     Dialog,
     DialogContent,
@@ -70,6 +71,16 @@ export default function SurgePage() {
                     </div>
 
                     <div className="flex items-center space-x-4">
+                        <Link href="/surge/docs">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2"
+                            >
+                                <BookOpen className="w-3.5 h-3.5" />
+                                Docs
+                            </Button>
+                        </Link>
                         <div className="flex items-center border rounded-lg p-1 bg-muted/20">
                             <Button
                                 variant="ghost"
