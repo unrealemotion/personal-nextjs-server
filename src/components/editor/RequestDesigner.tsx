@@ -91,6 +91,59 @@ function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove }: {
     );
 }
 
+function SortableMobileStep({ tmpl, isActive, onSelect, onRemove, canRemove }: {
+    tmpl: RequestTemplate;
+    isActive: boolean;
+    onSelect: () => void;
+    onRemove: () => void;
+    canRemove: boolean;
+}) {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: tmpl.id });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border text-xs whitespace-nowrap cursor-pointer transition-all shrink-0 ${isActive
+                ? "bg-primary/10 border-primary/50 shadow-sm"
+                : "bg-background/50 border-border/50"
+                }`}
+            onClick={onSelect}
+        >
+            <div
+                {...attributes}
+                {...listeners}
+                className="cursor-grab active:cursor-grabbing text-muted-foreground shrink-0 touch-none"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <GripVertical className="w-3 h-3" />
+            </div>
+            <span className="font-semibold truncate max-w-[100px]">{tmpl.name}</span>
+            {canRemove && (
+                <button
+                    className="text-muted-foreground hover:text-destructive ml-0.5"
+                    onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                >
+                    <Trash2 className="w-3 h-3" />
+                </button>
+            )}
+        </div>
+    );
+}
+
 export function RequestDesigner() {
     const templates = useStore(store, (state) => state.templates);
     const activeTemplateId = useStore(store, (state) => state.activeTemplateId);
@@ -288,66 +341,41 @@ export function RequestDesigner() {
                     </Button>
                 </div>
 
-                {/* Mobile: Compact step selector (hidden on desktop) */}
-                <div className="flex sm:hidden items-center gap-2 px-3 py-2 border-b border-border/40 bg-muted/20 shrink-0">
-                    <Select value={activeTemplateId} onValueChange={(val) => setActiveTemplate(val)}>
-                        <SelectTrigger className="flex-1 h-8 text-xs font-semibold bg-background/50 border-muted-foreground/20">
-                            <SelectValue placeholder="Select step..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {templates.map((tmpl, idx) => (
-                                <SelectItem key={tmpl.id} value={tmpl.id} className="text-xs">
-                                    Step {idx + 1}: {tmpl.name}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 border-dashed border-muted-foreground/30"
-                        onClick={() => addTemplate()}
-                    >
-                        <Plus className="w-3.5 h-3.5" />
-                    </Button>
-                    {templates.length > 1 && (
-                        <>
-                            <div className="flex flex-col gap-0.5">
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-4 w-6 text-muted-foreground hover:text-foreground"
-                                    disabled={templates.findIndex(t => t.id === activeTemplateId) === 0}
-                                    onClick={() => {
-                                        const idx = templates.findIndex(t => t.id === activeTemplateId);
-                                        if (idx > 0) reorderTemplates(idx, idx - 1);
-                                    }}
-                                >
-                                    <ChevronUp className="w-3.5 h-3.5" />
-                                </Button>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-4 w-6 text-muted-foreground hover:text-foreground"
-                                    disabled={templates.findIndex(t => t.id === activeTemplateId) === templates.length - 1}
-                                    onClick={() => {
-                                        const idx = templates.findIndex(t => t.id === activeTemplateId);
-                                        if (idx < templates.length - 1) reorderTemplates(idx, idx + 1);
-                                    }}
-                                >
-                                    <ChevronDown className="w-3.5 h-3.5" />
-                                </Button>
-                            </div>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                                onClick={() => removeTemplate(activeTemplateId)}
-                            >
-                                <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
-                        </>
-                    )}
+                {/* Mobile: Compact sortable step list (hidden on desktop) */}
+                <div className="flex sm:hidden flex-col border-b border-border/40 bg-muted/20 shrink-0">
+                    <div className="flex items-center gap-2 px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex-1">Steps</p>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 border-dashed border-muted-foreground/30"
+                            onClick={() => addTemplate()}
+                        >
+                            <Plus className="w-3 h-3" />
+                        </Button>
+                    </div>
+                    <div className="max-h-[150px] overflow-y-auto px-3 pb-2">
+                        <DndContext
+                            sensors={sensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={handleDragEnd}
+                        >
+                            <SortableContext items={templates.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                                <div className="space-y-1.5">
+                                    {templates.map((tmpl) => (
+                                        <SortableMobileStep
+                                            key={tmpl.id}
+                                            tmpl={tmpl}
+                                            isActive={tmpl.id === activeTemplateId}
+                                            onSelect={() => setActiveTemplate(tmpl.id)}
+                                            onRemove={() => removeTemplate(tmpl.id)}
+                                            canRemove={templates.length > 1}
+                                        />
+                                    ))}
+                                </div>
+                            </SortableContext>
+                        </DndContext>
+                    </div>
                 </div>
 
                 {/* Active template editor */}
