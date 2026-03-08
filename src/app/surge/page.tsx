@@ -61,7 +61,7 @@ export default function SurgePage() {
                 <div className="absolute bottom-[-10%] right-[-5%] w-[30%] h-[30%] rounded-full bg-primary/5 blur-[100px]" />
             </div>
 
-            <header className="border-b border-border/40 bg-background/50 backdrop-blur-xl sticky top-0 z-50">
+            <header className="border-b border-border/40 bg-background/50 backdrop-blur-xl relative z-40">
                 <div className="container mx-auto max-w-7xl px-4 h-16 flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                         <h1 className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
