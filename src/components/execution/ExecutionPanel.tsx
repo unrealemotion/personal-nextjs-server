@@ -75,7 +75,7 @@ export function ExecutionPanel() {
             </CardHeader>
             <CardContent>
                 <div className="flex flex-col space-y-5">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="concurrency" className="text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis block" title="Concurrency Limit">
                                 Concurrency Limit

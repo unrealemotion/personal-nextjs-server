@@ -179,7 +179,7 @@ export function FileUploader() {
                                             </TableBody>
                                         </Table>
                                     </div>
-                                    <div className="p-4 bg-muted/30 shrink-0 flex items-center justify-between">
+                                    <div className="p-4 bg-muted/30 shrink-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                                         <p className="text-xs text-muted-foreground font-medium italic underline decoration-primary/30 underline-offset-4 tracking-tight">
                                             Tip: Ensure numeric headers are cast to 'Number' if you require mathematical operations in subsequent steps.
                                         </p>

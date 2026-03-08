@@ -12,13 +12,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Code, Terminal, Copy, Braces, Minimize2, GripVertical } from "lucide-react";
+import { Plus, Trash2, Code, Terminal, Copy, Braces, Minimize2, GripVertical, ChevronUp, ChevronDown } from "lucide-react";
 import { parseCurl, generateCurl } from "@/lib/curl";
 import {
     DndContext,
     closestCenter,
     KeyboardSensor,
     PointerSensor,
+    TouchSensor,
     useSensor,
     useSensors,
     DragEndEvent,
@@ -102,6 +103,7 @@ export function RequestDesigner() {
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+        useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
         useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
     );
 
@@ -207,14 +209,14 @@ export function RequestDesigner() {
         <Card className="w-full flex flex-col h-full border-muted-foreground/20 shadow-lg shadow-black/5 rounded-xl bg-card/60 backdrop-blur-sm relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl -z-10" />
             <CardHeader className="pb-4 border-b border-border/40">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0">
                     <div>
                         <CardTitle className="text-xl bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
                             Request Designer
                         </CardTitle>
                         <CardDescription>Configure your API endpoint and payload with variables matching your data.</CardDescription>
                     </div>
-                    <div className="flex space-x-2">
+                    <div className="flex flex-wrap gap-2">
                         <Dialog open={isCurlDialogOpen} onOpenChange={setIsCurlDialogOpen}>
                             <DialogTrigger asChild>
                                 <Button variant="outline" size="sm">
@@ -251,9 +253,9 @@ export function RequestDesigner() {
                 </div>
             </CardHeader>
 
-            <CardContent className="flex-1 overflow-hidden p-0 flex z-10">
-                {/* Left: Step Sidebar */}
-                <div className="w-[200px] shrink-0 border-r border-border/40 p-3 flex flex-col space-y-2 overflow-y-auto bg-muted/20">
+            <CardContent className="flex-1 overflow-hidden p-0 flex flex-col sm:flex-row z-10">
+                {/* Desktop: Step Sidebar (hidden on mobile) */}
+                <div className="hidden sm:flex w-[200px] shrink-0 border-r border-border/40 p-3 flex-col space-y-2 overflow-y-auto bg-muted/20">
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Request Steps</p>
                     <DndContext
                         sensors={sensors}
@@ -286,8 +288,70 @@ export function RequestDesigner() {
                     </Button>
                 </div>
 
-                {/* Right: Active template editor */}
-                <div className="flex-1 p-6 space-y-4 overflow-hidden flex flex-col min-w-0">
+                {/* Mobile: Compact step selector (hidden on desktop) */}
+                <div className="flex sm:hidden items-center gap-2 px-3 py-2 border-b border-border/40 bg-muted/20 shrink-0">
+                    <Select value={activeTemplateId} onValueChange={(val) => setActiveTemplate(val)}>
+                        <SelectTrigger className="flex-1 h-8 text-xs font-semibold bg-background/50 border-muted-foreground/20">
+                            <SelectValue placeholder="Select step..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {templates.map((tmpl, idx) => (
+                                <SelectItem key={tmpl.id} value={tmpl.id} className="text-xs">
+                                    Step {idx + 1}: {tmpl.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 border-dashed border-muted-foreground/30"
+                        onClick={() => addTemplate()}
+                    >
+                        <Plus className="w-3.5 h-3.5" />
+                    </Button>
+                    {templates.length > 1 && (
+                        <>
+                            <div className="flex flex-col gap-0.5">
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-4 w-6 text-muted-foreground hover:text-foreground"
+                                    disabled={templates.findIndex(t => t.id === activeTemplateId) === 0}
+                                    onClick={() => {
+                                        const idx = templates.findIndex(t => t.id === activeTemplateId);
+                                        if (idx > 0) reorderTemplates(idx, idx - 1);
+                                    }}
+                                >
+                                    <ChevronUp className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-4 w-6 text-muted-foreground hover:text-foreground"
+                                    disabled={templates.findIndex(t => t.id === activeTemplateId) === templates.length - 1}
+                                    onClick={() => {
+                                        const idx = templates.findIndex(t => t.id === activeTemplateId);
+                                        if (idx < templates.length - 1) reorderTemplates(idx, idx + 1);
+                                    }}
+                                >
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                </Button>
+                            </div>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                                onClick={() => removeTemplate(activeTemplateId)}
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                        </>
+                    )}
+                </div>
+
+                {/* Active template editor */}
+                <div className="flex-1 p-3 sm:p-6 space-y-4 overflow-y-auto sm:overflow-hidden flex flex-col min-w-0 min-h-0">
                     {/* Step Name */}
                     <div className="shrink-0">
                         <Input
@@ -319,7 +383,7 @@ export function RequestDesigner() {
                         />
                     </div>
 
-                    <Tabs defaultValue="params" className="flex-1 flex flex-col min-h-0 min-w-0">
+                    <Tabs defaultValue="params" className="flex-1 flex flex-col min-h-[250px] sm:min-h-0 min-w-0">
                         <TabsList className="bg-muted/50 w-full justify-start rounded-none border-b pb-0 px-2 h-auto flex flex-wrap">
                             <TabsTrigger
                                 value="params"

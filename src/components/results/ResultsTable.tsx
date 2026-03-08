@@ -229,7 +229,7 @@ export function ResultsTable() {
     return (
         <Card className="w-full shadow-lg shadow-black/5 rounded-xl bg-card/60 backdrop-blur-sm border-muted-foreground/20">
             <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                     <div>
                         <CardTitle className="bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
                             Results & Mapping
@@ -248,15 +248,15 @@ export function ResultsTable() {
                     <h4 className="text-sm font-semibold">Column Mappings</h4>
                     <div className="space-y-3">
                         {columnMappings.map((col, idx) => (
-                            <div key={idx} className="flex space-x-2 items-center flex-wrap gap-y-2">
+                            <div key={idx} className="flex flex-col sm:flex-row sm:space-x-2 items-stretch sm:items-center flex-wrap gap-2 sm:gap-y-2">
                                 <Input
                                     value={col.name}
                                     onChange={(e) => updateColumnMapping(idx, { name: e.target.value })}
                                     placeholder="Column Name"
-                                    className="w-[180px]"
+                                    className="w-full sm:w-[180px]"
                                 />
                                 <Select value={col.source} onValueChange={(val: any) => updateColumnMapping(idx, { source: val, path: "", stepId: undefined })}>
-                                    <SelectTrigger className="w-[150px]">
+                                    <SelectTrigger className="w-full sm:w-[150px]">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -274,7 +274,7 @@ export function ResultsTable() {
                                         onChange={(val) => updateColumnMapping(idx, { path: val })}
                                         options={originalHeaders.map(h => ({ label: h, value: h }))}
                                         placeholder="Select variable"
-                                        className="w-[160px]"
+                                        className="w-full sm:w-[160px]"
                                     />
                                 )}
                                 {col.source === "request_param" && (() => {
@@ -290,7 +290,7 @@ export function ResultsTable() {
                                                     onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
                                                     options={[{ label: "All", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
                                                     placeholder="All steps"
-                                                    className="w-[140px]"
+                                                    className="w-full sm:w-[140px]"
                                                 />
                                             )}
                                             <SearchableSelect
@@ -298,7 +298,7 @@ export function ResultsTable() {
                                                 onChange={(val) => updateColumnMapping(idx, { path: val })}
                                                 options={allParams.map(p => ({ label: p, value: p }))}
                                                 placeholder="Select param"
-                                                className="w-[160px]"
+                                                className="w-full sm:w-[160px]"
                                             />
                                         </>
                                     );
@@ -311,7 +311,7 @@ export function ResultsTable() {
                                                 onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
                                                 options={[{ label: "All (Last)", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
                                                 placeholder="All / Last"
-                                                className="w-[140px]"
+                                                className="w-full sm:w-[140px]"
                                             />
                                         )}
                                         <Input
@@ -382,7 +382,7 @@ export function ResultsTable() {
                         </TableBody>
                     </Table>
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                     <div className="flex items-center space-x-2 text-sm text-muted-foreground">
                         <span>Show</span>
                         <Select
@@ -468,7 +468,7 @@ export function ResultsTable() {
                                     </TabsList>
                                 )}
                                 {hasSteps ? steps.map((step) => (
-                                    <TabsContent key={step.stepId} value={step.stepId} className="flex-1 min-h-0 grid grid-cols-2 gap-4 data-[state=active]:flex data-[state=active]:grid">
+                                    <TabsContent key={step.stepId} value={step.stepId} className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-4 data-[state=active]:flex data-[state=active]:grid">
                                         <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
                                             <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
                                                 Request Body — {step.stepName}
@@ -507,7 +507,7 @@ export function ResultsTable() {
                                         </div>
                                     </TabsContent>
                                 )) : (
-                                    <TabsContent value="legacy" className="flex-1 min-h-0 grid grid-cols-2 gap-4">
+                                    <TabsContent value="legacy" className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
                                             <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
                                                 Interpolated Request Body

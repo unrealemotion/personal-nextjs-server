@@ -70,7 +70,7 @@ export default function SurgePage() {
                         </h1>
                     </div>
 
-                    <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2 sm:space-x-4">
                         <Link href="/surge/docs">
                             <Button
                                 variant="ghost"
@@ -81,7 +81,7 @@ export default function SurgePage() {
                                 Docs
                             </Button>
                         </Link>
-                        <div className="flex items-center border rounded-lg p-1 bg-muted/20">
+                        <div className="flex items-center border rounded-lg p-0.5 sm:p-1 bg-muted/20">
                             <Button
                                 variant="ghost"
                                 size="sm"
@@ -89,7 +89,7 @@ export default function SurgePage() {
                                 onClick={exportState}
                             >
                                 <Download className="w-3.5 h-3.5" />
-                                Export
+                                <span className="hidden sm:inline">Export</span>
                             </Button>
                             <Button
                                 variant="ghost"
@@ -98,7 +98,7 @@ export default function SurgePage() {
                                 onClick={handleImportClick}
                             >
                                 <Upload className="w-3.5 h-3.5" />
-                                Import
+                                <span className="hidden sm:inline">Import</span>
                             </Button>
 
                             <Dialog>
@@ -109,7 +109,7 @@ export default function SurgePage() {
                                         className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2 text-red-400 hover:text-red-300 hover:bg-red-950/20"
                                     >
                                         <Trash2 className="w-3.5 h-3.5" />
-                                        Clear
+                                        <span className="hidden sm:inline">Clear</span>
                                     </Button>
                                 </DialogTrigger>
                                 <DialogContent className="sm:max-w-md border-red-900/50 bg-neutral-950">
@@ -145,14 +145,14 @@ export default function SurgePage() {
                 </div>
             </header>
 
-            <main className="container mx-auto max-w-7xl px-4 py-8 space-y-8 relative z-10">
+            <main className="container mx-auto max-w-7xl px-3 sm:px-4 py-4 space-y-4 sm:py-8 sm:space-y-8 relative z-10">
                 {/* Top Row: Data Source & Request Designer */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:h-[700px]">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-8 lg:h-[700px]">
                     <div className="lg:col-span-4 h-full">
                         <FileUploader />
                     </div>
 
-                    <div className="lg:col-span-8 h-[600px] lg:h-full flex min-h-0">
+                    <div className="lg:col-span-8 h-[700px] sm:h-[600px] lg:h-full flex min-h-0">
                         <RequestDesigner />
                     </div>
                 </div>
