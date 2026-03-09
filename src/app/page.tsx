@@ -65,13 +65,12 @@ export default function Home() {
                   <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs text-white/60 font-medium">Orchestration</span>
                   <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs text-white/60 font-medium">API Testing</span>
                   <span className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-400 font-medium">Active</span>
-                  <Link
-                    href="/surge/docs"
-                    className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-white/60 font-medium hover:bg-white/10 hover:text-white/90 transition-colors inline-flex items-center gap-1"
+                  <span
+                    className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-white/60 font-medium inline-flex items-center gap-1"
                   >
                     <BookOpen className="w-3 h-3" />
                     Docs
-                  </Link>
+                  </span>
                 </div>
               </div>
             </Link>
