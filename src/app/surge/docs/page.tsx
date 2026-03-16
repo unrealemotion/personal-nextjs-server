@@ -25,7 +25,7 @@ function Code({ children, title }: { children: string; title?: string }) {
                     {title}
                 </div>
             )}
-            <pre className="p-4 overflow-x-auto text-sm leading-relaxed font-mono text-emerald-300/90 whitespace-pre">
+            <pre className="p-4 overflow-x-auto max-w-full text-sm leading-relaxed font-mono text-emerald-300/90 whitespace-pre">
                 {children}
             </pre>
         </div>
@@ -101,25 +101,44 @@ export default function DocsPage() {
                 {/* ============================================================ */}
                 {/*  CORS WARNING                                                */}
                 {/* ============================================================ */}
-                <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-5 flex gap-4 items-start">
+                <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-5 flex gap-4 items-start overflow-hidden">
                     <AlertTriangle className="w-6 h-6 text-amber-400 shrink-0 mt-0.5" />
-                    <div className="space-y-2">
-                        <h3 className="font-bold text-amber-300 text-base">CORS Restriction — Not Supported</h3>
-                        <p className="text-sm text-amber-200/70 leading-relaxed">
-                            Surge runs <strong>entirely in your browser</strong>. It sends requests directly from your
-                            machine, which means servers that block cross-origin requests (CORS) will reject the call.
-                            <br />
-                            <br />
-                            If you see a <code className="px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300 text-xs font-mono">
-                                Failed to fetch
-                            </code>{" "}
-                            or{" "}
-                            <code className="px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300 text-xs font-mono">
-                                CORS policy
-                            </code>{" "}
-                            error, the target server is blocking browser requests. You&rsquo;ll need to either whitelist the
-                            origin or use a server that allows CORS.
-                        </p>
+                    <div className="flex-1 min-w-0 space-y-4 font-sans">
+                        <div className="space-y-2">
+                            <h3 className="font-bold text-amber-300 text-base">CORS Restriction — Not Supported</h3>
+                            <p className="text-sm text-amber-200/70 leading-relaxed">
+                                Surge runs <strong>entirely in your browser</strong>. It sends requests directly from your
+                                machine, which means servers that block cross-origin requests (CORS) will reject the call.
+                            </p>
+                            <p className="text-sm text-amber-200/70 leading-relaxed">
+                                If you see a{" "}
+                                <code className="px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300 text-xs font-mono">
+                                    Failed to fetch
+                                </code>{" "}
+                                or{" "}
+                                <code className="px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300 text-xs font-mono">
+                                    CORS policy
+                                </code>{" "}
+                                error, the target server is blocking browser requests.
+                            </p>
+                        </div>
+
+                        <div className="space-y-3 pt-4 border-t border-amber-500/20">
+                            <div className="flex items-center gap-2 text-amber-300">
+                                <Lightbulb className="w-4 h-4" />
+                                <h4 className="font-bold text-sm uppercase tracking-wider">The Workaround</h4>
+                            </div>
+                            <p className="text-xs text-amber-200/60 leading-relaxed">
+                                For testing or technical support, you can bypass CORS by launching Microsoft Edge with
+                                security disabled.
+                                <br />
+                                <span className="text-amber-500/80 font-bold">CAUTION:</span> This reduces your browser&apos;s
+                                security. Only use this for trusted API endpoints and within a dedicated session.
+                            </p>
+                            <Code title="Launch Edge (Windows CMD)">
+                                {`"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" --user-data-dir=C:\\msedge-dev-data\\ --disable-web-security`}
+                            </Code>
+                        </div>
                     </div>
                 </div>
 
