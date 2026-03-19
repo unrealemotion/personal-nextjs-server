@@ -1,4 +1,5 @@
-import { RequestTemplate } from "./schema";
+import { RequestTemplate, requestTemplateSchema } from "./schema";
+import { stripJsonComments } from "./utils";
 
 export function parseCurl(curlCommand: string): Partial<RequestTemplate> | null {
     try {
@@ -114,9 +115,130 @@ export function generateCurl(template: RequestTemplate): string {
 
     if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
         // Escape single quotes in body if we wrap with single quotes
-        const escapedBody = template.body.replace(/'/g, "'\\''");
+        const bodyContent = stripJsonComments(template.body);
+        const escapedBody = bodyContent.replace(/'/g, "'\\''");
         command += ` \\\n  --data '${escapedBody}'`;
     }
 
     return command;
+}
+
+export function generateFetch(template: RequestTemplate): string {
+    let urlStr = template.url;
+    if (template.params && template.params.length > 0) {
+        try {
+            const urlObj = new URL(urlStr);
+            template.params.forEach(p => {
+                if (p.key) urlObj.searchParams.append(p.key, p.value);
+            });
+            urlStr = urlObj.toString();
+        } catch {
+            const queryString = template.params.filter(p => p.key).map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`).join("&");
+            if (queryString) urlStr += (urlStr.includes('?') ? '&' : '?') + queryString;
+        }
+    }
+
+    let code = `fetch("${urlStr}", {\n  method: "${template.method}",\n`;
+    
+    const validHeaders = template.headers.filter(h => h.key && h.value);
+    if (validHeaders.length > 0) {
+        code += `  headers: {\n`;
+        validHeaders.forEach(h => {
+            code += `    "${h.key}": "${h.value.replace(/"/g, '\\"')}",\n`;
+        });
+        code += `  },\n`;
+    }
+
+    if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
+        let bodyContent = stripJsonComments(template.body).trim();
+        if (bodyContent.startsWith('{') || bodyContent.startsWith('[')) {
+            code += `  body: JSON.stringify(${bodyContent.replace(/\n/g, '\n  ')})\n`;
+        } else {
+            code += `  body: ${JSON.stringify(bodyContent)}\n`;
+        }
+    }
+
+    code += `})\n.then(response => response.text())\n.then(result => console.log(result))\n.catch(error => console.error('error', error));`;
+    return code;
+}
+
+export function generateAxios(template: RequestTemplate): string {
+    let urlStr = template.url;
+    let code = `import axios from 'axios';\n\n`;
+    code += `let config = {\n`;
+    code += `  method: '${template.method.toLowerCase()}',\n`;
+    code += `  maxBodyLength: Infinity,\n`;
+    code += `  url: '${urlStr}',\n`;
+
+    const validParams = template.params ? template.params.filter(p => p.key) : [];
+    if (validParams.length > 0) {
+        code += `  params: {\n`;
+        validParams.forEach(p => {
+            code += `    '${p.key}': '${p.value.replace(/'/g, "\\'")}',\n`;
+        });
+        code += `  },\n`;
+    }
+
+    const validHeaders = template.headers.filter(h => h.key && h.value);
+    if (validHeaders.length > 0) {
+        code += `  headers: {\n`;
+        validHeaders.forEach(h => {
+            code += `    '${h.key}': '${h.value.replace(/'/g, "\\'")}',\n`;
+        });
+        code += `  },\n`;
+    }
+
+    if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
+        let bodyContent = stripJsonComments(template.body).trim();
+        if (bodyContent.startsWith('{') || bodyContent.startsWith('[')) {
+            code += `  data: JSON.stringify(${bodyContent.replace(/\n/g, '\n  ')})\n`;
+        } else {
+            code += `  data: ${JSON.stringify(bodyContent)}\n`;
+        }
+    }
+
+    code += `};\n\n`;
+    code += `axios.request(config)\n.then((response) => {\n  console.log(JSON.stringify(response.data));\n})\n.catch((error) => {\n  console.error(error);\n});`;
+    return code;
+}
+
+export function generatePython(template: RequestTemplate): string {
+    let urlStr = template.url;
+    if (template.params && template.params.length > 0) {
+        try {
+            const urlObj = new URL(urlStr);
+            template.params.forEach(p => {
+                if (p.key) urlObj.searchParams.append(p.key, p.value);
+            });
+            urlStr = urlObj.toString();
+        } catch {
+            const queryString = template.params.filter(p => p.key).map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`).join("&");
+            if (queryString) urlStr += (urlStr.includes('?') ? '&' : '?') + queryString;
+        }
+    }
+
+    let code = `import requests\n\nurl = "${urlStr}"\n`;
+
+    let payloadStr = "None";
+    if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
+        let bodyContent = stripJsonComments(template.body).trim();
+        code += `\npayload = """${bodyContent}"""\n`;
+        payloadStr = "payload";
+    }
+
+    const validHeaders = template.headers.filter(h => h.key && h.value);
+    if (validHeaders.length > 0) {
+        code += `\nheaders = {\n`;
+        validHeaders.forEach(h => {
+             code += `  '${h.key}': '${h.value.replace(/'/g, "\\'")}',\n`;
+        });
+        code += `}\n`;
+    }
+
+    code += `\nresponse = requests.request("${template.method}", url`;
+    if (validHeaders.length > 0) code += `, headers=headers`;
+    if (payloadStr !== "None") code += `, data=payload`;
+    code += `)\n\nprint(response.text)`;
+    
+    return code;
 }

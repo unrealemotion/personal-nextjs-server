@@ -110,32 +110,33 @@ export function ResultsTable() {
             const rowData = fileData[res.rowId] || {};
             const rowMap: Record<string, any> = {};
 
-            columnMappings.forEach((col) => {
+            columnMappings.forEach((col, idx) => {
+                const key = `col_${idx}`;
                 if (col.source === "status") {
-                    rowMap[col.name] = res.status === "pending" ? "Pending" : res.statusCode;
+                    rowMap[key] = res.status === "pending" ? "Pending" : res.statusCode;
                 } else if (col.source === "error") {
-                    rowMap[col.name] = res.error || "";
+                    rowMap[key] = res.error || "";
                 } else if (col.source === "variable") {
-                    rowMap[col.name] = rowData[col.path] ?? "";
+                    rowMap[key] = rowData[col.path] ?? "";
                 } else if (col.source === "request_body") {
                     // From the first step's interpolated request body via dot notation
                     const steps = res.steps || [];
                     const step = col.stepId
                         ? steps.find(s => s.stepId === col.stepId)
                         : steps[0];
-                    rowMap[col.name] = step?.requestBody
+                    rowMap[key] = step?.requestBody
                         ? getByDotNotation(step.requestBody, col.path)
                         : "";
                 } else if (col.source === "request_param") {
                     // Param values are just variable lookups
-                    rowMap[col.name] = rowData[col.path] ?? "";
+                    rowMap[key] = rowData[col.path] ?? "";
                 } else if (col.source === "response") {
                     const steps = res.steps || [];
                     const step = col.stepId
                         ? steps.find(s => s.stepId === col.stepId)
                         : steps[steps.length - 1];
                     const body = step?.responseBody ?? res.responseBody;
-                    rowMap[col.name] = res.status === "pending" ? "..." : getByDotNotation(body, col.path);
+                    rowMap[key] = res.status === "pending" ? "..." : getByDotNotation(body, col.path);
                 }
             });
             rowMap.__status = res.status;
@@ -145,9 +146,10 @@ export function ResultsTable() {
     }, [results, fileData, columnMappings]);
 
     const columns = useMemo<ColumnDef<any>[]>(() => {
-        const dynamicCols: ColumnDef<any>[] = columnMappings.map((col) => ({
-            accessorKey: col.name,
-            header: col.name,
+        const dynamicCols: ColumnDef<any>[] = columnMappings.map((col, idx) => ({
+            id: `col_${idx}`,
+            accessorKey: `col_${idx}`,
+            header: col.name || "(Empty)",
             cell: (info) => {
                 const value = info.getValue() as string | number;
                 if (col.source === "status") {
@@ -203,7 +205,16 @@ export function ResultsTable() {
 
     const handleExport = () => {
         if (data.length === 0) return;
-        const worksheet = xlsx.utils.json_to_sheet(data);
+        const exportData = data.map(row => {
+            const cleanRow: Record<string, any> = {};
+            columnMappings.forEach((col, idx) => {
+                const colName = col.name || `Column ${idx + 1}`;
+                const finalName = cleanRow[colName] !== undefined ? `${colName} (${idx})` : colName;
+                cleanRow[finalName] = row[`col_${idx}`];
+            });
+            return cleanRow;
+        });
+        const worksheet = xlsx.utils.json_to_sheet(exportData);
         const workbook = xlsx.utils.book_new();
         xlsx.utils.book_append_sheet(workbook, worksheet, "Results");
         xlsx.writeFile(workbook, "orchestrator_results.xlsx");

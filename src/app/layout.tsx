@@ -23,6 +23,7 @@ export const metadata: Metadata = {
 
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { Toaster } from "@/components/ui/sonner";
 
 export default function RootLayout({
   children,
@@ -30,7 +31,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
       >
@@ -52,6 +53,7 @@ export default function RootLayout({
           {children}
         </main>
         <Footer />
+        <Toaster theme="dark" position="bottom-right" />
       </body>
     </html>
   );

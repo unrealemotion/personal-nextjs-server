@@ -41,10 +41,14 @@ export default function Home() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* Tool Card: API Surge */}
-            <Link href="/surge" className="group relative">
+            <div className="group relative">
               <div className="absolute -inset-0.5 bg-gradient-to-br from-indigo-500/20 to-fuchsia-500/20 rounded-[2rem] blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
               <div className="relative h-full flex flex-col p-8 rounded-3xl bg-[#0a0a0a] border border-white/10 hover:border-white/20 transition-all duration-300">
-                <div className="flex items-start justify-between mb-8">
+                <Link href="/surge" className="absolute inset-0 z-0">
+                  <span className="sr-only">Go to API Surge</span>
+                </Link>
+
+                <div className="flex items-start justify-between mb-8 pointer-events-none">
                   <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform duration-500 shadow-xl shadow-indigo-500/10 ring-1 ring-indigo-500/20">
                     <Zap className="w-7 h-7" />
                   </div>
@@ -53,27 +57,28 @@ export default function Home() {
                   </div>
                 </div>
 
-                <h3 className="text-2xl font-bold text-white mb-3 group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-white group-hover:to-white/60 transition-all">
+                <h3 className="text-2xl font-bold text-white mb-3 group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-white group-hover:to-white/60 transition-all pointer-events-none">
                   API Surge
                 </h3>
 
-                <p className="text-white/50 leading-relaxed font-medium mb-6 flex-grow">
+                <p className="text-white/50 leading-relaxed font-medium mb-6 flex-grow pointer-events-none">
                   High-performance API testing and orchestrator. Execute sequential chains across massive datasets with conditional logic.
                 </p>
 
-                <div className="flex flex-wrap gap-2 mt-auto">
+                <div className="flex flex-wrap gap-2 mt-auto relative z-10">
                   <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs text-white/60 font-medium">Orchestration</span>
                   <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs text-white/60 font-medium">API Testing</span>
                   <span className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-400 font-medium">Active</span>
-                  <span
-                    className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-white/60 font-medium inline-flex items-center gap-1"
+                  <Link
+                    href="/surge/docs"
+                    className="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/60 hover:text-white transition-colors font-medium inline-flex items-center gap-1 cursor-pointer"
                   >
                     <BookOpen className="w-3 h-3" />
                     Docs
-                  </span>
+                  </Link>
                 </div>
               </div>
-            </Link>
+            </div>
 
             {/* Placeholder for future tools */}
             <div className="h-full flex flex-col items-center justify-center p-8 rounded-3xl bg-[#0a0a0a]/50 border border-white/5 border-dashed text-center">

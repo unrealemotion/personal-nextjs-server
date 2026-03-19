@@ -4,6 +4,7 @@ import React, { useCallback, useRef } from "react";
 import Editor, { useMonaco } from "@monaco-editor/react";
 import { useStore } from "@tanstack/react-store";
 import { store, updateTemplate, addTemplate, removeTemplate, setActiveTemplate, reorderTemplates } from "@/lib/store";
+import { stripJsonComments } from "@/lib/utils";
 import { RequestTemplate } from "@/lib/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,7 +14,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Trash2, Code, Terminal, Copy, Braces, Minimize2, GripVertical, ChevronUp, ChevronDown } from "lucide-react";
-import { parseCurl, generateCurl } from "@/lib/curl";
+import { parseCurl, generateCurl, generateFetch, generateAxios, generatePython } from "@/lib/curl";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { toast } from "sonner";
 import {
     DndContext,
     closestCenter,
@@ -32,6 +35,50 @@ import {
     verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+
+const processTemplateForFormatting = (str: string, isMinify: boolean) => {
+    str = stripJsonComments(str);
+    let inString = false;
+    let escaped = false;
+    let result = '';
+    let i = 0;
+    while (i < str.length) {
+        const char = str[i];
+        if (char === '"' && !escaped) {
+            inString = !inString;
+            result += char;
+            i++;
+            continue;
+        }
+        if (char === '\\' && !escaped) {
+            escaped = true;
+            result += char;
+            i++;
+            continue;
+        }
+        escaped = false;
+
+        if (!inString && char === '{' && str[i + 1] === '{') {
+            const end = str.indexOf('}}', i);
+            if (end !== -1) {
+                const varName = str.substring(i + 2, end);
+                result += `"__UNQUOTED_VAR_${varName}__"`;
+                i = end + 2;
+                continue;
+            }
+        }
+        result += char;
+        i++;
+    }
+    
+    try {
+        const parsed = JSON.parse(result);
+        let formatted = JSON.stringify(parsed, null, isMinify ? 0 : 2);
+        return formatted.replace(/"__UNQUOTED_VAR_(.+?)__"/g, '{{$1}}');
+    } catch(e) {
+        throw new Error("Invalid JSON format");
+    }
+};
 
 function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove }: {
     tmpl: RequestTemplate;
@@ -149,8 +196,6 @@ export function RequestDesigner() {
     const activeTemplateId = useStore(store, (state) => state.activeTemplateId);
     const template = templates.find(t => t.id === activeTemplateId) || templates[0];
 
-    const [curlInput, setCurlInput] = React.useState("");
-    const [isCurlDialogOpen, setIsCurlDialogOpen] = React.useState(false);
     const monaco = useMonaco();
     const editorRef = useRef<any>(null);
 
@@ -225,6 +270,36 @@ export function RequestDesigner() {
 
     const handleEditorDidMount = (editor: any, monaco: any) => {
         editorRef.current = editor;
+
+        monaco.languages.json?.jsonDefaults?.setDiagnosticsOptions({
+            validate: false,
+        });
+
+        let decorations: any[] = [];
+        
+        const updateDecorations = () => {
+            const model = editor.getModel();
+            if (!model) return;
+            const text = model.getValue();
+            const regex = /\{\{([^}]+)\}\}/g;
+            let match;
+            const newDecorations = [];
+            while ((match = regex.exec(text)) !== null) {
+                const startPos = model.getPositionAt(match.index);
+                const endPos = model.getPositionAt(match.index + match[0].length);
+                newDecorations.push({
+                    range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
+                    options: { 
+                        inlineClassName: 'monaco-template-variable' 
+                    }
+                });
+            }
+            decorations = editor.deltaDecorations(decorations, newDecorations);
+        };
+
+        editor.onDidChangeModelContent(updateDecorations);
+        updateDecorations();
+
         editor.addAction({
             id: "format-json",
             label: "Format JSON",
@@ -232,26 +307,25 @@ export function RequestDesigner() {
             contextMenuGroupId: "navigation",
             contextMenuOrder: 1.5,
             run: function (ed: any) {
-                ed.getAction("editor.action.formatDocument").run();
+                try {
+                    const formatted = processTemplateForFormatting(ed.getValue(), false);
+                    ed.setValue(formatted);
+                } catch {
+                    toast.error("Invalid JSON format");
+                }
             },
         });
     };
 
-    const handleImportCurl = () => {
-        const parsed = parseCurl(curlInput);
-        if (parsed) {
-            updateTemplate(parsed);
-        } else {
-            alert("Invalid or unsupported cURL command");
-        }
-        setIsCurlDialogOpen(false);
-        setCurlInput("");
-    };
-
-    const handleCopyCurl = () => {
-        const curl = generateCurl(template);
-        navigator.clipboard.writeText(curl);
-        alert("Copied to clipboard!");
+    const handleCopy = (format: 'curl' | 'fetch' | 'axios' | 'python') => {
+        let text = "";
+        if (format === 'curl') text = generateCurl(template);
+        if (format === 'fetch') text = generateFetch(template);
+        if (format === 'axios') text = generateAxios(template);
+        if (format === 'python') text = generatePython(template);
+        
+        navigator.clipboard.writeText(text);
+        toast.success(`Copied as ${format.toUpperCase()}!`);
     };
 
     const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -270,38 +344,21 @@ export function RequestDesigner() {
                         <CardDescription>Configure your API endpoint and payload with variables matching your data.</CardDescription>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <Dialog open={isCurlDialogOpen} onOpenChange={setIsCurlDialogOpen}>
-                            <DialogTrigger asChild>
+                        <Popover>
+                            <PopoverTrigger asChild>
                                 <Button variant="outline" size="sm">
-                                    <Terminal className="w-4 h-4 mr-2" />
-                                    Paste cURL
+                                    <Copy className="w-4 h-4 mr-2" />
+                                    Copy snippet
+                                    <ChevronDown className="w-4 h-4 ml-2 opacity-50" />
                                 </Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-[500px]">
-                                <DialogHeader>
-                                    <DialogTitle>Import cURL</DialogTitle>
-                                    <DialogDescription>
-                                        Paste your cURL command here to autofill the request settings.
-                                    </DialogDescription>
-                                </DialogHeader>
-                                <div className="py-4">
-                                    <Textarea
-                                        value={curlInput}
-                                        onChange={(e) => setCurlInput(e.target.value)}
-                                        placeholder="curl -X POST https://api.example.com..."
-                                        className="h-32 font-mono text-xs break-all whitespace-pre-wrap"
-                                    />
-                                </div>
-                                <DialogFooter>
-                                    <Button variant="outline" onClick={() => setIsCurlDialogOpen(false)}>Cancel</Button>
-                                    <Button onClick={handleImportCurl}>Import</Button>
-                                </DialogFooter>
-                            </DialogContent>
-                        </Dialog>
-                        <Button variant="outline" size="sm" onClick={handleCopyCurl}>
-                            <Copy className="w-4 h-4 mr-2" />
-                            Copy cURL
-                        </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-40 p-1" align="end">
+                                <Button variant="ghost" size="sm" className="w-full justify-start font-normal" onClick={() => handleCopy('curl')}>cURL (Bash)</Button>
+                                <Button variant="ghost" size="sm" className="w-full justify-start font-normal" onClick={() => handleCopy('fetch')}>Fetch (JS)</Button>
+                                <Button variant="ghost" size="sm" className="w-full justify-start font-normal" onClick={() => handleCopy('axios')}>Axios (Node/JS)</Button>
+                                <Button variant="ghost" size="sm" className="w-full justify-start font-normal" onClick={() => handleCopy('python')}>Python (Requests)</Button>
+                            </PopoverContent>
+                        </Popover>
                     </div>
                 </div>
             </CardHeader>
@@ -311,6 +368,7 @@ export function RequestDesigner() {
                 <div className="hidden sm:flex w-[200px] shrink-0 border-r border-border/40 p-3 flex-col space-y-2 overflow-y-auto bg-muted/20">
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Request Steps</p>
                     <DndContext
+                        id="dnd-context-desktop"
                         sensors={sensors}
                         collisionDetection={closestCenter}
                         onDragEnd={handleDragEnd}
@@ -356,6 +414,7 @@ export function RequestDesigner() {
                     </div>
                     <div className="max-h-[150px] overflow-y-auto px-3 pb-2">
                         <DndContext
+                            id="dnd-context-mobile"
                             sensors={sensors}
                             collisionDetection={closestCenter}
                             onDragEnd={handleDragEnd}
@@ -435,6 +494,14 @@ export function RequestDesigner() {
 
                         <TabsContent value="body" className="flex-1 mt-0 min-h-0 min-w-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-hidden relative shadow-inner bg-[#1e1e1e] focus-within:ring-1 ring-ring">
                             <div className="absolute inset-0 flex flex-col">
+                                <style>{`
+                                    .monaco-template-variable {
+                                        color: #10b981 !important;
+                                        font-weight: 700 !important;
+                                        background-color: rgba(16, 185, 129, 0.15);
+                                        border-radius: 3px;
+                                    }
+                                `}</style>
                                 <div className="flex items-center justify-end gap-1 px-2 py-1 bg-[#252526] border-b border-muted-foreground/10 shrink-0">
                                     <Button
                                         variant="ghost"
@@ -442,9 +509,11 @@ export function RequestDesigner() {
                                         className="h-7 text-xs text-muted-foreground hover:text-foreground"
                                         onClick={() => {
                                             try {
-                                                const parsed = JSON.parse(template.body || "");
-                                                updateTemplate({ body: JSON.stringify(parsed, null, 2) });
-                                            } catch { }
+                                                const formatted = processTemplateForFormatting(template.body || "", false);
+                                                updateTemplate({ body: formatted });
+                                            } catch {
+                                                toast.error("Invalid JSON format");
+                                            }
                                         }}
                                     >
                                         <Braces className="w-3 h-3 mr-1" />
@@ -456,9 +525,11 @@ export function RequestDesigner() {
                                         className="h-7 text-xs text-muted-foreground hover:text-foreground"
                                         onClick={() => {
                                             try {
-                                                const parsed = JSON.parse(template.body || "");
-                                                updateTemplate({ body: JSON.stringify(parsed) });
-                                            } catch { }
+                                                const formatted = processTemplateForFormatting(template.body || "", true);
+                                                updateTemplate({ body: formatted });
+                                            } catch {
+                                                toast.error("Invalid JSON format");
+                                            }
                                         }}
                                     >
                                         <Minimize2 className="w-3 h-3 mr-1" />
@@ -477,8 +548,8 @@ export function RequestDesigner() {
                                         options={{
                                             minimap: { enabled: false },
                                             fontSize: 14,
-                                            formatOnPaste: true,
-                                            formatOnType: true,
+                                            formatOnPaste: false,
+                                            formatOnType: false,
                                             scrollBeyondLastLine: false,
                                             tabSize: 2,
                                         }}

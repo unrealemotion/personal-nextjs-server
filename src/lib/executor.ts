@@ -1,6 +1,7 @@
 import pLimit from "p-limit";
 import { store, setResults } from "./store";
 import { ExecutionResult, RequestTemplate, StepResult } from "./schema";
+import { stripJsonComments } from "./utils";
 
 function interpolate(str: string, data: Record<string, any>): string {
     if (!str) return str;
@@ -11,12 +12,13 @@ function interpolate(str: string, data: Record<string, any>): string {
 }
 
 function processBodyInterpolation(bodyString: string, data: Record<string, any>) {
-    if (!bodyString) return null;
-    const interpolatedString = interpolate(bodyString, data);
+    if (!bodyString || typeof bodyString !== 'string') return null;
+    const strippedString = stripJsonComments(bodyString);
+    const interpolatedString = interpolate(strippedString, data);
     try {
         return JSON.parse(interpolatedString);
     } catch (e) {
-        return interpolatedString;
+        return interpolatedString.trim();
     }
 }
 
@@ -148,11 +150,6 @@ export async function runBulkExecution(
 
     const tasks = rowsToProcess.map(({ row, index }) => limit(async () => {
         if (abortSignal?.aborted) {
-            import("./store").then(({ updateResultByRowId }) => {
-                updateResultByRowId(index, { status: "error", error: "Cancelled before execution", steps: [] });
-            });
-            completed++;
-            if (onProgress) onProgress(completed, total);
             return;
         }
 
@@ -208,4 +205,17 @@ export async function runBulkExecution(
     }));
 
     await Promise.all(tasks);
+
+    if (abortSignal?.aborted) {
+        import("./store").then(({ store }) => {
+            store.setState(state => ({
+                ...state,
+                results: state.results.map(r => 
+                    r.status === "pending" 
+                        ? { ...r, status: "error", error: "Execution Cancelled" }
+                        : r
+                )
+            }));
+        });
+    }
 }
