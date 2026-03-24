@@ -284,13 +284,19 @@ export function RequestDesigner() {
             const regex = /\{\{([^}]+)\}\}/g;
             let match;
             const newDecorations = [];
+            
+            const availableHeaders = store.state.headers;
+
             while ((match = regex.exec(text)) !== null) {
+                const varName = match[1];
+                const isAvailable = availableHeaders.includes(varName);
+
                 const startPos = model.getPositionAt(match.index);
                 const endPos = model.getPositionAt(match.index + match[0].length);
                 newDecorations.push({
                     range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
                     options: { 
-                        inlineClassName: 'monaco-template-variable' 
+                        inlineClassName: isAvailable ? 'monaco-template-variable' : 'monaco-template-variable-invalid'
                     }
                 });
             }
@@ -499,6 +505,12 @@ export function RequestDesigner() {
                                         color: #10b981 !important;
                                         font-weight: 700 !important;
                                         background-color: rgba(16, 185, 129, 0.15);
+                                        border-radius: 3px;
+                                    }
+                                    .monaco-template-variable-invalid {
+                                        color: #ef4444 !important;
+                                        font-weight: 700 !important;
+                                        background-color: rgba(239, 68, 68, 0.15);
                                         border-radius: 3px;
                                     }
                                 `}</style>
