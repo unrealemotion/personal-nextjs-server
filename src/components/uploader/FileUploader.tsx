@@ -159,7 +159,7 @@ export function FileUploader() {
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
-                                                {fileData.map((row, idx) => (
+                                                {fileData.slice(0, 100).map((row, idx) => (
                                                     <TableRow key={idx} className="hover:bg-primary/5 transition-colors group">
                                                         <TableCell className="border-r text-center font-mono text-[11px] text-muted-foreground bg-muted/20">{idx + 1}</TableCell>
                                                         {headers.map((header) => {
@@ -184,7 +184,7 @@ export function FileUploader() {
                                             Tip: Ensure numeric headers are cast to 'Number' if you require mathematical operations in subsequent steps.
                                         </p>
                                         <Badge variant="secondary" className="font-black text-[10px] uppercase border">
-                                            {fileData.length} Rows Ready
+                                            {fileData.length} Rows Ready {fileData.length > 100 && "(Showing first 100 rows preview)"}
                                         </Badge>
                                     </div>
                                 </DialogContent>

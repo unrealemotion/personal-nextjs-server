@@ -84,6 +84,25 @@ function getByDotNotation(obj: any, path: string): string {
     }
 }
 
+function formatBody(body: any): string {
+    if (body === null || body === undefined) return "";
+    if (typeof body === "object") {
+        return JSON.stringify(body, null, 2);
+    }
+    if (typeof body === "string") {
+        const trimmed = body.trim();
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+            try {
+                return JSON.stringify(JSON.parse(trimmed), null, 2);
+            } catch (e) {
+                // Fall through to plain text
+            }
+        }
+        return body;
+    }
+    return String(body);
+}
+
 export function ResultsTable() {
     const results = useStore(store, (state) => state.results);
     const fileData = useStore(store, (state) => state.fileData);
@@ -491,7 +510,7 @@ export function ResultsTable() {
                                                     theme="vs-dark"
                                                     value={
                                                         step.requestBody
-                                                            ? JSON.stringify(step.requestBody, null, 2)
+                                                            ? formatBody(step.requestBody)
                                                             : "No Request Body Content"
                                                     }
                                                     options={{ readOnly: true, minimap: { enabled: false } }}
@@ -508,8 +527,8 @@ export function ResultsTable() {
                                                     defaultLanguage="json"
                                                     theme="vs-dark"
                                                     value={
-                                                        step.responseBody
-                                                            ? JSON.stringify(step.responseBody, null, 2)
+                                                        step.responseBody !== null && step.responseBody !== undefined
+                                                            ? formatBody(step.responseBody)
                                                             : step.error || "No Response Body Content"
                                                     }
                                                     options={{ readOnly: true, minimap: { enabled: false } }}
@@ -530,7 +549,7 @@ export function ResultsTable() {
                                                     theme="vs-dark"
                                                     value={
                                                         result?.requestBody
-                                                            ? JSON.stringify(result.requestBody, null, 2)
+                                                            ? formatBody(result.requestBody)
                                                             : "No Request Body Content"
                                                     }
                                                     options={{ readOnly: true, minimap: { enabled: false } }}
@@ -547,8 +566,8 @@ export function ResultsTable() {
                                                     defaultLanguage="json"
                                                     theme="vs-dark"
                                                     value={
-                                                        result?.responseBody
-                                                            ? JSON.stringify(result.responseBody, null, 2)
+                                                        result?.responseBody !== null && result?.responseBody !== undefined
+                                                            ? formatBody(result.responseBody)
                                                             : "No Response Body Content"
                                                     }
                                                     options={{ readOnly: true, minimap: { enabled: false } }}
