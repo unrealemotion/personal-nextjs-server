@@ -62,90 +62,74 @@ export default function SurgePage() {
                 <div className="absolute bottom-[-10%] right-[-5%] w-[30%] h-[30%] rounded-full bg-primary/5 blur-[100px]" />
             </div>
 
-            <header className="border-b border-border/40 bg-background/50 backdrop-blur-xl relative z-40">
-                <div className="container mx-auto max-w-7xl px-4 h-16 flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                        <h1 className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
-                            Surge API
-                        </h1>
+            <main className="container mx-auto max-w-7xl px-3 sm:px-4 py-4 space-y-4 sm:py-8 sm:space-y-8 relative z-10">
+                {/* Sleek Workspace Toolbar */}
+                <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-neutral-900/40 border border-white/5 backdrop-blur-md">
+                    <div className="flex items-center space-x-2 text-xs font-bold text-white/60">
+                        <Sparkles className="w-4 h-4 text-indigo-400" />
+                        <span>Surge API Workspace</span>
                     </div>
+                    
+                    <div className="flex items-center border border-white/10 rounded-lg p-0.5 bg-neutral-950">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2 text-white/80 hover:text-white"
+                            onClick={exportState}
+                        >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Export</span>
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2 text-white/80 hover:text-white"
+                            onClick={handleImportClick}
+                        >
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Import</span>
+                        </Button>
 
-                    <div className="flex items-center space-x-2 sm:space-x-4">
-                        <Link href="/surge/docs">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2"
-                            >
-                                <BookOpen className="w-3.5 h-3.5" />
-                                Docs
-                            </Button>
-                        </Link>
-                        <div className="flex items-center border rounded-lg p-0.5 sm:p-1 bg-muted/20">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2"
-                                onClick={exportState}
-                            >
-                                <Download className="w-3.5 h-3.5" />
-                                <span className="hidden sm:inline">Export</span>
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2"
-                                onClick={handleImportClick}
-                            >
-                                <Upload className="w-3.5 h-3.5" />
-                                <span className="hidden sm:inline">Import</span>
-                            </Button>
-
-                            <Dialog>
-                                <DialogTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2 text-red-400 hover:text-red-300 hover:bg-red-950/20"
-                                    >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                        <span className="hidden sm:inline">Clear</span>
-                                    </Button>
-                                </DialogTrigger>
-                                <DialogContent className="sm:max-w-md border-red-900/50 bg-neutral-950">
-                                    <DialogHeader>
-                                        <DialogTitle className="flex items-center gap-2 text-red-500">
-                                            <AlertTriangle className="w-5 h-5" />
-                                            Clear Entire Workspace?
-                                        </DialogTitle>
-                                        <DialogDescription className="text-muted-foreground pt-2">
-                                            This will irreversibly delete all request templates, imported data, and results. Are you sure you want to proceed?
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                    <DialogFooter className="mt-4 gap-2 sm:gap-0">
-                                        <DialogClose asChild>
-                                            <Button variant="ghost" size="sm" onClick={() => { }} className="text-xs">Cancel</Button>
-                                        </DialogClose>
-                                        <DialogClose asChild>
-                                            <Button
-                                                variant="destructive"
-                                                size="sm"
-                                                onClick={resetStore}
-                                                className="text-xs font-bold"
-                                            >
-                                                Yes, Delete Everything
-                                            </Button>
-                                        </DialogClose>
-                                    </DialogFooter>
-                                </DialogContent>
-                            </Dialog>
-                        </div>
-
+                        <Dialog>
+                            <DialogTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2 text-red-400 hover:text-red-300 hover:bg-red-950/20"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Clear Workspace</span>
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-md border-red-900/50 bg-neutral-950 text-white">
+                                <DialogHeader>
+                                    <DialogTitle className="flex items-center gap-2 text-red-500 font-bold">
+                                        <AlertTriangle className="w-5 h-5" />
+                                        Clear Entire Workspace?
+                                    </DialogTitle>
+                                    <DialogDescription className="text-white/50 pt-2 text-xs">
+                                        This will irreversibly delete all request templates, imported data, and results. Are you sure you want to proceed?
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <DialogFooter className="mt-4 gap-2 sm:gap-0">
+                                    <DialogClose asChild>
+                                        <Button variant="ghost" size="sm" onClick={() => { }} className="text-xs">Cancel</Button>
+                                    </DialogClose>
+                                    <DialogClose asChild>
+                                        <Button
+                                            variant="destructive"
+                                            size="sm"
+                                            onClick={resetStore}
+                                            className="text-xs font-bold bg-red-600 hover:bg-red-700 text-white"
+                                        >
+                                            Yes, Delete Everything
+                                        </Button>
+                                    </DialogClose>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
                     </div>
                 </div>
-            </header>
-
-            <main className="container mx-auto max-w-7xl px-3 sm:px-4 py-4 space-y-4 sm:py-8 sm:space-y-8 relative z-10">
                 {/* Top Row: Data Source & Request Designer */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-8 lg:h-[700px]">
                     <div className="lg:col-span-4 h-full">
