@@ -217,6 +217,7 @@ export function ResultsTable() {
         columns,
         getCoreRowModel: getCoreRowModel(),
         getPaginationRowModel: getPaginationRowModel(),
+        autoResetPageIndex: false,
         initialState: {
             pagination: { pageSize: 20 },
         }
