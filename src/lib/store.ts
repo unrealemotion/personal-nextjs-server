@@ -1,5 +1,5 @@
 import { Store } from "@tanstack/react-store";
-import { type RequestTemplate, type ExecutionResult } from "./schema";
+import { type RequestTemplate, type ExecutionResult, type ColumnMapping } from "./schema";
 
 export type VariableType = "string" | "number" | "boolean";
 
@@ -29,6 +29,7 @@ export type AppState = {
     results: ExecutionResult[];
     maxRetries: number;
     retryStatusCodes: string;
+    columnMappings: ColumnMapping[];
 };
 
 const LOCAL_STORAGE_KEY = "surge_api_workspace";
@@ -45,7 +46,12 @@ const defaultState: AppState = {
     results: [],
     maxRetries: 0,
     retryStatusCodes: "",
+    columnMappings: [
+        { name: "Status Code", source: "status", path: "" },
+        { name: "Error", source: "error", path: "" },
+    ],
 };
+
 
 // --- Hydration & Persistence ---
 export const store = new Store<AppState>(defaultState);
@@ -263,3 +269,8 @@ export const updateResultByRowId = (rowId: number, resultUpdate: Partial<Executi
         return { ...state, results: newResults };
     });
 };
+
+export const setColumnMappings = (mappings: ColumnMapping[]) => {
+    store.setState((state) => ({ ...state, columnMappings: mappings }));
+};
+

@@ -60,3 +60,11 @@ export type ExecutionResult = {
   steps: StepResult[];
   error?: string;
 };
+
+export type ColumnMapping = {
+  name: string;
+  source: "variable" | "request_body" | "request_param" | "response" | "status" | "error" | "response_time";
+  path: string;
+  stepId?: string;
+};
+

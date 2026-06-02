@@ -2,7 +2,8 @@
 
 import React, { useMemo, useState } from "react";
 import { useStore } from "@tanstack/react-store";
-import { store } from "@/lib/store";
+import { store, setColumnMappings } from "@/lib/store";
+import { type ColumnMapping } from "@/lib/schema";
 import {
     flexRender,
     getCoreRowModel,
@@ -108,21 +109,11 @@ export function ResultsTable() {
     const fileData = useStore(store, (state) => state.fileData);
     const originalHeaders = useStore(store, (state) => state.headers);
     const templates = useStore(store, (state) => state.templates);
+    const columnMappings = useStore(store, (state) => state.columnMappings);
 
     const [selectedDetailId, setSelectedDetailId] = useState<number | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-    type ColumnMapping = {
-        name: string;
-        source: "variable" | "request_body" | "request_param" | "response" | "status" | "error" | "response_time";
-        path: string;
-        stepId?: string; // for response: which step to read from
-    };
-
-    const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>([
-        { name: "Status Code", source: "status", path: "" },
-        { name: "Error", source: "error", path: "" },
-    ]);
 
     const data = useMemo(() => {
         return results.map((res) => {
