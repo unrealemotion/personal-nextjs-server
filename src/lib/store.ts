@@ -1,5 +1,5 @@
 import { Store } from "@tanstack/react-store";
-import { type RequestTemplate, type ExecutionResult, type ColumnMapping } from "./schema";
+import { type RequestTemplate, type ExecutionResult, type ColumnMapping, type TableFilterConfig } from "./schema";
 
 export type VariableType = "string" | "number" | "boolean";
 
@@ -30,6 +30,8 @@ export type AppState = {
     maxRetries: number;
     retryStatusCodes: string;
     columnMappings: ColumnMapping[];
+    tableFilterConfig: TableFilterConfig;
+    fileName: string;
 };
 
 const LOCAL_STORAGE_KEY = "surge_api_workspace";
@@ -50,6 +52,14 @@ const defaultState: AppState = {
         { name: "Status Code", source: "status", path: "" },
         { name: "Error", source: "error", path: "" },
     ],
+    tableFilterConfig: {
+        searchQuery: "",
+        isRegex: false,
+        columnFilters: {},
+        sortBy: null,
+        sortOrder: null,
+    },
+    fileName: "",
 };
 
 
@@ -128,7 +138,18 @@ export const exportState = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `surge-workspace-${new Date().toISOString().split('T')[0]}.json`;
+
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = pad(now.getMonth() + 1);
+    const dd = pad(now.getDate());
+    const hh = pad(now.getHours());
+    const min = pad(now.getMinutes());
+    const ss = pad(now.getSeconds());
+    const timeStamp = `${yyyy}${mm}${dd}_${hh}${min}${ss}`;
+
+    a.download = `surge_workspace_${timeStamp}.json`;
     a.click();
     URL.revokeObjectURL(url);
 };
@@ -151,7 +172,7 @@ export const importState = (json: string) => {
 
 // --- File data actions ---
 
-export const setFileData = (data: Array<Record<string, any>>, headers: string[]) => {
+export const setFileData = (data: Array<Record<string, any>>, headers: string[], fileName?: string) => {
     const headerTypes: Record<string, VariableType> = {};
     headers.forEach(h => {
         const val = data.length > 0 ? data[0][h] : undefined;
@@ -167,6 +188,7 @@ export const setFileData = (data: Array<Record<string, any>>, headers: string[])
         headers,
         headerTypes,
         results: [],
+        fileName: fileName || "",
     }));
 };
 
@@ -273,4 +295,12 @@ export const updateResultByRowId = (rowId: number, resultUpdate: Partial<Executi
 export const setColumnMappings = (mappings: ColumnMapping[]) => {
     store.setState((state) => ({ ...state, columnMappings: mappings }));
 };
+
+export const setTableFilterConfig = (updates: Partial<TableFilterConfig>) => {
+    store.setState((state) => ({
+        ...state,
+        tableFilterConfig: { ...state.tableFilterConfig, ...updates },
+    }));
+};
+
 

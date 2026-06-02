@@ -68,3 +68,12 @@ export type ColumnMapping = {
   stepId?: string;
 };
 
+export type TableFilterConfig = {
+  searchQuery: string;
+  isRegex: boolean;
+  columnFilters: Record<string, string[]>;
+  sortBy: string | null;
+  sortOrder: "asc" | "desc" | null;
+};
+
+

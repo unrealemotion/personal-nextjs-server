@@ -455,7 +455,7 @@ Column Mapping:
                     <ul className="list-disc list-inside space-y-1 pl-2">
                         <li>
                             <strong className="text-white/90">Export</strong> — downloads a{" "}
-                            <code className="px-1.5 py-0.5 rounded bg-white/10 text-xs font-mono">surge-workspace-YYYY-MM-DD.json</code> file
+                            <code className="px-1.5 py-0.5 rounded bg-white/10 text-xs font-mono">surge_workspace_YYYYMMDD_hhmmss.json</code> file
                         </li>
                         <li>
                             <strong className="text-white/90">Import</strong> — opens a file picker, loads the workspace JSON

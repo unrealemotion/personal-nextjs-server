@@ -42,7 +42,7 @@ export function FileUploader() {
 
                 // Extract headers from the first row
                 const extractedHeaders = Object.keys(jsonData[0]);
-                setFileData(jsonData, extractedHeaders);
+                setFileData(jsonData, extractedHeaders, file.name);
             } catch (err) {
                 console.error(err);
                 setError("Error parsing the file. Please ensure it is a valid .xlsx or .csv file.");
