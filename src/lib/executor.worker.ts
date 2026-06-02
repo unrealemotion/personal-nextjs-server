@@ -25,6 +25,29 @@ function processBodyInterpolation(bodyString: string, data: Record<string, any>)
     }
 }
 
+function isStatusInRanges(status: number, rangesStr: string): boolean {
+    if (!rangesStr || !rangesStr.trim()) return false;
+    const parts = rangesStr.split(",");
+    for (let part of parts) {
+        part = part.trim();
+        if (!part) continue;
+        if (part.includes("-")) {
+            const [startStr, endStr] = part.split("-");
+            const start = parseInt(startStr.trim());
+            const end = parseInt(endStr.trim());
+            if (!isNaN(start) && !isNaN(end) && status >= start && status <= end) {
+                return true;
+            }
+        } else {
+            const val = parseInt(part);
+            if (!isNaN(val) && status === val) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 async function resolveHostnameIp(urlStr: string): Promise<string | null> {
     try {
         const urlObj = new URL(urlStr);
@@ -54,6 +77,8 @@ async function resolveHostnameIp(urlStr: string): Promise<string | null> {
 async function executeOneStep(
     template: RequestTemplate,
     row: Record<string, any>,
+    maxRetries: number,
+    retryStatusCodes: string,
     abortSignal?: AbortSignal
 ): Promise<StepResult> {
     let url = interpolate(template.url, row);
@@ -128,8 +153,9 @@ async function executeOneStep(
         requestHeaders["Content-Type"] = "application/json";
     }
 
-    const startTime = performance.now();
-    const stepResult: StepResult = {
+    const retryRanges = retryStatusCodes || "";
+    let attempts = 0;
+    let stepResult: StepResult = {
         stepId: template.id,
         stepName: template.name,
         statusCode: 0,
@@ -142,57 +168,75 @@ async function executeOneStep(
         responseBody: null,
     };
 
-    try {
-        if (!url) throw new Error("URL is empty after interpolation.");
-
-        const fetchOpts: RequestInit = {
-            method: template.method,
-            headers,
-            signal: abortSignal,
-        };
-
-        if (template.method !== "GET" && interpolatedBody) {
-            fetchOpts.body = typeof interpolatedBody === "object"
-                ? JSON.stringify(interpolatedBody)
-                : String(interpolatedBody);
-        }
-
-        const response = await fetch(url, fetchOpts);
-        stepResult.statusCode = response.status;
-        stepResult.responseType = response.type;
-        stepResult.responseRedirected = response.redirected;
-        stepResult.responseStatusText = response.statusText;
-
-        const responseHeaders: Record<string, string> = {};
-        response.headers.forEach((val, key) => {
-            responseHeaders[key] = val;
-        });
-        stepResult.responseHeaders = responseHeaders;
+    while (true) {
+        const startTime = performance.now();
+        stepResult.statusCode = 0;
+        stepResult.responseBody = null;
+        stepResult.error = undefined;
 
         try {
-            stepResult.ipAddress = await resolveHostnameIp(url);
-        } catch (e) {
-            // ignore
+            if (!url) throw new Error("URL is empty after interpolation.");
+
+            const fetchOpts: RequestInit = {
+                method: template.method,
+                headers,
+                signal: abortSignal,
+            };
+
+            if (template.method !== "GET" && interpolatedBody) {
+                fetchOpts.body = typeof interpolatedBody === "object"
+                    ? JSON.stringify(interpolatedBody)
+                    : String(interpolatedBody);
+            }
+
+            const response = await fetch(url, fetchOpts);
+            stepResult.statusCode = response.status;
+            stepResult.responseType = response.type;
+            stepResult.responseRedirected = response.redirected;
+            stepResult.responseStatusText = response.statusText;
+
+            const responseHeaders: Record<string, string> = {};
+            response.headers.forEach((val, key) => {
+                responseHeaders[key] = val;
+            });
+            stepResult.responseHeaders = responseHeaders;
+
+            try {
+                stepResult.ipAddress = await resolveHostnameIp(url);
+            } catch (e) {
+                // ignore
+            }
+
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+                stepResult.responseBody = await response.json();
+            } else {
+                stepResult.responseBody = await response.text();
+            }
+
+            if (!response.ok) {
+                stepResult.error = `HTTP ${response.status}`;
+            }
+        } catch (error: any) {
+            if (error.name === 'AbortError') {
+                stepResult.error = "Execution Cancelled by User";
+            } else {
+                stepResult.error = error.message || String(error);
+            }
+        } finally {
+            stepResult.responseTimeMs = Math.round(performance.now() - startTime);
         }
 
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("application/json")) {
-            stepResult.responseBody = await response.json();
-        } else {
-            stepResult.responseBody = await response.text();
+        if (
+            abortSignal?.aborted || 
+            attempts >= maxRetries || 
+            !isStatusInRanges(stepResult.statusCode, retryRanges)
+        ) {
+            break;
         }
 
-        if (!response.ok) {
-            stepResult.error = `HTTP ${response.status}`;
-        }
-    } catch (error: any) {
-        if (error.name === 'AbortError') {
-            stepResult.error = "Execution Cancelled by User";
-        } else {
-            stepResult.error = error.message || String(error);
-        }
-    } finally {
-        stepResult.responseTimeMs = Math.round(performance.now() - startTime);
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     return stepResult;
@@ -204,7 +248,7 @@ self.onmessage = async (e: MessageEvent) => {
     const { type } = e.data;
 
     if (type === "START") {
-        const { fileData, templates, concurrencyLimit, singleRowIndex } = e.data;
+        const { fileData, templates, concurrencyLimit, singleRowIndex, maxRetries, retryStatusCodes } = e.data;
         abortController = new AbortController();
         const signal = abortController.signal;
 
@@ -246,7 +290,7 @@ self.onmessage = async (e: MessageEvent) => {
                     continue;
                 }
 
-                const stepResult = await executeOneStep(tmpl, row, signal);
+                const stepResult = await executeOneStep(tmpl, row, maxRetries, retryStatusCodes, signal);
                 steps.push(stepResult);
 
                 if (stepResult.error) {

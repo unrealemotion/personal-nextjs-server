@@ -27,6 +27,8 @@ export type AppState = {
     templates: RequestTemplate[];
     activeTemplateId: string;
     results: ExecutionResult[];
+    maxRetries: number;
+    retryStatusCodes: string;
 };
 
 const LOCAL_STORAGE_KEY = "surge_api_workspace";
@@ -41,6 +43,8 @@ const defaultState: AppState = {
     templates: [initialTemplate],
     activeTemplateId: initialTemplate.id,
     results: [],
+    maxRetries: 0,
+    retryStatusCodes: "",
 };
 
 // --- Hydration & Persistence ---
@@ -218,6 +222,14 @@ export const reorderTemplates = (fromIndex: number, toIndex: number) => {
 export const updateTemplate = (updates: Partial<RequestTemplate>) => {
     const { activeTemplateId } = store.state;
     updateTemplateById(activeTemplateId, updates);
+};
+
+export const setMaxRetries = (val: number) => {
+    store.setState((state) => ({ ...state, maxRetries: val }));
+};
+
+export const setRetryStatusCodes = (val: string) => {
+    store.setState((state) => ({ ...state, retryStatusCodes: val }));
 };
 
 // --- Results actions ---

@@ -365,7 +365,23 @@ Charlie,charlie@test.org,+84 901 234 567`}
                             <strong className="text-white/90">Concurrency Limit</strong> — how many rows are processed in
                             parallel (1–50). Setting it to 1 means purely sequential.
                         </li>
+                        <li>
+                            <strong className="text-white/90">Max Retry Count</strong> — the maximum number of attempts (0–10) to retry a request if the response status matches the retry criteria.
+                        </li>
+                        <li>
+                            <strong className="text-white/90">Retry Status Ranges</strong> — a comma-separated list of specific status codes or ranges that trigger a retry.
+                        </li>
                     </ul>
+
+                    <h3 className="text-lg font-semibold text-white pt-2">Retry Mechanism</h3>
+                    <p>
+                        When enabled, if a request encounters a network error or returns a status code within the specified ranges, Surge will wait briefly and retry the request up to the maximum count. This helps handle transient issues, rate limiting, and temporary server overloads automatically.
+                    </p>
+                    <Code title="Example Status Ranges">
+                        {`429              // Retry on HTTP 429 (Too Many Requests) only
+500-599          // Retry on any 5xx server error range
+408, 429, 500-599 // Retry on timeouts, rate limits, or any server errors`}
+                    </Code>
 
                     <h3 className="text-lg font-semibold text-white pt-2">Test Row 1</h3>
                     <p>

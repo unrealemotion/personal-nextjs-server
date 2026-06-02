@@ -2,7 +2,7 @@
 
 import React, { useState, useRef } from "react";
 import { useStore } from "@tanstack/react-store";
-import { store } from "@/lib/store";
+import { store, setMaxRetries, setRetryStatusCodes } from "@/lib/store";
 import { runBulkExecution } from "@/lib/executor";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,8 @@ import { Progress } from "@/components/ui/progress";
 export function ExecutionPanel() {
     const fileData = useStore(store, (state) => state.fileData);
     const templates = useStore(store, (state) => state.templates);
+    const maxRetries = useStore(store, (state) => state.maxRetries);
+    const retryStatusCodes = useStore(store, (state) => state.retryStatusCodes);
     const [concurrency, setConcurrency] = useState(2);
     const [isRunning, setIsRunning] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -75,7 +77,7 @@ export function ExecutionPanel() {
             </CardHeader>
             <CardContent>
                 <div className="flex flex-col space-y-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="concurrency" className="text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis block" title="Concurrency Limit">
                                 Concurrency Limit
@@ -96,6 +98,35 @@ export function ExecutionPanel() {
                             <div className="h-10 flex items-center px-3 border rounded-md bg-muted/30 font-medium text-sm text-foreground/80 shadow-inner">
                                 {totalRows} {totalRows === 1 ? 'Request' : 'Requests'}
                             </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="maxRetries" className="text-xs text-muted-foreground block">
+                                Max Retry Count
+                            </Label>
+                            <Input
+                                id="maxRetries"
+                                type="number"
+                                min={0}
+                                max={10}
+                                placeholder="0 (no retries)"
+                                value={maxRetries ?? ""}
+                                onChange={(e) => setMaxRetries(e.target.value === "" ? 0 : Math.max(0, parseInt(e.target.value) || 0))}
+                                className="h-10 bg-background/50 font-mono text-sm"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="retryStatusCodes" className="text-xs text-muted-foreground block" title="Retry Status Codes (e.g. 429, 500-599)">
+                                Retry Status Ranges
+                            </Label>
+                            <Input
+                                id="retryStatusCodes"
+                                placeholder="e.g. 429, 500-599"
+                                value={retryStatusCodes ?? ""}
+                                onChange={(e) => setRetryStatusCodes(e.target.value)}
+                                className="h-10 bg-background/50 font-mono text-sm"
+                            />
                         </div>
                     </div>
 

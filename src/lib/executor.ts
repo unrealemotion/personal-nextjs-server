@@ -83,7 +83,9 @@ export async function runBulkExecution(
             fileData,
             templates,
             concurrencyLimit,
-            singleRowIndex
+            singleRowIndex,
+            maxRetries: state.maxRetries ?? 0,
+            retryStatusCodes: state.retryStatusCodes || ""
         });
     });
 }
