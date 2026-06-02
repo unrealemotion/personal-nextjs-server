@@ -29,13 +29,6 @@ export default function JSONNexusPage() {
               An environment to compare complex JSON structures side-by-side or convert, flatten, and split nested objects and lists recursively into dynamic grids.
             </p>
           </div>
-          <Link
-            href="/json-nexus/docs"
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold uppercase tracking-wider bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-white/80 hover:text-white transition-all w-fit cursor-pointer shrink-0"
-          >
-            <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
-            View Docs
-          </Link>
         </div>
 
         {/* Tab Selection */}
