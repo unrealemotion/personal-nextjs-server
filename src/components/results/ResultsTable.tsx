@@ -10,7 +10,7 @@ import {
     ColumnDef,
     getPaginationRowModel,
 } from "@tanstack/react-table";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -114,7 +114,7 @@ export function ResultsTable() {
 
     type ColumnMapping = {
         name: string;
-        source: "variable" | "request_body" | "request_param" | "response" | "status" | "error";
+        source: "variable" | "request_body" | "request_param" | "response" | "status" | "error" | "response_time";
         path: string;
         stepId?: string; // for response: which step to read from
     };
@@ -135,6 +135,16 @@ export function ResultsTable() {
                     rowMap[key] = res.status === "pending" ? "Pending" : res.statusCode;
                 } else if (col.source === "error") {
                     rowMap[key] = res.error || "";
+                } else if (col.source === "response_time") {
+                    if (res.status === "pending") {
+                        rowMap[key] = "...";
+                    } else {
+                        const steps = res.steps || [];
+                        const step = col.stepId
+                            ? steps.find(s => s.stepId === col.stepId)
+                            : steps[steps.length - 1];
+                        rowMap[key] = step ? `${step.responseTimeMs} ms` : `${res.responseTimeMs} ms`;
+                    }
                 } else if (col.source === "variable") {
                     rowMap[key] = rowData[col.path] ?? "";
                 } else if (col.source === "request_body") {
@@ -147,8 +157,11 @@ export function ResultsTable() {
                         ? getByDotNotation(step.requestBody, col.path)
                         : "";
                 } else if (col.source === "request_param") {
-                    // Param values are just variable lookups
-                    rowMap[key] = rowData[col.path] ?? "";
+                    const steps = res.steps || [];
+                    const step = col.stepId
+                        ? steps.find(s => s.stepId === col.stepId)
+                        : steps[0];
+                    rowMap[key] = (step?.requestParams?.[col.path] ?? rowData[col.path]) ?? "";
                 } else if (col.source === "response") {
                     const steps = res.steps || [];
                     const step = col.stepId
@@ -255,8 +268,6 @@ export function ResultsTable() {
         setColumnMappings(newMappings);
     };
 
-    // Remove early return, allow configuration before results populate
-
     return (
         <Card className="w-full shadow-lg shadow-black/5 rounded-xl bg-card/60 backdrop-blur-sm border-muted-foreground/20">
             <CardHeader>
@@ -297,6 +308,7 @@ export function ResultsTable() {
                                         <SelectItem value="response">Response JSON</SelectItem>
                                         <SelectItem value="status">Status Code</SelectItem>
                                         <SelectItem value="error">Error Message</SelectItem>
+                                        <SelectItem value="response_time">Response Time (ms)</SelectItem>
                                     </SelectContent>
                                 </Select>
                                 {col.source === "variable" && (
@@ -351,6 +363,22 @@ export function ResultsTable() {
                                             placeholder={col.source === "request_body" ? "e.g. name" : "e.g. data.id"}
                                             className="flex-1 font-mono text-sm min-w-[120px]"
                                         />
+                                    </>
+                                )}
+                                {col.source === "response_time" && (
+                                    <>
+                                        {templates.length > 1 ? (
+                                            <SearchableSelect
+                                                value={col.stepId || ""}
+                                                onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
+                                                options={[{ label: "All (Last)", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
+                                                placeholder="All / Last"
+                                                className="w-full sm:w-[140px]"
+                                            />
+                                        ) : null}
+                                        <div className="flex-1 text-sm text-muted-foreground flex items-center px-3 border border-transparent">
+                                            Automatic Value (Response Time)
+                                        </div>
                                     </>
                                 )}
                                 {(col.source === "status" || col.source === "error") && (
@@ -481,7 +509,6 @@ export function ResultsTable() {
                     {selectedDetailId !== null && (() => {
                         const result = results.find(r => r.rowId === selectedDetailId);
                         const steps = result?.steps || [];
-                        // Fallback for single-step results without steps array
                         const hasSteps = steps.length > 0;
                         return (
                             <Tabs defaultValue={hasSteps ? steps[0]?.stepId : "legacy"} className="flex-1 flex flex-col min-h-0 mt-4">
@@ -499,89 +526,333 @@ export function ResultsTable() {
                                     </TabsList>
                                 )}
                                 {hasSteps ? steps.map((step) => (
-                                    <TabsContent key={step.stepId} value={step.stepId} className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-4 data-[state=active]:flex data-[state=active]:grid">
-                                        <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
-                                            <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
-                                                Request Body — {step.stepName}
-                                            </div>
-                                            <div className="flex-1 min-h-0 relative">
-                                                <Editor
-                                                    height="100%"
-                                                    defaultLanguage="json"
-                                                    theme="vs-dark"
-                                                    value={
-                                                        step.requestBody
-                                                            ? formatBody(step.requestBody)
-                                                            : "No Request Body Content"
-                                                    }
-                                                    options={{ readOnly: true, minimap: { enabled: false } }}
-                                                />
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
-                                            <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
-                                                Response ({step.statusCode}) — {step.responseTimeMs}ms
-                                            </div>
-                                            <div className="flex-1 min-h-0 relative">
-                                                <Editor
-                                                    height="100%"
-                                                    defaultLanguage="json"
-                                                    theme="vs-dark"
-                                                    value={
-                                                        step.responseBody !== null && step.responseBody !== undefined
-                                                            ? formatBody(step.responseBody)
-                                                            : step.error || "No Response Body Content"
-                                                    }
-                                                    options={{ readOnly: true, minimap: { enabled: false } }}
-                                                />
-                                            </div>
-                                        </div>
-                                    </TabsContent>
-                                )) : (
-                                    <TabsContent value="legacy" className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
-                                            <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
-                                                Interpolated Request Body
-                                            </div>
-                                            <div className="flex-1 min-h-0 relative">
-                                                <Editor
-                                                    height="100%"
-                                                    defaultLanguage="json"
-                                                    theme="vs-dark"
-                                                    value={
-                                                        result?.requestBody
-                                                            ? formatBody(result.requestBody)
-                                                            : "No Request Body Content"
-                                                    }
-                                                    options={{ readOnly: true, minimap: { enabled: false } }}
-                                                />
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
-                                            <div className="bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground">
-                                                Response Body
-                                            </div>
-                                            <div className="flex-1 min-h-0 relative">
-                                                <Editor
-                                                    height="100%"
-                                                    defaultLanguage="json"
-                                                    theme="vs-dark"
-                                                    value={
-                                                        result?.responseBody !== null && result?.responseBody !== undefined
-                                                            ? formatBody(result.responseBody)
-                                                            : "No Response Body Content"
-                                                    }
-                                                    options={{ readOnly: true, minimap: { enabled: false } }}
-                                                />
-                                            </div>
-                                        </div>
-                                    </TabsContent>
-                                )}
-                            </Tabs>
-                        );
-                    })()}
-                </DialogContent>
-            </Dialog>
-        </Card>
-    );
+                                     <TabsContent key={step.stepId} value={step.stepId} className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-4 data-[state=active]:flex data-[state=active]:grid">
+                                         <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
+                                             <div className="bg-muted px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground flex flex-col gap-2">
+                                                 <div className="flex items-center justify-between">
+                                                     <span>Request Details — {step.stepName}</span>
+                                                 </div>
+                                                 {step.requestUrl && (
+                                                     <div className="flex items-center gap-2 font-mono text-[11px] bg-neutral-900/60 p-1.5 rounded border border-white/5 truncate select-all normal-case">
+                                                         <Badge variant="outline" className={cn(
+                                                             "text-[9px] font-bold px-1.5 py-0 uppercase shrink-0 border-transparent text-white",
+                                                             step.requestMethod === "GET" && "bg-sky-500/20 text-sky-300",
+                                                             step.requestMethod === "POST" && "bg-emerald-500/20 text-emerald-300",
+                                                             step.requestMethod === "PUT" && "bg-amber-500/20 text-amber-300",
+                                                             step.requestMethod === "DELETE" && "bg-rose-500/20 text-rose-300",
+                                                             !["GET", "POST", "PUT", "DELETE"].includes(step.requestMethod || "") && "bg-purple-500/20 text-purple-300"
+                                                         )}>
+                                                             {step.requestMethod || "GET"}
+                                                         </Badge>
+                                                         <span className="truncate text-neutral-300" title={step.requestUrl}>{step.requestUrl}</span>
+                                                     </div>
+                                                 )}
+                                             </div>
+                                             
+                                             <Tabs defaultValue="params" className="flex-1 flex flex-col min-h-0">
+                                                 <div className="bg-neutral-900/40 border-b px-2 shrink-0 h-8 flex items-center">
+                                                     <TabsList className="bg-transparent h-7 p-0 gap-1">
+                                                         <TabsTrigger value="params" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Params ({Object.keys(step.requestParams || {}).length})
+                                                         </TabsTrigger>
+                                                         <TabsTrigger value="headers" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Headers ({Object.keys(step.requestHeaders || {}).length})
+                                                         </TabsTrigger>
+                                                         <TabsTrigger value="body" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Body
+                                                         </TabsTrigger>
+                                                     </TabsList>
+                                                 </div>
+                                                 <TabsContent value="params" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     {step.requestParams && Object.keys(step.requestParams).length > 0 ? (
+                                                         <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                             {Object.entries(step.requestParams).map(([k, v]) => (
+                                                                 <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
+                                                                     <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
+                                                                     <span className="text-neutral-200 break-all select-all">{v}</span>
+                                                                 </div>
+                                                             ))}
+                                                         </div>
+                                                     ) : (
+                                                         <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
+                                                             No Request Parameters
+                                                         </div>
+                                                     )}
+                                                 </TabsContent>
+                                                 <TabsContent value="headers" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     {step.requestHeaders && Object.keys(step.requestHeaders).length > 0 ? (
+                                                         <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                             {Object.entries(step.requestHeaders).map(([k, v]) => (
+                                                                 <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
+                                                                     <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
+                                                                     <span className="text-neutral-200 break-all select-all">{v}</span>
+                                                                 </div>
+                                                             ))}
+                                                         </div>
+                                                     ) : (
+                                                         <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
+                                                             No Request Headers
+                                                         </div>
+                                                     )}
+                                                 </TabsContent>
+                                                 <TabsContent value="body" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     <Editor
+                                                         height="100%"
+                                                         defaultLanguage="json"
+                                                         theme="vs-dark"
+                                                         value={
+                                                             step.requestBody
+                                                                 ? formatBody(step.requestBody)
+                                                                 : "No Request Body Content"
+                                                         }
+                                                         options={{ readOnly: true, minimap: { enabled: false } }}
+                                                     />
+                                                 </TabsContent>
+                                             </Tabs>
+                                         </div>
+                                         <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
+                                             <div className="bg-muted px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground flex flex-col gap-1.5">
+                                                 <div className="flex items-center justify-between">
+                                                     <span>Response ({step.statusCode} {step.responseStatusText || ""}) — {step.responseTimeMs}ms</span>
+                                                 </div>
+                                                 {(step.ipAddress || step.responseType) && (
+                                                     <div className="flex flex-wrap gap-2 text-[10px] text-neutral-400 font-mono normal-case">
+                                                         {step.ipAddress && (
+                                                             <span className="bg-neutral-900/60 px-1.5 py-0.5 rounded border border-white/5">
+                                                                 IP: <span className="text-neutral-200 select-all">{step.ipAddress}</span>
+                                                             </span>
+                                                         )}
+                                                         {step.responseType && (
+                                                             <span className="bg-neutral-900/60 px-1.5 py-0.5 rounded border border-white/5">
+                                                                 Type: <span className="text-neutral-200">{step.responseType}</span>
+                                                             </span>
+                                                         )}
+                                                         {step.responseRedirected && (
+                                                             <span className="bg-amber-500/10 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/10">
+                                                                 Redirected
+                                                             </span>
+                                                         )}
+                                                     </div>
+                                                 )}
+                                             </div>
+                                             <Tabs defaultValue="body" className="flex-1 flex flex-col min-h-0">
+                                                 <div className="bg-neutral-900/40 border-b px-2 shrink-0 h-8 flex items-center">
+                                                     <TabsList className="bg-transparent h-7 p-0 gap-1">
+                                                         <TabsTrigger value="params" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Params (0)
+                                                         </TabsTrigger>
+                                                         <TabsTrigger value="headers" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Headers ({Object.keys(step.responseHeaders || {}).length})
+                                                         </TabsTrigger>
+                                                         <TabsTrigger value="body" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Body
+                                                         </TabsTrigger>
+                                                     </TabsList>
+                                                 </div>
+                                                 <TabsContent value="params" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
+                                                         No Response Parameters
+                                                     </div>
+                                                 </TabsContent>
+                                                 <TabsContent value="headers" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     {step.responseHeaders && Object.keys(step.responseHeaders).length > 0 ? (
+                                                         <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                             {Object.entries(step.responseHeaders).map(([k, v]) => (
+                                                                 <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
+                                                                     <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
+                                                                     <span className="text-neutral-200 break-all select-all">{v}</span>
+                                                                 </div>
+                                                             ))}
+                                                         </div>
+                                                     ) : (
+                                                         <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
+                                                             No Response Headers
+                                                         </div>
+                                                     )}
+                                                 </TabsContent>
+                                                 <TabsContent value="body" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     <Editor
+                                                         height="100%"
+                                                         defaultLanguage="json"
+                                                         theme="vs-dark"
+                                                         value={
+                                                             step.responseBody !== null && step.responseBody !== undefined
+                                                                 ? formatBody(step.responseBody)
+                                                                 : step.error || "No Response Body Content"
+                                                         }
+                                                         options={{ readOnly: true, minimap: { enabled: false } }}
+                                                     />
+                                                 </TabsContent>
+                                             </Tabs>
+                                         </div>
+                                     </TabsContent>
+                                 )) : (
+                                     <TabsContent value="legacy" className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                         <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
+                                             <div className="bg-muted px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground flex flex-col gap-2">
+                                                 <div className="flex items-center justify-between">
+                                                     <span>Interpolated Request Details</span>
+                                                 </div>
+                                                 {result?.requestUrl && (
+                                                     <div className="flex items-center gap-2 font-mono text-[11px] bg-neutral-900/60 p-1.5 rounded border border-white/5 truncate select-all normal-case">
+                                                         <Badge variant="outline" className={cn(
+                                                             "text-[9px] font-bold px-1.5 py-0 uppercase shrink-0 border-transparent text-white",
+                                                             result.requestMethod === "GET" && "bg-sky-500/20 text-sky-300",
+                                                             result.requestMethod === "POST" && "bg-emerald-500/20 text-emerald-300",
+                                                             result.requestMethod === "PUT" && "bg-amber-500/20 text-amber-300",
+                                                             result.requestMethod === "DELETE" && "bg-rose-500/20 text-rose-300",
+                                                             !["GET", "POST", "PUT", "DELETE"].includes(result.requestMethod || "") && "bg-purple-500/20 text-purple-300"
+                                                         )}>
+                                                             {result.requestMethod || "GET"}
+                                                         </Badge>
+                                                         <span className="truncate text-neutral-300" title={result.requestUrl}>{result.requestUrl}</span>
+                                                     </div>
+                                                 )}
+                                             </div>
+                                             
+                                             <Tabs defaultValue="params" className="flex-1 flex flex-col min-h-0">
+                                                 <div className="bg-neutral-900/40 border-b px-2 shrink-0 h-8 flex items-center">
+                                                     <TabsList className="bg-transparent h-7 p-0 gap-1">
+                                                         <TabsTrigger value="params" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Params ({Object.keys(result?.requestParams || {}).length})
+                                                         </TabsTrigger>
+                                                         <TabsTrigger value="headers" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Headers ({Object.keys(result?.requestHeaders || {}).length})
+                                                         </TabsTrigger>
+                                                         <TabsTrigger value="body" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Body
+                                                         </TabsTrigger>
+                                                     </TabsList>
+                                                 </div>
+                                                 <TabsContent value="params" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     {result?.requestParams && Object.keys(result.requestParams).length > 0 ? (
+                                                         <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                             {Object.entries(result.requestParams).map(([k, v]) => (
+                                                                 <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
+                                                                     <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
+                                                                     <span className="text-neutral-200 break-all select-all">{v}</span>
+                                                                 </div>
+                                                             ))}
+                                                         </div>
+                                                     ) : (
+                                                         <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
+                                                             No Request Parameters
+                                                         </div>
+                                                     )}
+                                                 </TabsContent>
+                                                 <TabsContent value="headers" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     {result?.requestHeaders && Object.keys(result.requestHeaders).length > 0 ? (
+                                                         <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                             {Object.entries(result.requestHeaders).map(([k, v]) => (
+                                                                 <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
+                                                                     <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
+                                                                     <span className="text-neutral-200 break-all select-all">{v}</span>
+                                                                 </div>
+                                                             ))}
+                                                         </div>
+                                                     ) : (
+                                                         <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
+                                                             No Request Headers
+                                                         </div>
+                                                     )}
+                                                 </TabsContent>
+                                                 <TabsContent value="body" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     <Editor
+                                                         height="100%"
+                                                         defaultLanguage="json"
+                                                         theme="vs-dark"
+                                                         value={
+                                                             result?.requestBody
+                                                                 ? formatBody(result.requestBody)
+                                                                 : "No Request Body Content"
+                                                         }
+                                                         options={{ readOnly: true, minimap: { enabled: false } }}
+                                                     />
+                                                 </TabsContent>
+                                             </Tabs>
+                                         </div>
+                                         <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
+                                             <div className="bg-muted px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground flex flex-col gap-1.5">
+                                                 <div className="flex items-center justify-between">
+                                                     <span>Response Details</span>
+                                                 </div>
+                                                 {(result?.ipAddress || result?.responseType) && (
+                                                     <div className="flex flex-wrap gap-2 text-[10px] text-neutral-400 font-mono normal-case">
+                                                         {result.ipAddress && (
+                                                             <span className="bg-neutral-900/60 px-1.5 py-0.5 rounded border border-white/5">
+                                                                 IP: <span className="text-neutral-200 select-all">{result.ipAddress}</span>
+                                                             </span>
+                                                         )}
+                                                         {result.responseType && (
+                                                             <span className="bg-neutral-900/60 px-1.5 py-0.5 rounded border border-white/5">
+                                                                 Type: <span className="text-neutral-200">{result.responseType}</span>
+                                                             </span>
+                                                         )}
+                                                         {result.responseRedirected && (
+                                                             <span className="bg-amber-500/10 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/10">
+                                                                 Redirected
+                                                             </span>
+                                                         )}
+                                                     </div>
+                                                 )}
+                                             </div>
+                                             <Tabs defaultValue="body" className="flex-1 flex flex-col min-h-0">
+                                                 <div className="bg-neutral-900/40 border-b px-2 shrink-0 h-8 flex items-center">
+                                                     <TabsList className="bg-transparent h-7 p-0 gap-1">
+                                                         <TabsTrigger value="params" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Params (0)
+                                                         </TabsTrigger>
+                                                         <TabsTrigger value="headers" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Headers ({Object.keys(result?.responseHeaders || {}).length})
+                                                         </TabsTrigger>
+                                                         <TabsTrigger value="body" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
+                                                             Body
+                                                         </TabsTrigger>
+                                                     </TabsList>
+                                                 </div>
+                                                 <TabsContent value="params" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
+                                                         No Response Parameters
+                                                     </div>
+                                                 </TabsContent>
+                                                 <TabsContent value="headers" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     {result?.responseHeaders && Object.keys(result.responseHeaders).length > 0 ? (
+                                                         <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                             {Object.entries(result.responseHeaders).map(([k, v]) => (
+                                                                 <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
+                                                                     <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
+                                                                     <span className="text-neutral-200 break-all select-all">{v}</span>
+                                                                 </div>
+                                                             ))}
+                                                         </div>
+                                                     ) : (
+                                                         <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
+                                                             No Response Headers
+                                                         </div>
+                                                     )}
+                                                 </TabsContent>
+                                                 <TabsContent value="body" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
+                                                     <Editor
+                                                         height="100%"
+                                                         defaultLanguage="json"
+                                                         theme="vs-dark"
+                                                         value={
+                                                             result?.responseBody !== null && result?.responseBody !== undefined
+                                                                 ? formatBody(result.responseBody)
+                                                                 : "No Response Body Content"
+                                                         }
+                                                         options={{ readOnly: true, minimap: { enabled: false } }}
+                                                     />
+                                                 </TabsContent>
+                                             </Tabs>
+                                         </div>
+                                     </TabsContent>
+                                 )}
+                             </Tabs>
+                         );
+                     })()}
+                 </DialogContent>
+             </Dialog>
+         </Card>
+     );
 }

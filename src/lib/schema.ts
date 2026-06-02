@@ -27,8 +27,17 @@ export type StepResult = {
   stepName: string;
   statusCode: number;
   responseTimeMs: number;
+  requestUrl?: string;
+  requestMethod?: string;
+  requestHeaders?: Record<string, string>;
+  requestParams?: Record<string, string>;
   requestBody: Record<string, any> | string | null;
   responseBody: any;
+  responseHeaders?: Record<string, string>;
+  responseType?: string;
+  responseRedirected?: boolean;
+  responseStatusText?: string;
+  ipAddress?: string | null;
   error?: string;
 };
 
@@ -37,8 +46,17 @@ export type ExecutionResult = {
   status: "pending" | "success" | "error";
   statusCode: number;
   responseTimeMs: number;
+  requestUrl?: string;
+  requestMethod?: string;
+  requestHeaders?: Record<string, string>;
+  requestParams?: Record<string, string>;
   requestBody: Record<string, any> | string | null;
   responseBody: any;
+  responseHeaders?: Record<string, string>;
+  responseType?: string;
+  responseRedirected?: boolean;
+  responseStatusText?: string;
+  ipAddress?: string | null;
   steps: StepResult[];
   error?: string;
 };

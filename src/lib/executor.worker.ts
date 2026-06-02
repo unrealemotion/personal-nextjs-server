@@ -25,6 +25,32 @@ function processBodyInterpolation(bodyString: string, data: Record<string, any>)
     }
 }
 
+async function resolveHostnameIp(urlStr: string): Promise<string | null> {
+    try {
+        const urlObj = new URL(urlStr);
+        const hostname = urlObj.hostname;
+        if (/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) || hostname === "localhost" || hostname.endsWith(".local")) {
+            return null;
+        }
+        const dnsUrl = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=A`;
+        const res = await fetch(dnsUrl, {
+            headers: { "accept": "application/dns-json" }
+        });
+        if (res.ok) {
+            const dnsData = await res.json();
+            if (dnsData.Answer && dnsData.Answer.length > 0) {
+                const aRecord = dnsData.Answer.find((ans: any) => ans.type === 1);
+                if (aRecord) {
+                    return aRecord.data;
+                }
+            }
+        }
+    } catch (e) {
+        // silence
+    }
+    return null;
+}
+
 async function executeOneStep(
     template: RequestTemplate,
     row: Record<string, any>,
@@ -32,19 +58,26 @@ async function executeOneStep(
 ): Promise<StepResult> {
     let url = interpolate(template.url, row);
 
+    const requestParams: Record<string, string> = {};
     if (template.params && template.params.length > 0) {
+        template.params.forEach(p => {
+            if (p.key) {
+                requestParams[p.key] = interpolate(p.value, row);
+            }
+        });
+
         try {
             const urlObj = new URL(url);
             template.params.forEach(p => {
                 if (p.key) {
-                    urlObj.searchParams.append(p.key, interpolate(p.value, row));
+                    urlObj.searchParams.append(p.key, requestParams[p.key]);
                 }
             });
             url = urlObj.toString();
         } catch (e) {
             const queryString = template.params
                 .filter(p => p.key)
-                .map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(interpolate(p.value, row))}`)
+                .map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(requestParams[p.key])}`)
                 .join("&");
             if (queryString) {
                 url += (url.includes('?') ? '&' : '?') + queryString;
@@ -52,11 +85,38 @@ async function executeOneStep(
         }
     }
 
+    // Parse all query parameters from the final url (including raw ones in the URL string)
+    try {
+        const urlObj = new URL(url);
+        urlObj.searchParams.forEach((val, key) => {
+            requestParams[key] = val;
+        });
+    } catch (e) {
+        const qIndex = url.indexOf('?');
+        if (qIndex !== -1) {
+            const search = url.slice(qIndex + 1);
+            const pairs = search.split('&');
+            pairs.forEach(pair => {
+                const [k, v] = pair.split('=');
+                if (k) {
+                    try {
+                        requestParams[decodeURIComponent(k)] = decodeURIComponent(v || '');
+                    } catch (err) {
+                        requestParams[k] = v || '';
+                    }
+                }
+            });
+        }
+    }
+
     const headers = new Headers();
+    const requestHeaders: Record<string, string> = {};
     let hasContentType = false;
     template.headers.forEach(h => {
         if (h.key) {
-            headers.append(h.key, interpolate(h.value, row));
+            const val = interpolate(h.value, row);
+            headers.append(h.key, val);
+            requestHeaders[h.key] = val;
             if (h.key.toLowerCase() === "content-type") hasContentType = true;
         }
     });
@@ -65,6 +125,7 @@ async function executeOneStep(
 
     if (interpolatedBody && typeof interpolatedBody === "object" && !hasContentType) {
         headers.append("Content-Type", "application/json");
+        requestHeaders["Content-Type"] = "application/json";
     }
 
     const startTime = performance.now();
@@ -73,6 +134,10 @@ async function executeOneStep(
         stepName: template.name,
         statusCode: 0,
         responseTimeMs: 0,
+        requestUrl: url,
+        requestMethod: template.method,
+        requestHeaders,
+        requestParams,
         requestBody: interpolatedBody,
         responseBody: null,
     };
@@ -94,6 +159,21 @@ async function executeOneStep(
 
         const response = await fetch(url, fetchOpts);
         stepResult.statusCode = response.status;
+        stepResult.responseType = response.type;
+        stepResult.responseRedirected = response.redirected;
+        stepResult.responseStatusText = response.statusText;
+
+        const responseHeaders: Record<string, string> = {};
+        response.headers.forEach((val, key) => {
+            responseHeaders[key] = val;
+        });
+        stepResult.responseHeaders = responseHeaders;
+
+        try {
+            stepResult.ipAddress = await resolveHostnameIp(url);
+        } catch (e) {
+            // ignore
+        }
 
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
@@ -181,8 +261,17 @@ self.onmessage = async (e: MessageEvent) => {
                 status: chainFailed ? "error" : "success",
                 statusCode: lastStep?.statusCode || 0,
                 responseTimeMs: totalTime,
+                requestUrl: steps[0]?.requestUrl || null,
+                requestMethod: steps[0]?.requestMethod || null,
+                requestHeaders: steps[0]?.requestHeaders || null,
+                requestParams: steps[0]?.requestParams || null,
                 requestBody: steps[0]?.requestBody || null,
                 responseBody: lastStep?.responseBody || null,
+                responseHeaders: lastStep?.responseHeaders || null,
+                responseType: lastStep?.responseType || null,
+                responseRedirected: lastStep?.responseRedirected || null,
+                responseStatusText: lastStep?.responseStatusText || null,
+                ipAddress: lastStep?.ipAddress || null,
                 steps,
                 error: chainFailed ? steps.filter(s => s.error).map(s => s.error).join("; ") : undefined,
             };
