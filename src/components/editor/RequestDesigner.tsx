@@ -75,8 +75,8 @@ const processTemplateForFormatting = (str: string, isMinify: boolean) => {
         const parsed = JSON.parse(result);
         let formatted = JSON.stringify(parsed, null, isMinify ? 0 : 2);
         return formatted.replace(/"__UNQUOTED_VAR_(.+?)__"/g, '{{$1}}');
-    } catch(e) {
-        throw new Error("Invalid JSON format");
+    } catch(e: any) {
+        throw new Error(e?.message || "Invalid JSON format");
     }
 };
 
@@ -316,8 +316,8 @@ export function RequestDesigner() {
                 try {
                     const formatted = processTemplateForFormatting(ed.getValue(), false);
                     ed.setValue(formatted);
-                } catch {
-                    toast.error("Invalid JSON format");
+                } catch (err: any) {
+                    toast.error(`Format failed: ${err?.message || "Invalid JSON format"}`);
                 }
             },
         });
@@ -523,8 +523,8 @@ export function RequestDesigner() {
                                             try {
                                                 const formatted = processTemplateForFormatting(template.body || "", false);
                                                 updateTemplate({ body: formatted });
-                                            } catch {
-                                                toast.error("Invalid JSON format");
+                                            } catch (err: any) {
+                                                toast.error(`Format failed: ${err?.message || "Invalid JSON format"}`);
                                             }
                                         }}
                                     >
@@ -539,8 +539,8 @@ export function RequestDesigner() {
                                             try {
                                                 const formatted = processTemplateForFormatting(template.body || "", true);
                                                 updateTemplate({ body: formatted });
-                                            } catch {
-                                                toast.error("Invalid JSON format");
+                                            } catch (err: any) {
+                                                toast.error(`Format failed: ${err?.message || "Invalid JSON format"}`);
                                             }
                                         }}
                                     >

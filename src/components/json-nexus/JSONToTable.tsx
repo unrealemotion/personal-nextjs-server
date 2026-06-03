@@ -444,6 +444,12 @@ export function JSONToTable() {
     convertRef.current = handleConvert;
   }, [handleConvert]);
 
+  useEffect(() => {
+    if (isConverted && jsonInput.trim()) {
+      convertRef.current();
+    }
+  }, [flattenObjects, splitArrays]);
+
   // Export to CSV
   const handleExportCSV = () => {
     if (convertedRows.length === 0) return;
@@ -659,7 +665,6 @@ export function JSONToTable() {
                     checked={flattenObjects} 
                     onCheckedChange={(checked) => {
                       setFlattenObjects(!!checked);
-                      setIsConverted(false);
                     }}
                     className="border-white/20 mt-0.5 data-[state=checked]:bg-indigo-500 data-[state=checked]:border-indigo-500"
                   />
@@ -679,7 +684,6 @@ export function JSONToTable() {
                     checked={splitArrays} 
                     onCheckedChange={(checked) => {
                       setSplitArrays(!!checked);
-                      setIsConverted(false);
                     }}
                     className="border-white/20 mt-0.5 data-[state=checked]:bg-fuchsia-500 data-[state=checked]:border-fuchsia-500"
                   />

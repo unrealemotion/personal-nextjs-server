@@ -54,6 +54,34 @@ const sampleRight = {
   }
 };
 
+function findLineForPath(jsonStr: string, path: string): number {
+  if (!jsonStr || !path) return 1;
+  const lines = jsonStr.split("\n");
+  const normalizedPath = path.replace(/\[(\d+)\]/g, '.$1');
+  const parts = normalizedPath.split(".");
+  let currentLine = 0;
+
+  for (let pIdx = 0; pIdx < parts.length; pIdx++) {
+    const part = parts[pIdx];
+    const isIndex = /^\d+$/.test(part);
+    let found = false;
+
+    for (let i = currentLine; i < lines.length; i++) {
+      const line = lines[i];
+      const hasKey = line.includes(`"${part}"`);
+      const hasIndex = isIndex && (line.includes(`[`) || i - currentLine === parseInt(part) + 1);
+
+      if (hasKey || hasIndex) {
+        currentLine = i;
+        found = true;
+        break;
+      }
+    }
+  }
+
+  return currentLine + 1;
+}
+
 export function JSONCompare() {
   const [leftInput, setLeftInput] = useState<string>("");
   const [rightInput, setRightInput] = useState<string>("");
@@ -282,6 +310,36 @@ export function JSONCompare() {
     compareRef.current = handleCompare;
   }, [handleCompare]);
 
+  const diffEditorRef = React.useRef<any>(null);
+
+  useEffect(() => {
+    if (isDiffActive && leftInput.trim() && rightInput.trim()) {
+      compareRef.current();
+    }
+  }, [ignoreArrayOrder, diffMode]);
+
+  const scrollToPath = (path: string) => {
+    if (!diffEditorRef.current) return;
+    try {
+      const leftText = getDiffViewText(leftCompareVal, "left");
+      const rightText = getDiffViewText(rightCompareVal, "right");
+      
+      const leftLine = findLineForPath(leftText, path);
+      const rightLine = findLineForPath(rightText, path);
+      
+      const editor = diffEditorRef.current;
+      editor.getOriginalEditor().revealLineInCenter(leftLine);
+      editor.getModifiedEditor().revealLineInCenter(rightLine);
+      
+      editor.getOriginalEditor().setPosition({ lineNumber: leftLine, column: 1 });
+      editor.getModifiedEditor().setPosition({ lineNumber: rightLine, column: 1 });
+      
+      toast.success(`Focused difference at: ${path}`, { duration: 1500 });
+    } catch (e) {
+      console.warn("Failed to scroll to path:", e);
+    }
+  };
+
   // Handle file uploads
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, side: "left" | "right") => {
     const file = e.target.files?.[0];
@@ -342,7 +400,6 @@ export function JSONCompare() {
               checked={ignoreArrayOrder}
               onChange={(e) => {
                 setIgnoreArrayOrder(e.target.checked);
-                setIsDiffActive(false); // Reset comparison when toggled so they re-trigger it
               }}
               className="rounded border-white/20 bg-neutral-950 text-indigo-500 focus:ring-0 focus:ring-offset-0 w-3.5 h-3.5 cursor-pointer accent-indigo-500"
             />
@@ -548,13 +605,13 @@ export function JSONCompare() {
                 ) : (
                   <div className="space-y-2">
                     {semanticDiff.added.map((k) => (
-                      <div key={`add-${k}`} className="flex items-center text-xs justify-between bg-green-500/10 border border-green-500/20 rounded-md p-1.5 text-green-400 font-mono">
+                      <div key={`add-${k}`} className="flex items-center text-xs justify-between bg-green-500/10 border border-green-500/20 rounded-md p-1.5 text-green-400 font-mono cursor-pointer hover:bg-green-500/20 transition-colors" onClick={() => scrollToPath(k)}>
                         <span className="truncate max-w-[200px]" title={k}>+ {k}</span>
                         <span className="text-[9px] uppercase font-bold bg-green-500/20 px-1 py-0.2 rounded">Added</span>
                       </div>
                     ))}
                     {semanticDiff.removed.map((k) => (
-                      <div key={`rem-${k}`} className="flex items-center text-xs justify-between bg-red-500/10 border border-red-500/20 rounded-md p-1.5 text-red-400 font-mono">
+                      <div key={`rem-${k}`} className="flex items-center text-xs justify-between bg-red-500/10 border border-red-500/20 rounded-md p-1.5 text-red-400 font-mono cursor-pointer hover:bg-red-500/20 transition-colors" onClick={() => scrollToPath(k)}>
                         <span className="truncate max-w-[200px]" title={k}>- {k}</span>
                         <span className="text-[9px] uppercase font-bold bg-red-500/20 px-1 py-0.2 rounded">Removed</span>
                       </div>
@@ -563,7 +620,7 @@ export function JSONCompare() {
                 )}
               </div>
             </Card>
-
+ 
             {/* Value Changes Breakdown */}
             <Card className="p-6 bg-[#0a0a0a] border border-white/10 rounded-2xl">
               <h4 className="font-bold text-white/90 text-sm mb-3 flex items-center justify-between">
@@ -578,7 +635,7 @@ export function JSONCompare() {
                 ) : (
                   <div className="space-y-2">
                     {semanticDiff.modified.map((item, idx) => (
-                      <div key={`mod-${idx}`} className="text-xs bg-indigo-500/5 border border-indigo-500/10 rounded-lg p-2 font-mono">
+                      <div key={`mod-${idx}`} className="text-xs bg-indigo-500/5 border border-indigo-500/10 hover:bg-indigo-500/10 transition-colors rounded-lg p-2 font-mono cursor-pointer" onClick={() => scrollToPath(item.path)}>
                         <div className="font-bold text-indigo-400 truncate text-[11px] mb-1" title={item.path}>
                           {item.path}
                         </div>
@@ -665,6 +722,9 @@ export function JSONCompare() {
                   language="json"
                   theme="vs-dark"
                   height="100%"
+                  onMount={(editor, monaco) => {
+                    diffEditorRef.current = editor;
+                  }}
                   options={{
                     originalEditable: false,
                     readOnly: true,

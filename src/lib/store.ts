@@ -29,6 +29,9 @@ export type AppState = {
     results: ExecutionResult[];
     maxRetries: number;
     retryStatusCodes: string;
+    stopOnFailure: boolean;
+    throttleDelayMs: number;
+    rowIterations: number;
     columnMappings: ColumnMapping[];
     tableFilterConfig: TableFilterConfig;
     fileName: string;
@@ -48,6 +51,9 @@ const defaultState: AppState = {
     results: [],
     maxRetries: 0,
     retryStatusCodes: "",
+    stopOnFailure: false,
+    throttleDelayMs: 0,
+    rowIterations: 1,
     columnMappings: [
         { name: "Status Code", source: "status", path: "" },
         { name: "Error", source: "error", path: "" },
@@ -269,15 +275,16 @@ export const setResults = (results: ExecutionResult[]) => {
     }));
 };
 
-export const updateResultByRowId = (rowId: number, resultUpdate: Partial<ExecutionResult>) => {
+export const updateResultByRowId = (rowId: number, resultUpdate: Partial<ExecutionResult>, iteration = 1) => {
     store.setState((state) => {
         const newResults = [...state.results];
-        const idx = newResults.findIndex((r) => r.rowId === rowId);
+        const idx = newResults.findIndex((r) => r.rowId === rowId && (r.iteration ?? 1) === iteration);
         if (idx !== -1) {
             newResults[idx] = { ...newResults[idx], ...resultUpdate };
         } else {
             newResults.push({
                 rowId,
+                iteration,
                 status: "success",
                 statusCode: 0,
                 responseTimeMs: 0,
@@ -286,7 +293,10 @@ export const updateResultByRowId = (rowId: number, resultUpdate: Partial<Executi
                 steps: [],
                 ...resultUpdate
             } as ExecutionResult);
-            newResults.sort((a, b) => a.rowId - b.rowId);
+            newResults.sort((a, b) => {
+                if (a.rowId !== b.rowId) return a.rowId - b.rowId;
+                return (a.iteration ?? 1) - (b.iteration ?? 1);
+            });
         }
         return { ...state, results: newResults };
     });
@@ -302,5 +312,18 @@ export const setTableFilterConfig = (updates: Partial<TableFilterConfig>) => {
         tableFilterConfig: { ...state.tableFilterConfig, ...updates },
     }));
 };
+
+export const setStopOnFailure = (val: boolean) => {
+    store.setState((state) => ({ ...state, stopOnFailure: val }));
+};
+
+export const setThrottleDelayMs = (val: number) => {
+    store.setState((state) => ({ ...state, throttleDelayMs: val }));
+};
+
+export const setRowIterations = (val: number) => {
+    store.setState((state) => ({ ...state, rowIterations: val }));
+};
+
 
 

@@ -43,6 +43,7 @@ export type StepResult = {
 
 export type ExecutionResult = {
   rowId: number;
+  iteration?: number;
   status: "pending" | "success" | "error";
   statusCode: number;
   responseTimeMs: number;

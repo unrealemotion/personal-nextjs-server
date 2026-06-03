@@ -77,7 +77,8 @@ function SearchableSelect({ value, onChange, options, placeholder, className }: 
 function getByDotNotation(obj: any, path: string): string {
     if (!obj || !path) return "";
     try {
-        const value = path.split('.').reduce((acc, part) => acc && acc[part], obj);
+        const normalizedPath = path.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
+        const value = normalizedPath.split('.').reduce((acc, part) => acc && acc[part], obj);
         if (value === undefined || value === null) return "";
         if (typeof value === "object") return JSON.stringify(value);
         return String(value);
@@ -295,7 +296,7 @@ export function ResultsTable() {
     const tableFilterConfig = useStore(store, (state) => state.tableFilterConfig);
     const fileName = useStore(store, (state) => state.fileName);
 
-    const [selectedDetailId, setSelectedDetailId] = useState<number | null>(null);
+    const [selectedDetail, setSelectedDetail] = useState<{ rowId: number; iteration: number } | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
@@ -311,14 +312,14 @@ export function ResultsTable() {
                 } else if (col.source === "error") {
                     rowMap[key] = res.error || "";
                 } else if (col.source === "response_time") {
-                    if (res.status === "pending") {
-                        rowMap[key] = "...";
+                    const steps = res.steps || [];
+                    const step = col.stepId
+                        ? steps.find(s => s.stepId === col.stepId)
+                        : steps[steps.length - 1];
+                    if (step) {
+                        rowMap[key] = `${step.responseTimeMs} ms`;
                     } else {
-                        const steps = res.steps || [];
-                        const step = col.stepId
-                            ? steps.find(s => s.stepId === col.stepId)
-                            : steps[steps.length - 1];
-                        rowMap[key] = step ? `${step.responseTimeMs} ms` : `${res.responseTimeMs} ms`;
+                        rowMap[key] = res.status === "pending" ? "..." : `${res.responseTimeMs} ms`;
                     }
                 } else if (col.source === "variable") {
                     rowMap[key] = rowData[col.path] ?? "";
@@ -342,11 +343,16 @@ export function ResultsTable() {
                         ? steps.find(s => s.stepId === col.stepId)
                         : steps[steps.length - 1];
                     const body = step?.responseBody ?? res.responseBody;
-                    rowMap[key] = res.status === "pending" ? "..." : getByDotNotation(body, col.path);
+                    if (body !== undefined && body !== null) {
+                        rowMap[key] = getByDotNotation(body, col.path);
+                    } else {
+                        rowMap[key] = res.status === "pending" ? "..." : "";
+                    }
                 }
             });
             rowMap.__status = res.status;
             rowMap.__id = res.rowId;
+            rowMap.__iteration = res.iteration;
             return rowMap;
         });
     }, [results, fileData, columnMappings]);
@@ -429,10 +435,27 @@ export function ResultsTable() {
             return Array.from(values).sort();
         };
 
-        const dynamicCols: ColumnDef<any>[] = columnMappings.map((col, idx) => {
+        const dynamicCols: ColumnDef<any>[] = [];
+
+        // Prepend built-in Row # / Run Grouping Column
+        dynamicCols.push({
+            id: "row_number",
+            header: "Row #",
+            cell: ({ row }) => {
+                const rowNum = row.original.__id + 1;
+                const iter = row.original.__iteration ?? 1;
+                return (
+                    <div className="font-mono text-xs font-bold text-foreground/80 select-none">
+                        {rowNum}#{iter}
+                    </div>
+                );
+            }
+        });
+
+        columnMappings.forEach((col, idx) => {
             const colId = `col_${idx}`;
             const colName = col.name || `Column ${idx + 1}`;
-            return {
+            dynamicCols.push({
                 id: colId,
                 accessorKey: colId,
                 header: () => (
@@ -457,7 +480,7 @@ export function ResultsTable() {
                     }
                     return <div className="max-w-[200px] truncate text-xs" title={String(value)}>{value}</div>;
                 }
-            };
+            });
         });
 
         dynamicCols.push({
@@ -465,19 +488,18 @@ export function ResultsTable() {
             header: "Actions",
             cell: ({ row }) => {
                 const internalId = row.original.__id;
-                const isPending = row.original.__status === "pending";
+                const iteration = row.original.__iteration ?? 1;
                 return (
                     <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                            setSelectedDetailId(internalId);
+                            setSelectedDetail({ rowId: internalId, iteration });
                             setIsDialogOpen(true);
                         }}
-                        disabled={isPending}
                         title="View Raw Details"
                     >
-                        <Eye className={`w-4 h-4 ${isPending ? 'text-muted-foreground' : 'text-primary'}`} />
+                        <Eye className="w-4 h-4 text-primary" />
                     </Button>
                 )
             }
@@ -506,6 +528,8 @@ export function ResultsTable() {
 
         const exportData = dataToExport.map(row => {
             const cleanRow: Record<string, any> = {};
+            cleanRow["Source Row"] = row.__id + 1;
+            cleanRow["Run Iteration"] = row.__iteration ?? 1;
             columnMappings.forEach((col, idx) => {
                 const colName = col.name || `Column ${idx + 1}`;
                 const finalName = cleanRow[colName] !== undefined ? `${colName} (${idx})` : colName;
@@ -858,8 +882,8 @@ export function ResultsTable() {
                             Comparing the final interpolated JSON Request sent alongside the raw Response received.
                         </DialogDescription>
                     </DialogHeader>
-                    {selectedDetailId !== null && (() => {
-                        const result = results.find(r => r.rowId === selectedDetailId);
+                    {selectedDetail !== null && (() => {
+                        const result = results.find(r => r.rowId === selectedDetail.rowId && (r.iteration ?? 1) === selectedDetail.iteration);
                         const steps = result?.steps || [];
                         const hasSteps = steps.length > 0;
                         return (

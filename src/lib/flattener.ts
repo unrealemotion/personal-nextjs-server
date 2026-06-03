@@ -188,8 +188,16 @@ export function computeSemanticDiff(left: any, right: any): SemanticDiff {
 
     // If both are arrays
     if (Array.isArray(l) && Array.isArray(r)) {
-      if (JSON.stringify(l) !== JSON.stringify(r)) {
-        modified.push({ path, oldValue: l, newValue: r });
+      const maxLen = Math.max(l.length, r.length);
+      for (let i = 0; i < maxLen; i++) {
+        const subPath = `${path}[${i}]`;
+        if (i >= l.length) {
+          added.push(subPath);
+        } else if (i >= r.length) {
+          removed.push(subPath);
+        } else {
+          compare(l[i], r[i], subPath);
+        }
       }
       return;
     }

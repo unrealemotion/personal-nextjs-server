@@ -75,8 +75,6 @@ export function parseCurl(curlCommand: string): Partial<RequestTemplate> | null 
         }
 
         return template;
-
-        return template;
     } catch (error) {
         console.error("Failed to parse cURL:", error);
         return null;
@@ -151,11 +149,8 @@ export function generateFetch(template: RequestTemplate): string {
 
     if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
         let bodyContent = stripJsonComments(template.body).trim();
-        if (bodyContent.startsWith('{') || bodyContent.startsWith('[')) {
-            code += `  body: JSON.stringify(${bodyContent.replace(/\n/g, '\n  ')})\n`;
-        } else {
-            code += `  body: ${JSON.stringify(bodyContent)}\n`;
-        }
+        const jsBody = bodyContent.replace(/\{\{(.+?)\}\}/g, (_, g) => `\${${g.trim()}}`);
+        code += `  body: \`${jsBody.replace(/`/g, '\\`').replace(/\n/g, '\n  ')}\`,\n`;
     }
 
     code += `})\n.then(response => response.text())\n.then(result => console.log(result))\n.catch(error => console.error('error', error));`;
@@ -190,11 +185,8 @@ export function generateAxios(template: RequestTemplate): string {
 
     if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
         let bodyContent = stripJsonComments(template.body).trim();
-        if (bodyContent.startsWith('{') || bodyContent.startsWith('[')) {
-            code += `  data: JSON.stringify(${bodyContent.replace(/\n/g, '\n  ')})\n`;
-        } else {
-            code += `  data: ${JSON.stringify(bodyContent)}\n`;
-        }
+        const jsBody = bodyContent.replace(/\{\{(.+?)\}\}/g, (_, g) => `\${${g.trim()}}`);
+        code += `  data: \`${jsBody.replace(/`/g, '\\`').replace(/\n/g, '\n  ')}\`,\n`;
     }
 
     code += `};\n\n`;

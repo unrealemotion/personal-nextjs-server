@@ -2,7 +2,7 @@
 
 import React, { useState, useRef } from "react";
 import { useStore } from "@tanstack/react-store";
-import { store, setMaxRetries, setRetryStatusCodes } from "@/lib/store";
+import { store, setMaxRetries, setRetryStatusCodes, setStopOnFailure, setThrottleDelayMs, setRowIterations } from "@/lib/store";
 import { runBulkExecution } from "@/lib/executor";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,12 +10,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Play, Loader2, StopCircle, FlaskConical } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
+import { toast } from "sonner";
 
 export function ExecutionPanel() {
     const fileData = useStore(store, (state) => state.fileData);
     const templates = useStore(store, (state) => state.templates);
     const maxRetries = useStore(store, (state) => state.maxRetries);
     const retryStatusCodes = useStore(store, (state) => state.retryStatusCodes);
+    const stopOnFailure = useStore(store, (state) => state.stopOnFailure);
+    const throttleDelayMs = useStore(store, (state) => state.throttleDelayMs);
+    const rowIterations = useStore(store, (state) => state.rowIterations);
     const [concurrency, setConcurrency] = useState(2);
     const [isRunning, setIsRunning] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -30,17 +35,21 @@ export function ExecutionPanel() {
         setProgress(0);
         abortControllerRef.current = new AbortController();
 
-        await runBulkExecution(
-            Math.max(1, concurrency),
-            (completed, total) => {
-                setProgress(Math.round((completed / total) * 100));
-            },
-            undefined,
-            abortControllerRef.current.signal
-        );
-
-        setIsRunning(false);
-        abortControllerRef.current = null;
+        try {
+            await runBulkExecution(
+                Math.max(1, concurrency),
+                (completed, total) => {
+                    setProgress(Math.round((completed / total) * 100));
+                },
+                undefined,
+                abortControllerRef.current.signal
+            );
+        } catch (err: any) {
+            toast.error(err?.message || "Execution engine crashed");
+        } finally {
+            setIsRunning(false);
+            abortControllerRef.current = null;
+        }
     };
 
     const handleTestRun = async () => {
@@ -49,17 +58,21 @@ export function ExecutionPanel() {
         setProgress(0);
         abortControllerRef.current = new AbortController();
 
-        await runBulkExecution(
-            1,
-            (completed, total) => {
-                setProgress(Math.round((completed / total) * 100));
-            },
-            0,
-            abortControllerRef.current.signal
-        ); // Execute only Row index 0
-
-        setIsRunning(false);
-        abortControllerRef.current = null;
+        try {
+            await runBulkExecution(
+                1,
+                (completed, total) => {
+                    setProgress(Math.round((completed / total) * 100));
+                },
+                0,
+                abortControllerRef.current.signal
+            ); // Execute only Row index 0
+        } catch (err: any) {
+            toast.error(err?.message || "Test execution crashed");
+        } finally {
+            setIsRunning(false);
+            abortControllerRef.current = null;
+        }
     };
 
     const handleStop = () => {
@@ -77,7 +90,7 @@ export function ExecutionPanel() {
             </CardHeader>
             <CardContent>
                 <div className="flex flex-col space-y-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="concurrency" className="text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis block" title="Concurrency Limit">
                                 Concurrency Limit
@@ -127,6 +140,52 @@ export function ExecutionPanel() {
                                 onChange={(e) => setRetryStatusCodes(e.target.value)}
                                 className="h-10 bg-background/50 font-mono text-sm"
                             />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="throttleDelayMs" className="text-xs text-muted-foreground block" title="Delay (ms) between each row's request batch execution">
+                                Throttling Delay (ms)
+                            </Label>
+                            <Input
+                                id="throttleDelayMs"
+                                type="number"
+                                min={0}
+                                max={10000}
+                                placeholder="0 (no delay)"
+                                value={throttleDelayMs ?? ""}
+                                onChange={(e) => setThrottleDelayMs(e.target.value === "" ? 0 : Math.max(0, parseInt(e.target.value) || 0))}
+                                className="h-10 bg-background/50 font-mono text-sm"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="rowIterations" className="text-xs text-muted-foreground block" title="Number of times each row should be executed">
+                                Row Iterations
+                            </Label>
+                            <Input
+                                id="rowIterations"
+                                type="number"
+                                min={1}
+                                max={100}
+                                placeholder="1 (run once)"
+                                value={rowIterations ?? 1}
+                                onChange={(e) => setRowIterations(e.target.value === "" ? 1 : Math.max(1, parseInt(e.target.value) || 1))}
+                                className="h-10 bg-background/50 font-mono text-sm"
+                            />
+                        </div>
+
+                        <div className="space-y-2 flex flex-col justify-end pb-2.5">
+                            <div className="flex items-center space-x-2">
+                                <Checkbox
+                                    id="stopOnFailure"
+                                    checked={stopOnFailure}
+                                    onCheckedChange={(checked) => setStopOnFailure(!!checked)}
+                                    className="border-white/20 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                                />
+                                <Label htmlFor="stopOnFailure" className="text-xs text-muted-foreground cursor-pointer select-none font-bold uppercase tracking-tight">
+                                    Stop on failure
+                                </Label>
+                            </div>
                         </div>
                     </div>
 

@@ -349,7 +349,26 @@ Charlie,charlie@test.org,+84 901 234 567`}
                     </ol>
                     <p>
                         Drag and drop steps to reorder them. If any step fails, the chain is marked as an error but
-                        continues to subsequent steps so you still get partial data.
+                        continues to subsequent steps so you still get partial data (unless <em>Stop on Failure</em> is enabled).
+                    </p>
+
+                    <h3 className="text-lg font-semibold text-white pt-2">Step Output Propagation</h3>
+                    <p>
+                        Subsequent steps can dynamically reference data returned by previous steps. You can read status codes, headers, and responses from any prior step:
+                    </p>
+                    <ul className="list-disc list-inside space-y-1 pl-2">
+                        <li>
+                            Reference by 1-based order index: <code className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-xs font-mono">{`{{Step 1.response.token}}`}</code>
+                        </li>
+                        <li>
+                            Reference by clean Step Name: <code className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-xs font-mono">{`{{Create User.response.id}}`}</code>
+                        </li>
+                    </ul>
+                    <Code title="Example URL containing step results">
+                        {`https://api.example.com/customers/{{Step 1.response.id}}/details`}
+                    </Code>
+                    <p className="text-xs text-white/50 leading-relaxed">
+                        Data is recursively flattened into dot-notation paths. You can drill down to any depth (e.g. <code className="px-1.5 py-0.5 rounded bg-white/10 text-xs font-mono">{`{{Step 1.response.data.profile.role}}`}</code>).
                     </p>
                 </Section>
 
@@ -360,7 +379,7 @@ Charlie,charlie@test.org,+84 901 234 567`}
                     <p>
                         The <em>Execution Engine</em> panel lets you configure:
                     </p>
-                    <ul className="list-disc list-inside space-y-1 pl-2">
+                    <ul className="list-disc list-inside space-y-2 pl-2">
                         <li>
                             <strong className="text-white/90">Concurrency Limit</strong> — how many rows are processed in
                             parallel (1–50). Setting it to 1 means purely sequential.
@@ -370,6 +389,15 @@ Charlie,charlie@test.org,+84 901 234 567`}
                         </li>
                         <li>
                             <strong className="text-white/90">Retry Status Ranges</strong> — a comma-separated list of specific status codes or ranges that trigger a retry.
+                        </li>
+                        <li>
+                            <strong className="text-white/90">Throttling Delay (ms)</strong> — delay staggered between each row's batch execution. Essential for throttling outbound API traffic to prevent HTTP 429 rate limit errors.
+                        </li>
+                        <li>
+                            <strong className="text-white/90">Row Iterations</strong> — configure how many times each row is executed. When greater than 1, each run executes the step chain independently, and subsequent runs are visually grouped under the parent row index (e.g. <code>↳ Run 2</code>, <code>↳ Run 3</code>) in the results table.
+                        </li>
+                        <li>
+                            <strong className="text-white/90">Stop on Failure</strong> — when enabled, if any step in a row's chain encounters an error, subsequent steps for that row are automatically skipped to avoid making invalid dependent calls.
                         </li>
                     </ul>
 
