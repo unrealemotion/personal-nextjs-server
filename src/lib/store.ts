@@ -158,7 +158,12 @@ export const hydrateStore = () => {
     if (!saved) return;
     try {
         const parsed = JSON.parse(saved);
-        store.setState(() => ({ ...defaultState, ...parsed }));
+        const apiTabs = Array.isArray(parsed.apiTabs) ? parsed.apiTabs : [];
+        store.setState(() => ({
+            ...defaultState,
+            ...parsed,
+            apiTabs
+        }));
     } catch (e) {
         console.error("Failed to hydrate state:", e);
     }
@@ -172,7 +177,7 @@ if (typeof window !== "undefined") {
             // Strip response bodies/payloads before persisting to keep storage minimal
             const sanitizedState = {
                 ...state,
-                apiTabs: state.apiTabs.map(tab => ({
+                apiTabs: (state.apiTabs || []).map(tab => ({
                     ...tab,
                     response: null // Response data is transient and shouldn't fill localstorage
                 }))
