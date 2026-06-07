@@ -97,16 +97,23 @@ export default function NotFound() {
         });
     }, []);
 
-    // Generate particles
-    const particles = Array.from({ length: 30 }, (_, i) => ({
-        id: i,
-        delay: Math.random() * 5,
-        duration: 4 + Math.random() * 6,
-        size: 2 + Math.random() * 4,
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        opacity: 0.3 + Math.random() * 0.5,
-    }));
+    // Seeded PRNG for deterministic particles (avoids hydration mismatch)
+    const particles = (() => {
+        let seed = 42;
+        const rand = () => {
+            seed = (seed * 16807 + 0) % 2147483647;
+            return (seed - 1) / 2147483646;
+        };
+        return Array.from({ length: 30 }, (_, i) => ({
+            id: i,
+            delay: rand() * 5,
+            duration: 4 + rand() * 6,
+            size: 2 + rand() * 4,
+            x: rand() * 100,
+            y: rand() * 100,
+            opacity: 0.3 + rand() * 0.5,
+        }));
+    })();
 
     const parallaxX = (mousePos.x - 50) * 0.02;
     const parallaxY = (mousePos.y - 50) * 0.02;
@@ -161,23 +168,7 @@ export default function NotFound() {
                 ))}
             </div>
 
-            {/* Expanding void rings */}
-            <div className="absolute left-1/2 top-1/2 pointer-events-none">
-                {[0, 2, 4].map((delay) => (
-                    <div
-                        key={delay}
-                        className="absolute rounded-full border border-violet-500/10"
-                        style={{
-                            width: 200,
-                            height: 200,
-                            left: "50%",
-                            top: "50%",
-                            transform: "translate(-50%, -50%)",
-                            animation: `ringExpand 6s ${delay}s ease-out infinite`,
-                        }}
-                    />
-                ))}
-            </div>
+
 
             {/* Main content */}
             <div
@@ -247,15 +238,6 @@ export default function NotFound() {
                     <div className="relative w-20 h-20 flex items-center justify-center">
                         {/* SVG ring timer */}
                         <svg className="absolute inset-0 -rotate-90" viewBox="0 0 80 80">
-                            {/* Background ring */}
-                            <circle
-                                cx="40"
-                                cy="40"
-                                r="36"
-                                fill="none"
-                                stroke="rgba(139, 92, 246, 0.08)"
-                                strokeWidth="2"
-                            />
                             {/* Progress ring */}
                             <circle
                                 cx="40"
@@ -266,7 +248,7 @@ export default function NotFound() {
                                 strokeWidth="2"
                                 strokeLinecap="round"
                                 strokeDasharray={`${2 * Math.PI * 36}`}
-                                strokeDashoffset={`${2 * Math.PI * 36 * (1 - countdown / 10)}`}
+                                strokeDashoffset={`${2 * Math.PI * 36 * (countdown / 10)}`}
                                 style={{
                                     transition: "stroke-dashoffset 1s linear",
                                     filter: "drop-shadow(0 0 6px rgba(139, 92, 246, 0.4))",
