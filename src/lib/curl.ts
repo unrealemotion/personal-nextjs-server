@@ -1,5 +1,32 @@
-import { RequestTemplate, requestTemplateSchema } from "./schema";
+import { RequestTemplate } from "./schema";
 import { stripJsonComments } from "./utils";
+
+export function getRawBodyString(bodyObj: any): string {
+    if (!bodyObj) return "";
+    if (typeof bodyObj === "string") return bodyObj;
+    if (bodyObj.mode === "raw") return bodyObj.raw || "";
+    if (bodyObj.mode === "graphql" && bodyObj.graphql) {
+        let variables = {};
+        try {
+            variables = JSON.parse(bodyObj.graphql.variables || "{}");
+        } catch (e) {}
+        return JSON.stringify({ query: bodyObj.graphql.query || "", variables }, null, 2);
+    }
+    if (bodyObj.mode === "urlencoded" && bodyObj.urlencoded) {
+        return bodyObj.urlencoded
+            .filter((p: any) => p.enabled !== false && p.key)
+            .map((p: any) => `${p.key}=${p.value}`)
+            .join("&");
+    }
+    if (bodyObj.mode === "formdata" && bodyObj.formdata) {
+        return bodyObj.formdata
+            .filter((p: any) => p.enabled !== false && p.key)
+            .map((p: any) => `${p.key}: ${p.value}`)
+            .join("\n");
+    }
+    if (bodyObj.mode === "binary") return bodyObj.binary || "";
+    return "";
+}
 
 export function parseCurl(curlCommand: string): Partial<RequestTemplate> | null {
     try {
@@ -8,7 +35,12 @@ export function parseCurl(curlCommand: string): Partial<RequestTemplate> | null 
             url: "",
             headers: [],
             params: [],
-            body: "",
+            body: {
+                mode: "none",
+                raw: "",
+                formdata: [],
+                urlencoded: []
+            },
         };
 
         // Normalize command by stripping trailing slashes used for newlines
@@ -38,7 +70,6 @@ export function parseCurl(curlCommand: string): Partial<RequestTemplate> | null 
         }
 
         // 3. Extract Headers
-        // Look for -H or --header followed by a quoted string or unquoted if no spaces
         const headerRegex = /(?:-H|--header)\s+(['"])(.*?)\1|(?:-H|--header)\s+([^\s'"]+)/g;
         let hMatch;
         while ((hMatch = headerRegex.exec(normalizedCmd)) !== null) {
@@ -54,21 +85,23 @@ export function parseCurl(curlCommand: string): Partial<RequestTemplate> | null 
         }
 
         // 4. Extract Body
-        // Try to find --data, -d, --data-raw, --data-binary
-        // The body might be enclosed in single or double quotes
         const dataFlagRegex = /(?:--data|-d|--data-raw|--data-binary)\s+((['"])([\s\S]*?)\2)/;
         const dataMatch = normalizedCmd.match(dataFlagRegex);
 
         if (dataMatch && dataMatch[3] !== undefined) {
             let bodyStr = dataMatch[3];
-            // Unescape if needed
             bodyStr = bodyStr.replace(/\\'/g, "'").replace(/\\"/g, '"');
 
+            let formattedBody = bodyStr;
             try {
-                template.body = JSON.stringify(JSON.parse(bodyStr), null, 2);
-            } catch {
-                template.body = bodyStr;
-            }
+                formattedBody = JSON.stringify(JSON.parse(bodyStr), null, 2);
+            } catch {}
+
+            template.body = {
+                mode: "raw",
+                raw: formattedBody,
+                rawLanguage: "json"
+            };
             if (template.method === "GET") {
                 template.method = "POST";
             }
@@ -111,9 +144,9 @@ export function generateCurl(template: RequestTemplate): string {
         }
     });
 
-    if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
-        // Escape single quotes in body if we wrap with single quotes
-        const bodyContent = stripJsonComments(template.body);
+    const bodyString = getRawBodyString(template.body);
+    if (bodyString && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
+        const bodyContent = stripJsonComments(bodyString);
         const escapedBody = bodyContent.replace(/'/g, "'\\''");
         command += ` \\\n  --data '${escapedBody}'`;
     }
@@ -147,8 +180,9 @@ export function generateFetch(template: RequestTemplate): string {
         code += `  },\n`;
     }
 
-    if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
-        let bodyContent = stripJsonComments(template.body).trim();
+    const bodyString = getRawBodyString(template.body);
+    if (bodyString && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
+        let bodyContent = stripJsonComments(bodyString).trim();
         const jsBody = bodyContent.replace(/\{\{(.+?)\}\}/g, (_, g) => `\${${g.trim()}}`);
         code += `  body: \`${jsBody.replace(/`/g, '\\`').replace(/\n/g, '\n  ')}\`,\n`;
     }
@@ -183,8 +217,9 @@ export function generateAxios(template: RequestTemplate): string {
         code += `  },\n`;
     }
 
-    if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
-        let bodyContent = stripJsonComments(template.body).trim();
+    const bodyString = getRawBodyString(template.body);
+    if (bodyString && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
+        let bodyContent = stripJsonComments(bodyString).trim();
         const jsBody = bodyContent.replace(/\{\{(.+?)\}\}/g, (_, g) => `\${${g.trim()}}`);
         code += `  data: \`${jsBody.replace(/`/g, '\\`').replace(/\n/g, '\n  ')}\`,\n`;
     }
@@ -212,8 +247,9 @@ export function generatePython(template: RequestTemplate): string {
     let code = `import requests\n\nurl = "${urlStr}"\n`;
 
     let payloadStr = "None";
-    if (template.body && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
-        let bodyContent = stripJsonComments(template.body).trim();
+    const bodyString = getRawBodyString(template.body);
+    if (bodyString && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
+        let bodyContent = stripJsonComments(bodyString).trim();
         code += `\npayload = """${bodyContent}"""\n`;
         payloadStr = "payload";
     }

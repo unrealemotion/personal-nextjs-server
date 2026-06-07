@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useRef, useEffect } from "react";
+import { useStore } from "@tanstack/react-store";
 import { FileUploader } from "@/components/uploader/FileUploader";
 import { RequestDesigner } from "@/components/editor/RequestDesigner";
 import { ExecutionPanel } from "@/components/execution/ExecutionPanel";
 import { ResultsTable } from "@/components/results/ResultsTable";
+import { ApiClientWorkspace } from "@/components/api-client/ApiClientWorkspace";
 import { Layers, Sparkles, Download, Upload, Trash2, AlertTriangle, BookOpen } from "lucide-react";
-import { exportState, importState, resetStore, hydrateStore } from "@/lib/store";
+import { exportState, importState, resetStore, hydrateStore, store, setCurrentView } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import {
@@ -22,6 +24,7 @@ import {
 
 export default function SurgePage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const currentView = useStore(store, (state) => state.currentView || "api_client");
 
     useEffect(() => {
         hydrateStore();
@@ -46,7 +49,7 @@ export default function SurgePage() {
     };
 
     return (
-        <div className="min-h-screen relative bg-background text-foreground font-sans selection:bg-primary/20 overflow-hidden">
+        <div className="min-h-screen flex flex-col relative bg-background text-foreground font-sans selection:bg-primary/20">
             {/* Hidden Input for JSON Import */}
             <input
                 type="file"
@@ -62,31 +65,55 @@ export default function SurgePage() {
                 <div className="absolute bottom-[-10%] right-[-5%] w-[30%] h-[30%] rounded-full bg-primary/5 blur-[100px]" />
             </div>
 
-            <main className="container mx-auto max-w-7xl px-3 sm:px-4 py-4 space-y-4 sm:py-8 sm:space-y-8 relative z-10">
-                {/* Sleek Workspace Toolbar */}
-                <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-neutral-900/40 border border-white/5 backdrop-blur-md">
+            {/* Compact Sticky Header */}
+            <header className="sticky top-16 z-40 w-full bg-neutral-950/80 backdrop-blur-md border-b border-white/5 shadow-sm shrink-0">
+                <div className="w-full px-4 lg:px-8 xl:px-12 py-2 flex items-center justify-between gap-4">
                     <div className="flex items-center space-x-2 text-xs font-bold text-white/60">
                         <Sparkles className="w-4 h-4 text-indigo-400" />
                         <span>Surge API Workspace</span>
                     </div>
+
+                    {/* View Switcher Tabs */}
+                    <div className="flex items-center bg-neutral-900/50 p-0.5 rounded-xl border border-white/5">
+                        <button
+                            onClick={() => setCurrentView("api_client")}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                currentView === "api_client"
+                                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                                    : "text-white/50 hover:text-white"
+                            }`}
+                        >
+                            API Client
+                        </button>
+                        <button
+                            onClick={() => setCurrentView("bulk")}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                currentView === "bulk"
+                                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                                    : "text-white/50 hover:text-white"
+                            }`}
+                        >
+                            Bulk Runner
+                        </button>
+                    </div>
                     
-                    <div className="flex items-center border border-white/10 rounded-lg p-0.5 bg-neutral-950">
+                    <div className="flex items-center border border-white/10 rounded-lg p-0.5 bg-neutral-950/60">
                         <Button
                             variant="ghost"
                             size="sm"
-                            className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2 text-white/80 hover:text-white"
+                            className="h-7 text-[10px] font-bold uppercase tracking-tight gap-1.5 text-white/80 hover:text-white"
                             onClick={exportState}
                         >
-                            <Download className="w-3.5 h-3.5" />
+                            <Download className="w-3 h-3" />
                             <span>Export</span>
                         </Button>
                         <Button
                             variant="ghost"
                             size="sm"
-                            className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2 text-white/80 hover:text-white"
+                            className="h-7 text-[10px] font-bold uppercase tracking-tight gap-1.5 text-white/80 hover:text-white"
                             onClick={handleImportClick}
                         >
-                            <Upload className="w-3.5 h-3.5" />
+                            <Upload className="w-3 h-3" />
                             <span>Import</span>
                         </Button>
 
@@ -95,10 +122,10 @@ export default function SurgePage() {
                                 <Button
                                     variant="ghost"
                                     size="sm"
-                                    className="h-8 text-[11px] font-bold uppercase tracking-tight gap-2 text-red-400 hover:text-red-300 hover:bg-red-950/20"
+                                    className="h-7 text-[10px] font-bold uppercase tracking-tight gap-1.5 text-red-400 hover:text-red-300 hover:bg-red-950/20"
                                 >
                                     <Trash2 className="w-3.5 h-3.5" />
-                                    <span>Clear Workspace</span>
+                                    <span>Clear</span>
                                 </Button>
                             </DialogTrigger>
                             <DialogContent className="sm:max-w-md border-red-900/50 bg-neutral-950 text-white">
@@ -113,7 +140,7 @@ export default function SurgePage() {
                                 </DialogHeader>
                                 <DialogFooter className="mt-4 gap-2 sm:gap-0">
                                     <DialogClose asChild>
-                                        <Button variant="ghost" size="sm" onClick={() => { }} className="text-xs">Cancel</Button>
+                                        <Button variant="ghost" size="sm" className="text-xs">Cancel</Button>
                                     </DialogClose>
                                     <DialogClose asChild>
                                         <Button
@@ -122,7 +149,7 @@ export default function SurgePage() {
                                             onClick={resetStore}
                                             className="text-xs font-bold bg-red-600 hover:bg-red-700 text-white"
                                         >
-                                            Yes, Delete Everything
+                                            Yes, Clear Workspace
                                         </Button>
                                     </DialogClose>
                                 </DialogFooter>
@@ -130,26 +157,35 @@ export default function SurgePage() {
                         </Dialog>
                     </div>
                 </div>
-                {/* Top Row: Data Source & Request Designer */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-8 lg:h-[700px]">
-                    <div className="lg:col-span-4 h-full">
-                        <FileUploader />
+            </header>
+
+            <main className="flex-grow w-full px-4 lg:px-8 xl:px-12 py-6 space-y-6 relative z-10 flex flex-col min-h-0">
+                {currentView === "api_client" ? (
+                    <ApiClientWorkspace />
+                ) : (
+                    <div className="flex-grow flex-1 min-h-0 space-y-6">
+                        {/* Top Row: Data Source & Request Designer */}
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-8 lg:h-[700px] shrink-0 min-h-0">
+                            <div className="lg:col-span-4 h-full min-h-0 flex flex-col">
+                                <FileUploader />
+                            </div>
+
+                            <div className="lg:col-span-8 h-full flex flex-col min-h-0">
+                                <RequestDesigner />
+                            </div>
+                        </div>
+
+                        {/* Middle Row: Execution Engine */}
+                        <div className="w-full shrink-0">
+                            <ExecutionPanel />
+                        </div>
+
+                        {/* Bottom Row: Results */}
+                        <div className="pt-2 pb-6">
+                            <ResultsTable />
+                        </div>
                     </div>
-
-                    <div className="lg:col-span-8 h-[80vh] sm:h-[600px] lg:h-full flex min-h-0">
-                        <RequestDesigner />
-                    </div>
-                </div>
-
-                {/* Middle Row: Execution Engine */}
-                <div className="w-full">
-                    <ExecutionPanel />
-                </div>
-
-                {/* Bottom Row: Results */}
-                <div className="pt-4 mt-8">
-                    <ResultsTable />
-                </div>
+                )}
             </main>
         </div>
     );

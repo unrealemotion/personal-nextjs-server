@@ -1,9 +1,19 @@
 import { Store } from "@tanstack/react-store";
-import { type RequestTemplate, type ExecutionResult, type ColumnMapping, type TableFilterConfig } from "./schema";
+import {
+    type RequestTemplate,
+    type ExecutionResult,
+    type ColumnMapping,
+    type TableFilterConfig,
+    type ApiCollection,
+    type Environment,
+    type RequestTab,
+    type ApiRequest,
+    type ApiFolder
+} from "./schema";
 
 export type VariableType = "string" | "number" | "boolean";
 
-function generateId(): string {
+export function generateId(): string {
     return Math.random().toString(36).substring(2, 10);
 }
 
@@ -15,7 +25,44 @@ function createDefaultTemplate(name?: string): RequestTemplate {
         url: "",
         params: [],
         headers: [],
-        body: "{\n  \n}",
+        body: {
+            mode: "none",
+            raw: "{\n  \n}",
+            formdata: [],
+            urlencoded: [],
+        },
+    };
+}
+
+export function createDefaultApiRequest(name = "Untitled Request"): ApiRequest {
+    return {
+        id: generateId(),
+        name,
+        method: "GET",
+        url: "",
+        params: [],
+        headers: [],
+        body: {
+            mode: "none",
+            raw: "{\n  \n}",
+            formdata: [],
+            urlencoded: [],
+        },
+        preRequestScript: "",
+        testScript: "",
+    };
+}
+
+export function createDefaultTab(name = "Untitled Request", request?: ApiRequest): RequestTab {
+    const req = request || createDefaultApiRequest(name);
+    return {
+        id: generateId(),
+        name: req.name,
+        isDirty: false,
+        request: req,
+        requestId: request ? req.id : undefined,
+        response: null,
+        loading: false,
     };
 }
 
@@ -35,6 +82,14 @@ export type AppState = {
     columnMappings: ColumnMapping[];
     tableFilterConfig: TableFilterConfig;
     fileName: string;
+
+    // API Client state
+    currentView: "bulk" | "api_client";
+    collections: ApiCollection[];
+    environments: Environment[];
+    activeEnvironmentId: string | null;
+    apiTabs: RequestTab[];
+    activeTabId: string | null;
 };
 
 const LOCAL_STORAGE_KEY = "surge_api_workspace";
@@ -42,10 +97,29 @@ const LOCAL_STORAGE_KEY = "surge_api_workspace";
 const initialTemplate = createDefaultTemplate();
 
 const defaultState: AppState = {
-    originalData: [],
-    fileData: [],
-    headers: [],
-    headerTypes: {},
+    originalData: [
+        {
+            paramName: "test_param",
+            paramValue: "world",
+            headerName: "X-Test-Header",
+            headerValue: "hello"
+        }
+    ],
+    fileData: [
+        {
+            paramName: "test_param",
+            paramValue: "world",
+            headerName: "X-Test-Header",
+            headerValue: "hello"
+        }
+    ],
+    headers: ["paramName", "paramValue", "headerName", "headerValue"],
+    headerTypes: {
+        paramName: "string",
+        paramValue: "string",
+        headerName: "string",
+        headerValue: "string"
+    },
     templates: [initialTemplate],
     activeTemplateId: initialTemplate.id,
     results: [],
@@ -65,7 +139,13 @@ const defaultState: AppState = {
         sortBy: null,
         sortOrder: null,
     },
-    fileName: "",
+    fileName: "test.csv",
+    currentView: "bulk",
+    collections: [],
+    environments: [],
+    activeEnvironmentId: null,
+    apiTabs: [],
+    activeTabId: null,
 };
 
 
@@ -88,12 +168,18 @@ export const hydrateStore = () => {
 if (typeof window !== "undefined") {
     store.subscribe(() => {
         const state = store.state;
-        // Don't persist large results for now to keep localStorage small, or persist everything?
-        // Let's persist everything but be mindful of limits.
         try {
-            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+            // Strip response bodies/payloads before persisting to keep storage minimal
+            const sanitizedState = {
+                ...state,
+                apiTabs: state.apiTabs.map(tab => ({
+                    ...tab,
+                    response: null // Response data is transient and shouldn't fill localstorage
+                }))
+            };
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(sanitizedState));
         } catch (e) {
-            console.warn("Storage limit reached, results might not be saved.");
+            console.warn("Storage limit reached, results might not be saved.", e);
         }
     });
 }
@@ -135,7 +221,8 @@ const applyTypes = (data: Array<Record<string, any>>, types: Record<string, Vari
 
 export const resetStore = () => {
     localStorage.removeItem(LOCAL_STORAGE_KEY);
-    store.setState(() => defaultState);
+    const currentView = store.state.currentView;
+    store.setState(() => ({ ...defaultState, currentView }));
 };
 
 export const exportState = () => {
@@ -167,9 +254,11 @@ export const importState = (json: string) => {
         if (!parsed.templates || !Array.isArray(parsed.templates)) {
             throw new Error("Invalid workspace file");
         }
+        const currentView = store.state.currentView;
         store.setState(() => ({
             ...defaultState, // Start with default to ensure all keys are present
-            ...parsed
+            ...parsed,
+            currentView
         }));
     } catch (e) {
         alert("Failed to import: " + (e instanceof Error ? e.message : "Unknown error"));
@@ -324,6 +413,202 @@ export const setThrottleDelayMs = (val: number) => {
 export const setRowIterations = (val: number) => {
     store.setState((state) => ({ ...state, rowIterations: val }));
 };
+
+// --- API Client Actions ---
+
+export const setCurrentView = (view: "bulk" | "api_client") => {
+    store.setState((state) => ({ ...state, currentView: view }));
+};
+
+export const setCollections = (collections: ApiCollection[]) => {
+    store.setState((state) => ({ ...state, collections }));
+};
+
+export const addCollection = (collection: ApiCollection) => {
+    store.setState((state) => ({
+        ...state,
+        collections: [...state.collections, collection],
+    }));
+};
+
+export const deleteCollection = (id: string) => {
+    store.setState((state) => ({
+        ...state,
+        collections: state.collections.filter((c) => c.id !== id),
+    }));
+};
+
+export const updateCollection = (id: string, updates: Partial<ApiCollection>) => {
+    store.setState((state) => ({
+        ...state,
+        collections: state.collections.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+    }));
+};
+
+export const setEnvironments = (environments: Environment[]) => {
+    store.setState((state) => ({ ...state, environments }));
+};
+
+export const addEnvironment = (env: Environment) => {
+    store.setState((state) => ({
+        ...state,
+        environments: [...state.environments, env],
+    }));
+};
+
+export const deleteEnvironment = (id: string) => {
+    store.setState((state) => ({
+        ...state,
+        environments: state.environments.filter((e) => e.id !== id),
+        activeEnvironmentId: state.activeEnvironmentId === id ? null : state.activeEnvironmentId,
+    }));
+};
+
+export const updateEnvironment = (id: string, updates: Partial<Environment>) => {
+    store.setState((state) => ({
+        ...state,
+        environments: state.environments.map((e) => (e.id === id ? { ...e, ...updates } : e)),
+    }));
+};
+
+export const setActiveEnvironmentId = (id: string | null) => {
+    store.setState((state) => ({ ...state, activeEnvironmentId: id }));
+};
+
+export const openRequestInTab = (request: ApiRequest, requestId?: string) => {
+    store.setState((state) => {
+        if (requestId) {
+            const existingTab = state.apiTabs.find((t) => t.requestId === requestId);
+            if (existingTab) {
+                return { ...state, activeTabId: existingTab.id };
+            }
+        }
+        const newTab = createDefaultTab(request.name, request);
+        newTab.requestId = requestId;
+        return {
+            ...state,
+            apiTabs: [...state.apiTabs, newTab],
+            activeTabId: newTab.id,
+        };
+    });
+};
+
+export const addApiTab = () => {
+    store.setState((state) => {
+        const newTab = createDefaultTab();
+        return {
+            ...state,
+            apiTabs: [...state.apiTabs, newTab],
+            activeTabId: newTab.id,
+        };
+    });
+};
+
+export const closeApiTab = (id: string) => {
+    store.setState((state) => {
+        const newTabs = state.apiTabs.filter((t) => t.id !== id);
+        let newActiveId = state.activeTabId;
+        if (state.activeTabId === id) {
+            newActiveId = newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
+        }
+        return {
+            ...state,
+            apiTabs: newTabs,
+            activeTabId: newActiveId,
+        };
+    });
+};
+
+export const setActiveTabId = (id: string | null) => {
+    store.setState((state) => ({ ...state, activeTabId: id }));
+};
+
+export const updateActiveTabRequest = (updates: Partial<ApiRequest>) => {
+    store.setState((state) => {
+        if (!state.activeTabId) return state;
+        const newTabs = state.apiTabs.map((t) => {
+            if (t.id === state.activeTabId) {
+                const req = { ...t.request, ...updates };
+                return {
+                    ...t,
+                    name: updates.name !== undefined ? updates.name : t.name,
+                    request: req,
+                    isDirty: true,
+                };
+            }
+            return t;
+        });
+        return { ...state, apiTabs: newTabs };
+    });
+};
+
+export const markActiveTabClean = () => {
+    store.setState((state) => {
+        if (!state.activeTabId) return state;
+        const newTabs = state.apiTabs.map((t) => {
+            if (t.id === state.activeTabId) {
+                return { ...t, isDirty: false };
+            }
+            return t;
+        });
+        return { ...state, apiTabs: newTabs };
+    });
+};
+
+export const updateTabResponse = (tabId: string, response: RequestTab["response"]) => {
+    store.setState((state) => {
+        const newTabs = state.apiTabs.map((t) => {
+            if (t.id === tabId) {
+                return { ...t, response, loading: false };
+            }
+            return t;
+        });
+        return { ...state, apiTabs: newTabs };
+    });
+};
+
+export const updateTabLoading = (tabId: string, loading: boolean) => {
+    store.setState((state) => {
+        const newTabs = state.apiTabs.map((t) => {
+            if (t.id === tabId) {
+                return { ...t, loading };
+            }
+            return t;
+        });
+        return { ...state, apiTabs: newTabs };
+    });
+};
+
+function updateRequestInTree(items: (ApiFolder | ApiRequest)[], id: string, updates: Partial<ApiRequest>): boolean {
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if ('method' in item) {
+            if (item.id === id) {
+                items[i] = { ...item, ...updates } as ApiRequest;
+                return true;
+            }
+        } else {
+            const updated = updateRequestInTree(item.items, id, updates);
+            if (updated) return true;
+        }
+    }
+    return false;
+}
+
+export const saveCollectionRequest = (requestId: string, updates: Partial<ApiRequest>) => {
+    store.setState((state) => {
+        const newCollections = state.collections.map((col) => {
+            const itemsCopy = JSON.parse(JSON.stringify(col.items));
+            const updated = updateRequestInTree(itemsCopy, requestId, updates);
+            if (updated) {
+                return { ...col, items: itemsCopy };
+            }
+            return col;
+        });
+        return { ...state, collections: newCollections };
+    });
+};
+
 
 
 

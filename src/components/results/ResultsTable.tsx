@@ -775,7 +775,7 @@ export function ResultsTable() {
                 </div>
 
                 {/* Data Table */}
-                <div className="rounded-md border">
+                <div className="rounded-md border overflow-x-auto w-full">
                     <Table>
                         <TableHeader>
                             {table.getHeaderGroups().map((headerGroup) => (
@@ -981,7 +981,12 @@ export function ResultsTable() {
                                                                 ? formatBody(step.requestBody)
                                                                 : "No Request Body Content"
                                                         }
-                                                        options={{ readOnly: true, minimap: { enabled: false } }}
+                                                        options={{
+                                                            automaticLayout: true,
+                                                            readOnly: true,
+                                                            minimap: { enabled: false },
+                                                            wordWrap: "on",
+                                                        }}
                                                     />
                                                 </TabsContent>
                                             </Tabs>
@@ -1056,7 +1061,12 @@ export function ResultsTable() {
                                                                 ? formatBody(step.responseBody)
                                                                 : step.error || "No Response Body Content"
                                                         }
-                                                        options={{ readOnly: true, minimap: { enabled: false } }}
+                                                        options={{
+                                                            automaticLayout: true,
+                                                            readOnly: true,
+                                                            minimap: { enabled: false },
+                                                            wordWrap: "on",
+                                                        }}
                                                     />
                                                 </TabsContent>
                                             </Tabs>
@@ -1142,7 +1152,12 @@ export function ResultsTable() {
                                                                 ? formatBody(result.requestBody)
                                                                 : "No Request Body Content"
                                                         }
-                                                        options={{ readOnly: true, minimap: { enabled: false } }}
+                                                        options={{
+                                                            automaticLayout: true,
+                                                            readOnly: true,
+                                                            minimap: { enabled: false },
+                                                            wordWrap: "on",
+                                                        }}
                                                     />
                                                 </TabsContent>
                                             </Tabs>
@@ -1217,7 +1232,12 @@ export function ResultsTable() {
                                                                 ? formatBody(result.responseBody)
                                                                 : "No Response Body Content"
                                                         }
-                                                        options={{ readOnly: true, minimap: { enabled: false } }}
+                                                        options={{
+                                                            automaticLayout: true,
+                                                            readOnly: true,
+                                                            minimap: { enabled: false },
+                                                            wordWrap: "on",
+                                                        }}
                                                     />
                                                 </TabsContent>
                                             </Tabs>

@@ -540,7 +540,7 @@ export function JSONToTable() {
         if (typeof val === "object") {
           return <span className="font-mono text-white/50 text-[11px] truncate max-w-[150px]" title={JSON.stringify(val)}>{JSON.stringify(val)}</span>;
         }
-        return <span className="text-xs text-white/80">{String(val)}</span>;
+        return <div className="max-w-[250px] truncate text-xs text-white/80" title={String(val)}>{String(val)}</div>;
       }
     }));
   }, [tableColumns]);

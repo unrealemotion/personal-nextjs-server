@@ -726,6 +726,7 @@ export function JSONCompare() {
                     diffEditorRef.current = editor;
                   }}
                   options={{
+                    automaticLayout: true,
                     originalEditable: false,
                     readOnly: true,
                     minimap: { enabled: false },

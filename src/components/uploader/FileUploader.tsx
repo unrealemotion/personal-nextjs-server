@@ -167,10 +167,12 @@ export function FileUploader() {
                                                             const isNum = typeof val === 'number';
                                                             const isBool = typeof val === 'boolean';
                                                             return (
-                                                                <TableCell key={header} className="border-r font-medium text-xs truncate max-w-[300px]" title={String(val)}>
-                                                                    <span className={isNum ? "text-blue-400" : isBool ? "text-purple-400" : "text-white/80"}>
-                                                                        {String(val)}
-                                                                    </span>
+                                                                <TableCell key={header} className="border-r p-2.5">
+                                                                    <div className="max-w-[300px] truncate text-xs font-medium" title={String(val)}>
+                                                                        <span className={isNum ? "text-blue-400" : isBool ? "text-purple-400" : "text-white/80"}>
+                                                                            {String(val)}
+                                                                        </span>
+                                                                    </div>
                                                                 </TableCell>
                                                             );
                                                         })}

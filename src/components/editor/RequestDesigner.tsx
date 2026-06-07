@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useRef, useEffect } from "react";
 import Editor, { useMonaco } from "@monaco-editor/react";
 import { useStore } from "@tanstack/react-store";
 import { store, updateTemplate, addTemplate, removeTemplate, setActiveTemplate, reorderTemplates } from "@/lib/store";
-import { stripJsonComments } from "@/lib/utils";
+import { stripJsonComments, processTemplateForFormatting } from "@/lib/utils";
 import { RequestTemplate } from "@/lib/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { VariableInput } from "@/components/ui/VariableInput";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -36,49 +37,23 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-const processTemplateForFormatting = (str: string, isMinify: boolean) => {
-    str = stripJsonComments(str);
-    let inString = false;
-    let escaped = false;
-    let result = '';
-    let i = 0;
-    while (i < str.length) {
-        const char = str[i];
-        if (char === '"' && !escaped) {
-            inString = !inString;
-            result += char;
-            i++;
-            continue;
-        }
-        if (char === '\\' && !escaped) {
-            escaped = true;
-            result += char;
-            i++;
-            continue;
-        }
-        escaped = false;
-
-        if (!inString && char === '{' && str[i + 1] === '{') {
-            const end = str.indexOf('}}', i);
-            if (end !== -1) {
-                const varName = str.substring(i + 2, end);
-                result += `"__UNQUOTED_VAR_${varName}__"`;
-                i = end + 2;
-                continue;
-            }
-        }
-        result += char;
-        i++;
+const normalizeKey = (key: string): string => {
+    let k = key.trim();
+    if (k.startsWith("{{") && k.endsWith("}}")) {
+        k = k.slice(2, -2).trim();
     }
-    
-    try {
-        const parsed = JSON.parse(result);
-        let formatted = JSON.stringify(parsed, null, isMinify ? 0 : 2);
-        return formatted.replace(/"__UNQUOTED_VAR_(.+?)__"/g, '{{$1}}');
-    } catch(e: any) {
-        throw new Error(e?.message || "Invalid JSON format");
-    }
+    return k;
 };
+
+const RAW_LANGUAGES = [
+    { label: "Text", value: "text" },
+    { label: "JavaScript", value: "javascript" },
+    { label: "JSON", value: "json" },
+    { label: "HTML", value: "html" },
+    { label: "XML", value: "xml" }
+];
+
+
 
 function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove }: {
     tmpl: RequestTemplate;
@@ -120,9 +95,9 @@ function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove }: {
             >
                 <GripVertical className="w-3.5 h-3.5" />
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 overflow-hidden">
                 <p className="text-xs font-semibold truncate">{tmpl.name}</p>
-                <p className="text-[10px] text-muted-foreground font-mono">{tmpl.method} {tmpl.url ? tmpl.url.substring(0, 30) + (tmpl.url.length > 30 ? "..." : "") : "No URL"}</p>
+                <p className="text-[10px] text-muted-foreground font-mono truncate">{tmpl.method} {tmpl.url || "No URL"}</p>
             </div>
             {canRemove && (
                 <Button
@@ -194,16 +169,40 @@ function SortableMobileStep({ tmpl, isActive, onSelect, onRemove, canRemove }: {
 export function RequestDesigner() {
     const templates = useStore(store, (state) => state.templates);
     const activeTemplateId = useStore(store, (state) => state.activeTemplateId);
+    const headers = useStore(store, (state) => state.headers);
     const template = templates.find(t => t.id === activeTemplateId) || templates[0];
 
     const monaco = useMonaco();
     const editorRef = useRef<any>(null);
+    const monacoRef = useRef<any>(null);
+    const decorationsRef = useRef<any[]>([]);
+    const hoverProviderRef = useRef<any>(null);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
         useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
         useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
     );
+
+    const getBodyMode = (body: any): string => {
+        if (!body) return "none";
+        if (typeof body === "string") return "raw";
+        return body.mode || "none";
+    };
+
+    const handleBodyModeChange = (mode: string) => {
+        const currentBody = typeof template.body === "string" ? { mode: "raw", raw: template.body } : (template.body || { mode: "none" });
+        updateTemplate({
+            body: { ...currentBody, mode }
+        });
+    };
+
+    const handleBodyRawChange = (raw: string) => {
+        const currentBody = typeof template.body === "string" ? { mode: "raw", raw } : (template.body || { mode: "raw" });
+        updateTemplate({
+            body: { ...currentBody, raw, mode: "raw" }
+        });
+    };
 
     const handleDragEnd = (event: DragEndEvent) => {
         const { active, over } = event;
@@ -268,42 +267,61 @@ export function RequestDesigner() {
         updateTemplate({ params: newParams });
     };
 
+    const updateDecorations = () => {
+        const editor = editorRef.current;
+        const monaco = monacoRef.current;
+        if (!editor || !monaco) return;
+
+        const model = editor.getModel();
+        if (!model) return;
+        const text = model.getValue();
+        const regex = /\{\{([^}]+)\}\}/g;
+        let match;
+        const newDecorations = [];
+        
+        const availableHeaders = (headers || []).map(h => normalizeKey(h));
+
+        while ((match = regex.exec(text)) !== null) {
+            const varName = normalizeKey(match[1]);
+            const isAvailable = availableHeaders.includes(varName);
+
+            const startPos = model.getPositionAt(match.index);
+            const endPos = model.getPositionAt(match.index + match[0].length);
+            newDecorations.push({
+                range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
+                options: { 
+                    inlineClassName: isAvailable ? 'monaco-template-variable' : 'monaco-template-variable-invalid'
+                }
+            });
+        }
+        decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
+    };
+
+    const latestUpdateDecorationsRef = useRef(updateDecorations);
+    latestUpdateDecorationsRef.current = updateDecorations;
+
+    const debouncedUpdateDecorations = React.useMemo(() => {
+        let timeout: ReturnType<typeof setTimeout> | null = null;
+        return () => {
+            if (timeout) clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                latestUpdateDecorationsRef.current();
+            }, 400);
+        };
+    }, []);
+
     const handleEditorDidMount = (editor: any, monaco: any) => {
         editorRef.current = editor;
+        monacoRef.current = monaco;
 
         monaco.languages.json?.jsonDefaults?.setDiagnosticsOptions({
             validate: false,
         });
 
-        let decorations: any[] = [];
-        
-        const updateDecorations = () => {
-            const model = editor.getModel();
-            if (!model) return;
-            const text = model.getValue();
-            const regex = /\{\{([^}]+)\}\}/g;
-            let match;
-            const newDecorations = [];
-            
-            const availableHeaders = store.state.headers;
+        editor.onDidChangeModelContent(() => {
+            debouncedUpdateDecorations();
+        });
 
-            while ((match = regex.exec(text)) !== null) {
-                const varName = match[1];
-                const isAvailable = availableHeaders.includes(varName);
-
-                const startPos = model.getPositionAt(match.index);
-                const endPos = model.getPositionAt(match.index + match[0].length);
-                newDecorations.push({
-                    range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
-                    options: { 
-                        inlineClassName: isAvailable ? 'monaco-template-variable' : 'monaco-template-variable-invalid'
-                    }
-                });
-            }
-            decorations = editor.deltaDecorations(decorations, newDecorations);
-        };
-
-        editor.onDidChangeModelContent(updateDecorations);
         updateDecorations();
 
         editor.addAction({
@@ -314,7 +332,7 @@ export function RequestDesigner() {
             contextMenuOrder: 1.5,
             run: function (ed: any) {
                 try {
-                    const formatted = processTemplateForFormatting(ed.getValue(), false);
+                    const formatted = processTemplateForFormatting(ed.getValue());
                     ed.setValue(formatted);
                 } catch (err: any) {
                     toast.error(`Format failed: ${err?.message || "Invalid JSON format"}`);
@@ -322,6 +340,54 @@ export function RequestDesigner() {
             },
         });
     };
+
+    useEffect(() => {
+        updateDecorations();
+    }, [headers, activeTemplateId]);
+
+    useEffect(() => {
+        const monaco = monacoRef.current;
+        if (!monaco) return;
+
+        if (hoverProviderRef.current) {
+            hoverProviderRef.current.dispose();
+        }
+
+        hoverProviderRef.current = monaco.languages.registerHoverProvider('json', {
+            provideHover: function (model: any, position: any) {
+                const lineContent = model.getLineContent(position.lineNumber);
+                const regex = /\{\{([^}]+)\}\}/g;
+                let match;
+                while ((match = regex.exec(lineContent)) !== null) {
+                    const startIdx = match.index;
+                    const endIdx = startIdx + match[0].length;
+                    if (position.column >= startIdx + 1 && position.column <= endIdx + 1) {
+                        const rawVar = match[1];
+                        const varName = normalizeKey(rawVar);
+                        const availableHeaders = (store.state.headers || []).map(h => normalizeKey(h));
+                        const isAvailable = availableHeaders.includes(varName);
+                        
+                        return {
+                            range: new monaco.Range(position.lineNumber, startIdx + 1, position.lineNumber, endIdx + 1),
+                            contents: [
+                                { value: `**Excel Variable: \`{{${rawVar.trim()}}}\`**` },
+                                { value: isAvailable ? `✓ Available as an Excel column header.` : `⚠ Missing from Excel headers. Ensure your sheet has a column named \`${varName}\`.` }
+                            ]
+                        };
+                    }
+                }
+                return null;
+            }
+        });
+    }, [activeTemplateId]);
+
+    useEffect(() => {
+        return () => {
+            if (hoverProviderRef.current) {
+                hoverProviderRef.current.dispose();
+            }
+        };
+    }, []);
 
     const handleCopy = (format: 'curl' | 'fetch' | 'axios' | 'python') => {
         let text = "";
@@ -339,7 +405,7 @@ export function RequestDesigner() {
     };
 
     return (
-        <Card className="w-full flex flex-col h-full border-muted-foreground/20 shadow-lg shadow-black/5 rounded-xl bg-card/60 backdrop-blur-sm relative overflow-hidden">
+        <Card className="w-full flex flex-col h-full min-h-0 border-muted-foreground/20 shadow-lg shadow-black/5 rounded-xl bg-card/60 backdrop-blur-sm relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl -z-10" />
             <CardHeader className="pb-4 border-b border-border/40">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0">
@@ -467,7 +533,8 @@ export function RequestDesigner() {
                                 ))}
                             </SelectContent>
                         </Select>
-                        <Input
+                        <VariableInput
+                            isBulk={true}
                             placeholder="https://api.example.com/users/{{id}}"
                             value={template.url}
                             onChange={handleUrlChange}
@@ -477,110 +544,364 @@ export function RequestDesigner() {
                     </div>
 
                     <Tabs defaultValue="params" className="flex-1 flex flex-col min-h-0 min-w-0">
-                        <TabsList className="bg-muted/50 w-full justify-start rounded-none border-b pb-0 px-2 h-auto flex flex-wrap shrink-0">
+                        <TabsList className="bg-muted/50 w-full justify-start rounded-none border-b pb-0 px-2 h-9 flex flex-nowrap overflow-x-hidden overflow-y-hidden shrink-0">
                             <TabsTrigger
                                 value="params"
-                                className="data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-2"
+                                className="data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-3 py-2 shrink-0"
                             >
                                 Params ({(template.params || []).length})
                             </TabsTrigger>
                             <TabsTrigger
                                 value="headers"
-                                className="data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-2"
+                                className="data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-3 py-2 shrink-0"
                             >
                                 Headers ({template.headers.length})
                             </TabsTrigger>
                             <TabsTrigger
                                 value="body"
-                                className="data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-2"
+                                className="data-[state=active]:bg-background data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-3 py-2 shrink-0"
                             >
-                                Body (JSON)
+                                Body
                             </TabsTrigger>
                         </TabsList>
 
-                        <TabsContent value="body" className="flex-1 mt-0 min-h-0 min-w-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-hidden relative shadow-inner bg-[#1e1e1e] focus-within:ring-1 ring-ring">
-                            <div className="absolute inset-0 flex flex-col">
-                                <style>{`
-                                    .monaco-template-variable {
-                                        color: #10b981 !important;
-                                        font-weight: 700 !important;
-                                        background-color: rgba(16, 185, 129, 0.15);
-                                        border-radius: 3px;
-                                    }
-                                    .monaco-template-variable-invalid {
-                                        color: #ef4444 !important;
-                                        font-weight: 700 !important;
-                                        background-color: rgba(239, 68, 68, 0.15);
-                                        border-radius: 3px;
-                                    }
-                                `}</style>
-                                <div className="flex items-center justify-end gap-1 px-2 py-1 bg-[#252526] border-b border-muted-foreground/10 shrink-0">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                                        onClick={() => {
-                                            try {
-                                                const formatted = processTemplateForFormatting(template.body || "", false);
-                                                updateTemplate({ body: formatted });
-                                            } catch (err: any) {
-                                                toast.error(`Format failed: ${err?.message || "Invalid JSON format"}`);
-                                            }
-                                        }}
-                                    >
-                                        <Braces className="w-3 h-3 mr-1" />
-                                        Beautify
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                                        onClick={() => {
-                                            try {
-                                                const formatted = processTemplateForFormatting(template.body || "", true);
-                                                updateTemplate({ body: formatted });
-                                            } catch (err: any) {
-                                                toast.error(`Format failed: ${err?.message || "Invalid JSON format"}`);
-                                            }
-                                        }}
-                                    >
-                                        <Minimize2 className="w-3 h-3 mr-1" />
-                                        Minify
-                                    </Button>
-                                </div>
-                                <div className="flex-1 min-h-0">
-                                    <Editor
-                                        key={template.id}
-                                        height="100%"
-                                        defaultLanguage="json"
-                                        value={template.body}
-                                        onChange={(val) => updateTemplate({ body: val || "" })}
-                                        theme="vs-dark"
-                                        onMount={handleEditorDidMount}
-                                        options={{
-                                            minimap: { enabled: false },
-                                            fontSize: 14,
-                                            formatOnPaste: false,
-                                            formatOnType: false,
-                                            scrollBeyondLastLine: false,
-                                            tabSize: 2,
-                                        }}
-                                    />
-                                </div>
+                        <TabsContent value="body" className="flex-1 mt-0 min-h-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-hidden bg-muted/10 relative flex flex-col p-4 space-y-4">
+                            {/* Body mode radio selectors */}
+                            <div className="flex flex-wrap gap-4 text-xs font-semibold text-muted-foreground border-b border-border/40 pb-2 shrink-0">
+                                {[
+                                    { label: "none", value: "none" },
+                                    { label: "form-data", value: "formdata" },
+                                    { label: "x-www-form-urlencoded", value: "urlencoded" },
+                                    { label: "raw", value: "raw" },
+                                    { label: "binary", value: "binary" },
+                                    { label: "GraphQL", value: "graphql" }
+                                ].map((m) => {
+                                    const mode = getBodyMode(template.body);
+                                    return (
+                                        <label key={m.value} className="flex items-center gap-1.5 cursor-pointer hover:text-foreground">
+                                            <input
+                                                type="radio"
+                                                name="bulkBodyMode"
+                                                checked={mode === m.value}
+                                                onChange={() => handleBodyModeChange(m.value)}
+                                                className="text-primary bg-background border-border cursor-pointer animate-none"
+                                            />
+                                            <span>{m.label}</span>
+                                        </label>
+                                    );
+                                })}
                             </div>
+
+                            {/* mode panels */}
+                            {getBodyMode(template.body) === "raw" && (() => {
+                                const bodyObj = typeof template.body === "string" ? { mode: "raw", raw: template.body, rawLanguage: "json" } : (template.body || { mode: "raw", raw: "", rawLanguage: "json" });
+                                const rawLanguage = bodyObj.rawLanguage || "json";
+                                const rawText = bodyObj.raw || "";
+                                return (
+                                    <div className="flex flex-col flex-1 min-h-0 space-y-2 relative">
+                                        <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground bg-muted/50 p-2 rounded-lg border border-border/40 shrink-0">
+                                            <div className="flex items-center gap-2">
+                                                <span>Type:</span>
+                                                <select
+                                                    value={rawLanguage}
+                                                    onChange={(e) => {
+                                                        updateTemplate({
+                                                            body: { ...bodyObj, rawLanguage: e.target.value, mode: "raw" }
+                                                        });
+                                                    }}
+                                                    className="bg-background border border-border rounded px-2 py-0.5 text-xs text-foreground focus:outline-none cursor-pointer font-sans"
+                                                >
+                                                    {RAW_LANGUAGES.map(lang => (
+                                                        <option key={lang.value} value={lang.value}>{lang.label}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            {rawLanguage === "json" && (
+                                                <div className="flex items-center gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-6 text-[10px] text-primary hover:text-primary/80"
+                                                        onClick={() => {
+                                                            try {
+                                                                const beautified = processTemplateForFormatting(rawText);
+                                                                handleBodyRawChange(beautified);
+                                                            } catch (e) {
+                                                                toast.error("Invalid JSON format");
+                                                            }
+                                                        }}
+                                                    >
+                                                        Beautify
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex-1 min-h-0 w-full border border-border/40 rounded-xl overflow-hidden bg-[#1e1e1e]">
+                                            <Editor
+                                                key={`${template.id}-raw`}
+                                                height="100%"
+                                                language={rawLanguage === "text" ? "plaintext" : rawLanguage}
+                                                value={rawText}
+                                                onChange={(val) => handleBodyRawChange(val || "")}
+                                                theme="vs-dark"
+                                                onMount={handleEditorDidMount}
+                                                options={{
+                                                    automaticLayout: true,
+                                                    minimap: { enabled: false },
+                                                    fontSize: 13,
+                                                    scrollBeyondLastLine: false,
+                                                    lineNumbers: "on",
+                                                    tabSize: 2,
+                                                    wordWrap: "on",
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            {getBodyMode(template.body) === "graphql" && (() => {
+                                const bodyObj = typeof template.body === "string" ? { mode: "graphql", graphql: { query: "", variables: "" } } : (template.body || { mode: "graphql" });
+                                const graphql = bodyObj.graphql || { query: "", variables: "" };
+                                return (
+                                    <div className="flex flex-col flex-1 min-h-0 space-y-2">
+                                        <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-2">
+                                            <div className="md:col-span-8 flex flex-col min-h-0">
+                                                <span className="text-[10px] font-bold uppercase text-muted-foreground mb-1">Query</span>
+                                                <div className="flex-1 min-h-0 w-full border border-border/40 rounded-xl overflow-hidden bg-[#1e1e1e]">
+                                                    <Editor
+                                                        key={`${template.id}-gql`}
+                                                        height="100%"
+                                                        language="graphql"
+                                                        value={graphql.query || ""}
+                                                        onChange={(val) => {
+                                                            updateTemplate({
+                                                                body: {
+                                                                    ...bodyObj,
+                                                                    mode: "graphql",
+                                                                    graphql: {
+                                                                        query: val || "",
+                                                                        variables: graphql.variables || ""
+                                                                    }
+                                                                }
+                                                            });
+                                                        }}
+                                                        theme="vs-dark"
+                                                        options={{
+                                                            automaticLayout: true,
+                                                            minimap: { enabled: false },
+                                                            fontSize: 12,
+                                                            scrollBeyondLastLine: false,
+                                                            lineNumbers: "on",
+                                                            wordWrap: "on",
+                                                        }}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="md:col-span-4 flex flex-col min-h-0">
+                                                <span className="text-[10px] font-bold uppercase text-muted-foreground mb-1">Variables (JSON)</span>
+                                                <textarea
+                                                    value={graphql.variables || ""}
+                                                    onChange={(e) => {
+                                                        updateTemplate({
+                                                            body: {
+                                                                ...bodyObj,
+                                                                mode: "graphql",
+                                                                graphql: {
+                                                                    query: graphql.query || "",
+                                                                    variables: e.target.value
+                                                                }
+                                                            }
+                                                        });
+                                                    }}
+                                                    placeholder={'{\n  "variable": "value"\n}'}
+                                                    className="w-full flex-1 min-h-0 p-2.5 font-mono text-xs bg-[#121213] border border-border/40 rounded-xl text-white focus:outline-none resize-none"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            {getBodyMode(template.body) === "binary" && (() => {
+                                const bodyObj = typeof template.body === "string" ? { mode: "binary", binary: "" } : (template.body || { mode: "binary" });
+                                return (
+                                    <div className="py-2 space-y-2 flex flex-col flex-1 min-h-0">
+                                        <span className="text-[10px] font-bold uppercase text-muted-foreground">Select File or Enter Raw Text Payload</span>
+                                        <textarea
+                                            value={bodyObj.binary || ""}
+                                            onChange={(e) => {
+                                                updateTemplate({
+                                                    body: {
+                                                        ...bodyObj,
+                                                        mode: "binary",
+                                                        binary: e.target.value
+                                                    }
+                                                });
+                                            }}
+                                            placeholder="Enter binary content or file payload reference..."
+                                            className="w-full flex-1 min-h-0 p-3 font-mono text-xs bg-[#121213] border border-border/40 rounded-xl text-white focus:outline-none resize-none"
+                                        />
+                                    </div>
+                                );
+                            })()}
+
+                            {getBodyMode(template.body) === "urlencoded" && (() => {
+                                const bodyObj = typeof template.body === "string" ? { mode: "urlencoded", urlencoded: [] } : (template.body || { mode: "urlencoded" });
+                                const urlencoded = bodyObj.urlencoded || [];
+                                return (
+                                    <div className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
+                                        {urlencoded.map((p: any, idx: number) => (
+                                            <div key={idx} className="flex gap-2 items-center">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={p.enabled}
+                                                    onChange={(e) => {
+                                                        const newUrlencoded = [...urlencoded];
+                                                        newUrlencoded[idx] = { ...newUrlencoded[idx], enabled: e.target.checked };
+                                                        updateTemplate({ body: { ...bodyObj, urlencoded: newUrlencoded } });
+                                                    }}
+                                                    className="rounded border-border bg-background text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer shrink-0"
+                                                />
+                                                <VariableInput
+                                                    isBulk={true}
+                                                    placeholder="Key"
+                                                    value={p.key}
+                                                    onChange={(e) => {
+                                                        const newUrlencoded = [...urlencoded];
+                                                        newUrlencoded[idx] = { ...newUrlencoded[idx], key: e.target.value };
+                                                        updateTemplate({ body: { ...bodyObj, urlencoded: newUrlencoded } });
+                                                    }}
+                                                    className="h-8 font-mono text-[11px] bg-background/50 border-border"
+                                                />
+                                                <VariableInput
+                                                    isBulk={true}
+                                                    placeholder="Value"
+                                                    value={p.value}
+                                                    onChange={(e) => {
+                                                        const newUrlencoded = [...urlencoded];
+                                                        newUrlencoded[idx] = { ...newUrlencoded[idx], value: e.target.value };
+                                                        updateTemplate({ body: { ...bodyObj, urlencoded: newUrlencoded } });
+                                                    }}
+                                                    className="h-8 font-mono text-[11px] bg-background/50 border-border"
+                                                />
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() => {
+                                                        const newUrlencoded = urlencoded.filter((_: any, i: number) => i !== idx);
+                                                        updateTemplate({ body: { ...bodyObj, urlencoded: newUrlencoded } });
+                                                    }}
+                                                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                const newUrlencoded = [...urlencoded, { key: "", value: "", enabled: true }];
+                                                updateTemplate({ body: { ...bodyObj, urlencoded: newUrlencoded, mode: "urlencoded" } });
+                                            }}
+                                            className="h-7 text-[10px] border-dashed border-border bg-background hover:bg-muted w-full"
+                                        >
+                                            <Plus className="w-3.5 h-3.5 mr-1" />
+                                            Add urlencoded key/value
+                                        </Button>
+                                    </div>
+                                );
+                            })()}
+
+                            {getBodyMode(template.body) === "formdata" && (() => {
+                                const bodyObj = typeof template.body === "string" ? { mode: "formdata", formdata: [] } : (template.body || { mode: "formdata" });
+                                const formdata = bodyObj.formdata || [];
+                                return (
+                                    <div className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
+                                        {formdata.map((p: any, idx: number) => (
+                                            <div key={idx} className="flex gap-2 items-center">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={p.enabled}
+                                                    onChange={(e) => {
+                                                        const newFormdata = [...formdata];
+                                                        newFormdata[idx] = { ...newFormdata[idx], enabled: e.target.checked };
+                                                        updateTemplate({ body: { ...bodyObj, formdata: newFormdata } });
+                                                    }}
+                                                    className="rounded border-border bg-background text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer shrink-0"
+                                                />
+                                                <VariableInput
+                                                    isBulk={true}
+                                                    placeholder="Key"
+                                                    value={p.key}
+                                                    onChange={(e) => {
+                                                        const newFormdata = [...formdata];
+                                                        newFormdata[idx] = { ...newFormdata[idx], key: e.target.value };
+                                                        updateTemplate({ body: { ...bodyObj, formdata: newFormdata } });
+                                                    }}
+                                                    className="h-8 font-mono text-[11px] bg-background/50 border-border"
+                                                />
+                                                <VariableInput
+                                                    isBulk={true}
+                                                    placeholder="Value"
+                                                    value={p.value}
+                                                    onChange={(e) => {
+                                                        const newFormdata = [...formdata];
+                                                        newFormdata[idx] = { ...newFormdata[idx], value: e.target.value };
+                                                        updateTemplate({ body: { ...bodyObj, formdata: newFormdata } });
+                                                    }}
+                                                    className="h-8 font-mono text-[11px] bg-background/50 border-border"
+                                                />
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() => {
+                                                        const newFormdata = formdata.filter((_: any, i: number) => i !== idx);
+                                                        updateTemplate({ body: { ...bodyObj, formdata: newFormdata } });
+                                                    }}
+                                                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                const newFormdata = [...formdata, { key: "", value: "", enabled: true, type: "text" }];
+                                                updateTemplate({ body: { ...bodyObj, formdata: newFormdata, mode: "formdata" } });
+                                            }}
+                                            className="h-7 text-[10px] border-dashed border-border bg-background hover:bg-muted w-full"
+                                        >
+                                            <Plus className="w-3.5 h-3.5 mr-1" />
+                                            Add formdata key/value
+                                        </Button>
+                                    </div>
+                                );
+                            })()}
+
+                            {getBodyMode(template.body) === "none" && (
+                                <div className="py-8 text-center text-muted-foreground text-xs italic">
+                                    This request does not have a body payload.
+                                </div>
+                            )}
                         </TabsContent>
 
                         <TabsContent value="params" className="flex-1 mt-0 min-h-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-y-auto bg-muted/10 relative">
                             <div className="p-4 space-y-3 pb-16 min-h-full flex flex-col">
                                 {(template.params || []).map((param, idx) => (
                                     <div key={idx} className="flex space-x-2 items-center group">
-                                        <Input
+                                        <VariableInput
+                                            isBulk={true}
                                             placeholder="Key (e.g., page)"
                                             value={param.key}
                                             onChange={(e) => updateParam(idx, e.target.value, param.value)}
                                             className="font-mono text-sm bg-background/50 border-muted-foreground/20 focus-visible:ring-primary/50"
                                         />
-                                        <Input
+                                        <VariableInput
+                                            isBulk={true}
                                             placeholder="Value (e.g., {{page}})"
                                             value={param.value}
                                             onChange={(e) => updateParam(idx, param.key, e.target.value)}
@@ -604,13 +925,15 @@ export function RequestDesigner() {
                             <div className="p-4 space-y-3 pb-16 min-h-full flex flex-col">
                                 {template.headers.map((header, idx) => (
                                     <div key={idx} className="flex space-x-2 items-center group">
-                                        <Input
+                                        <VariableInput
+                                            isBulk={true}
                                             placeholder="Key (e.g., Authorization)"
                                             value={header.key}
                                             onChange={(e) => updateHeader(idx, e.target.value, header.value)}
                                             className="font-mono text-sm bg-background/50 border-muted-foreground/20 focus-visible:ring-primary/50"
                                         />
-                                        <Input
+                                        <VariableInput
+                                            isBulk={true}
                                             placeholder="Value (e.g., Bearer {{token}})"
                                             value={header.value}
                                             onChange={(e) => updateHeader(idx, header.key, e.target.value)}

@@ -30,11 +30,24 @@ function pLimit(concurrency: number) {
     };
 }
 
+function normalizeKey(key: string): string {
+    let k = key.trim();
+    if (k.startsWith("{{") && k.endsWith("}}")) {
+        k = k.slice(2, -2).trim();
+    }
+    return k;
+}
+
 function interpolate(str: string, data: Record<string, any>): string {
     if (!str) return str;
     return str.replace(/\{\{(.+?)\}\}/g, (_, key) => {
-        const value = data[key.trim()];
-        return value !== undefined ? String(value) : "";
+        const targetNorm = normalizeKey(key);
+        const matchedKey = Object.keys(data).find(k => normalizeKey(k) === targetNorm);
+        if (matchedKey !== undefined) {
+            const value = data[matchedKey];
+            return value !== undefined ? String(value) : "";
+        }
+        return "";
     });
 }
 
@@ -116,7 +129,8 @@ async function executeOneStep(
     if (template.params && template.params.length > 0) {
         template.params.forEach(p => {
             if (p.key) {
-                requestParams[p.key] = interpolate(p.value, row);
+                const rKey = interpolate(p.key, row);
+                requestParams[rKey] = interpolate(p.value, row);
             }
         });
 
@@ -124,14 +138,18 @@ async function executeOneStep(
             const urlObj = new URL(url);
             template.params.forEach(p => {
                 if (p.key) {
-                    urlObj.searchParams.append(p.key, requestParams[p.key]);
+                    const rKey = interpolate(p.key, row);
+                    urlObj.searchParams.append(rKey, requestParams[rKey]);
                 }
             });
             url = urlObj.toString();
         } catch (e) {
             const queryString = template.params
                 .filter(p => p.key)
-                .map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(requestParams[p.key])}`)
+                .map(p => {
+                    const rKey = interpolate(p.key, row);
+                    return `${encodeURIComponent(rKey)}=${encodeURIComponent(requestParams[rKey])}`;
+                })
                 .join("&");
             if (queryString) {
                 url += (url.includes('?') ? '&' : '?') + queryString;
@@ -168,18 +186,114 @@ async function executeOneStep(
     let hasContentType = false;
     template.headers.forEach(h => {
         if (h.key) {
+            const rKey = interpolate(h.key, row);
             const val = interpolate(h.value, row);
-            headers.append(h.key, val);
-            requestHeaders[h.key] = val;
-            if (h.key.toLowerCase() === "content-type") hasContentType = true;
+            headers.append(rKey, val);
+            requestHeaders[rKey] = val;
+            if (rKey.toLowerCase() === "content-type") hasContentType = true;
         }
     });
 
-    const interpolatedBody = processBodyInterpolation(template.body || "", row);
+    let fetchBody: any = null;
+    let requestBodyForLog: any = null;
 
-    if (interpolatedBody && typeof interpolatedBody === "object" && !hasContentType) {
-        headers.append("Content-Type", "application/json");
-        requestHeaders["Content-Type"] = "application/json";
+    if (template.body && template.method !== "GET" && (template.method as string) !== "HEAD") {
+        if (typeof template.body === "string") {
+            const parsed = processBodyInterpolation(template.body, row);
+            fetchBody = parsed && typeof parsed === "object" ? JSON.stringify(parsed) : String(parsed);
+            requestBodyForLog = parsed;
+            if (parsed && typeof parsed === "object" && !hasContentType) {
+                headers.append("Content-Type", "application/json");
+                requestHeaders["Content-Type"] = "application/json";
+                hasContentType = true;
+            }
+        } else {
+            const mode = template.body.mode || "none";
+            if (mode === "raw" && template.body.raw) {
+                const rawBody = interpolate(template.body.raw, row);
+                fetchBody = rawBody;
+                requestBodyForLog = rawBody;
+
+                const lang = template.body.rawLanguage || "json";
+                let contentType = "application/json";
+                if (lang === "text") contentType = "text/plain";
+                else if (lang === "javascript") contentType = "application/javascript";
+                else if (lang === "html") contentType = "text/html";
+                else if (lang === "xml") contentType = "application/xml";
+
+                if (!hasContentType) {
+                    headers.append("Content-Type", contentType);
+                    requestHeaders["Content-Type"] = contentType;
+                    hasContentType = true;
+                }
+
+                if (lang === "json") {
+                    const cleanJson = stripJsonComments(rawBody);
+                    fetchBody = cleanJson;
+                    try {
+                        requestBodyForLog = JSON.parse(cleanJson);
+                    } catch (e) {}
+                }
+            } else if (mode === "graphql" && template.body.graphql) {
+                const query = interpolate(template.body.graphql.query || "", row);
+                const varsStr = interpolate(template.body.graphql.variables || "{}", row);
+                let variables = {};
+                try {
+                    variables = JSON.parse(stripJsonComments(varsStr));
+                } catch (e) {}
+                const gBody = JSON.stringify({ query, variables });
+                fetchBody = gBody;
+                requestBodyForLog = { query, variables };
+
+                if (!hasContentType) {
+                    headers.append("Content-Type", "application/json");
+                    requestHeaders["Content-Type"] = "application/json";
+                    hasContentType = true;
+                }
+            } else if (mode === "urlencoded" && template.body.urlencoded) {
+                const formParams = new URLSearchParams();
+                const logObj: Record<string, string> = {};
+                template.body.urlencoded.forEach((p: any) => {
+                    if (p.enabled !== false && p.key) {
+                        const rKey = interpolate(p.key, row);
+                        const rVal = interpolate(p.value, row);
+                        formParams.append(rKey, rVal);
+                        logObj[rKey] = rVal;
+                    }
+                });
+                fetchBody = formParams.toString();
+                requestBodyForLog = logObj;
+
+                if (!hasContentType) {
+                    headers.append("Content-Type", "application/x-www-form-urlencoded");
+                    requestHeaders["Content-Type"] = "application/x-www-form-urlencoded";
+                    hasContentType = true;
+                }
+            } else if (mode === "formdata" && template.body.formdata) {
+                const fd = new FormData();
+                const logObj: Record<string, string> = {};
+                template.body.formdata.forEach((p: any) => {
+                    if (p.enabled !== false && p.key) {
+                        const rKey = interpolate(p.key, row);
+                        const rVal = interpolate(p.value, row);
+                        fd.append(rKey, rVal);
+                        logObj[rKey] = rVal;
+                    }
+                });
+                fetchBody = fd;
+                requestBodyForLog = logObj;
+            } else if (mode === "binary" && template.body.binary) {
+                const binaryBody = interpolate(template.body.binary, row);
+                fetchBody = binaryBody;
+                requestBodyForLog = "<Binary Data>";
+
+                if (!hasContentType) {
+                    headers.append("Content-Type", "application/octet-stream");
+                    requestHeaders["Content-Type"] = "application/octet-stream";
+                    hasContentType = true;
+                }
+            }
+        }
     }
 
     const retryRanges = retryStatusCodes || "";
@@ -193,7 +307,7 @@ async function executeOneStep(
         requestMethod: template.method,
         requestHeaders,
         requestParams,
-        requestBody: interpolatedBody,
+        requestBody: requestBodyForLog,
         responseBody: null,
     };
 
@@ -212,10 +326,8 @@ async function executeOneStep(
                 signal: abortSignal,
             };
 
-            if (template.method !== "GET" && interpolatedBody) {
-                fetchOpts.body = typeof interpolatedBody === "object"
-                    ? JSON.stringify(interpolatedBody)
-                    : String(interpolatedBody);
+            if (template.method !== "GET" && fetchBody !== null && fetchBody !== undefined) {
+                fetchOpts.body = fetchBody;
             }
 
             const response = await fetch(url, fetchOpts);
@@ -324,179 +436,182 @@ self.onmessage = async (e: MessageEvent) => {
         const tasks: Array<Promise<void>> = [];
         rowsToProcess.forEach(({ row, index }: any) => {
             for (let iter = 1; iter <= rowIterations; iter++) {
-                tasks.push(limit(async () => {
+                const flatIdx = index * rowIterations + iter - 1;
+                const runTask = async () => {
                     if (signal.aborted) {
                         return;
                     }
-
-                    // Implement staggered rate-limiting throttling if running full batch
                     if (throttleDelayMs > 0 && singleRowIndex === undefined) {
-                        const flatIdx = index * rowIterations + iter - 1;
                         await new Promise(resolve => setTimeout(resolve, flatIdx * throttleDelayMs));
                     }
-
                     if (signal.aborted) {
                         return;
                     }
-
-                    const steps: StepResult[] = [];
-                    let chainFailed = false;
-                    const chainStartTime = performance.now();
-                    
-                    // Build dynamic context for step-to-step variable interpolation
-                    const executionContext = { ...row };
-
-                    for (const tmpl of templates) {
+                    await limit(async () => {
                         if (signal.aborted) {
-                            steps.push({
-                                stepId: tmpl.id,
-                                stepName: tmpl.name,
-                                statusCode: 0,
-                                responseTimeMs: 0,
-                                requestBody: null,
-                                responseBody: null,
-                                error: "Cancelled",
+                            return;
+                        }
+
+                        const steps: StepResult[] = [];
+                        let chainFailed = false;
+                        const chainStartTime = performance.now();
+                        
+                        // Build dynamic context for step-to-step variable interpolation
+                        const executionContext = { ...row };
+
+                        for (const tmpl of templates) {
+                            if (signal.aborted) {
+                                steps.push({
+                                    stepId: tmpl.id,
+                                    stepName: tmpl.name,
+                                    statusCode: 0,
+                                    responseTimeMs: 0,
+                                    requestBody: null,
+                                    responseBody: null,
+                                    error: "Cancelled",
+                                });
+                                chainFailed = true;
+                                continue;
+                            }
+
+                            // Stop chain on step failure if configured
+                            if (chainFailed && stopOnFailure) {
+                                steps.push({
+                                    stepId: tmpl.id,
+                                    stepName: tmpl.name,
+                                    statusCode: 0,
+                                    responseTimeMs: 0,
+                                    requestBody: null,
+                                    responseBody: null,
+                                    error: "Skipped (Previous Step Failed)",
+                                });
+                                continue;
+                            }
+
+                            const stepResult = await executeOneStep(tmpl, executionContext, maxRetries, retryStatusCodes, signal);
+                            steps.push(stepResult);
+
+                            self.postMessage({
+                                type: "STEP_PROGRESS",
+                                index,
+                                iteration: iter,
+                                stepResult,
+                                stepIndex: steps.length - 1
                             });
-                            chainFailed = true;
-                            continue;
-                        }
 
-                        // Stop chain on step failure if configured
-                        if (chainFailed && stopOnFailure) {
-                            steps.push({
-                                stepId: tmpl.id,
-                                stepName: tmpl.name,
-                                statusCode: 0,
-                                responseTimeMs: 0,
-                                requestBody: null,
-                                responseBody: null,
-                                error: "Skipped (Previous Step Failed)",
-                            });
-                            continue;
-                        }
-
-                        const stepResult = await executeOneStep(tmpl, executionContext, maxRetries, retryStatusCodes, signal);
-                        steps.push(stepResult);
-
-                        self.postMessage({
-                            type: "STEP_PROGRESS",
-                            index,
-                            iteration: iter,
-                            stepResult,
-                            stepIndex: steps.length - 1
-                        });
-
-                        if (stepResult.error) {
-                            chainFailed = true;
-                        }
-
-                        // Populate executionContext with step outputs for variables usage
-                        const idx = steps.length; // 1-based step order
-                        const cleanName = tmpl.name.trim();
-
-                        // 1. Store index-based paths: Step 1.status, Step 1.response.token, etc.
-                        executionContext[`Step ${idx}.status`] = stepResult.statusCode;
-                        executionContext[`Step ${idx}.response_time`] = stepResult.responseTimeMs;
-                        if (stepResult.error) {
-                            executionContext[`Step ${idx}.error`] = stepResult.error;
-                        }
-                        if (stepResult.responseBody !== undefined && stepResult.responseBody !== null) {
-                            flattenObject(stepResult.responseBody, `Step ${idx}.response`, executionContext);
-                        }
-                        if (stepResult.requestBody !== undefined && stepResult.requestBody !== null) {
-                            flattenObject(stepResult.requestBody, `Step ${idx}.request.body`, executionContext);
-                        }
-                        if (stepResult.requestParams) {
-                            const paramKeys = Object.keys(stepResult.requestParams);
-                            for (let i = 0; i < paramKeys.length; i++) {
-                                executionContext[`Step ${idx}.request.params.${paramKeys[i]}`] = stepResult.requestParams[paramKeys[i]];
-                            }
-                        }
-                        if (stepResult.requestHeaders) {
-                            const headerKeys = Object.keys(stepResult.requestHeaders);
-                            for (let i = 0; i < headerKeys.length; i++) {
-                                executionContext[`Step ${idx}.request.headers.${headerKeys[i]}`] = stepResult.requestHeaders[headerKeys[i]];
-                            }
-                        }
-                        if (stepResult.responseHeaders) {
-                            const rHeaderKeys = Object.keys(stepResult.responseHeaders);
-                            for (let i = 0; i < rHeaderKeys.length; i++) {
-                                executionContext[`Step ${idx}.response.headers.${rHeaderKeys[i]}`] = stepResult.responseHeaders[rHeaderKeys[i]];
-                            }
-                        }
-
-                        // 2. Store name-based paths: Login.status, Login.response.token, etc.
-                        if (cleanName) {
-                            executionContext[`${cleanName}.status`] = stepResult.statusCode;
-                            executionContext[`${cleanName}.response_time`] = stepResult.responseTimeMs;
                             if (stepResult.error) {
-                                executionContext[`${cleanName}.error`] = stepResult.error;
+                                chainFailed = true;
+                            }
+
+                            // Populate executionContext with step outputs for variables usage
+                            const idx = steps.length; // 1-based step order
+                            const cleanName = tmpl.name.trim();
+
+                            // 1. Store index-based paths: Step 1.status, Step 1.response.token, etc.
+                            executionContext[`Step ${idx}.status`] = stepResult.statusCode;
+                            executionContext[`Step ${idx}.response_time`] = stepResult.responseTimeMs;
+                            if (stepResult.error) {
+                                executionContext[`Step ${idx}.error`] = stepResult.error;
                             }
                             if (stepResult.responseBody !== undefined && stepResult.responseBody !== null) {
-                                flattenObject(stepResult.responseBody, `${cleanName}.response`, executionContext);
+                                flattenObject(stepResult.responseBody, `Step ${idx}.response`, executionContext);
                             }
                             if (stepResult.requestBody !== undefined && stepResult.requestBody !== null) {
-                                flattenObject(stepResult.requestBody, `${cleanName}.request.body`, executionContext);
+                                flattenObject(stepResult.requestBody, `Step ${idx}.request.body`, executionContext);
                             }
                             if (stepResult.requestParams) {
                                 const paramKeys = Object.keys(stepResult.requestParams);
                                 for (let i = 0; i < paramKeys.length; i++) {
-                                    executionContext[`${cleanName}.request.params.${paramKeys[i]}`] = stepResult.requestParams[paramKeys[i]];
+                                    executionContext[`Step ${idx}.request.params.${paramKeys[i]}`] = stepResult.requestParams[paramKeys[i]];
                                 }
                             }
                             if (stepResult.requestHeaders) {
                                 const headerKeys = Object.keys(stepResult.requestHeaders);
                                 for (let i = 0; i < headerKeys.length; i++) {
-                                    executionContext[`${cleanName}.request.headers.${headerKeys[i]}`] = stepResult.requestHeaders[headerKeys[i]];
+                                    executionContext[`Step ${idx}.request.headers.${headerKeys[i]}`] = stepResult.requestHeaders[headerKeys[i]];
                                 }
                             }
                             if (stepResult.responseHeaders) {
                                 const rHeaderKeys = Object.keys(stepResult.responseHeaders);
                                 for (let i = 0; i < rHeaderKeys.length; i++) {
-                                    executionContext[`${cleanName}.response.headers.${rHeaderKeys[i]}`] = stepResult.responseHeaders[rHeaderKeys[i]];
+                                    executionContext[`Step ${idx}.response.headers.${rHeaderKeys[i]}`] = stepResult.responseHeaders[rHeaderKeys[i]];
+                                }
+                            }
+
+                            // 2. Store name-based paths: Login.status, Login.response.token, etc.
+                            if (cleanName) {
+                                executionContext[`${cleanName}.status`] = stepResult.statusCode;
+                                executionContext[`${cleanName}.response_time`] = stepResult.responseTimeMs;
+                                if (stepResult.error) {
+                                    executionContext[`${cleanName}.error`] = stepResult.error;
+                                }
+                                if (stepResult.responseBody !== undefined && stepResult.responseBody !== null) {
+                                    flattenObject(stepResult.responseBody, `${cleanName}.response`, executionContext);
+                                }
+                                if (stepResult.requestBody !== undefined && stepResult.requestBody !== null) {
+                                    flattenObject(stepResult.requestBody, `${cleanName}.request.body`, executionContext);
+                                }
+                                if (stepResult.requestParams) {
+                                    const paramKeys = Object.keys(stepResult.requestParams);
+                                    for (let i = 0; i < paramKeys.length; i++) {
+                                        executionContext[`${cleanName}.request.params.${paramKeys[i]}`] = stepResult.requestParams[paramKeys[i]];
+                                    }
+                                }
+                                if (stepResult.requestHeaders) {
+                                    const headerKeys = Object.keys(stepResult.requestHeaders);
+                                    for (let i = 0; i < headerKeys.length; i++) {
+                                        executionContext[`${cleanName}.request.headers.${headerKeys[i]}`] = stepResult.requestHeaders[headerKeys[i]];
+                                    }
+                                }
+                                if (stepResult.responseHeaders) {
+                                    const rHeaderKeys = Object.keys(stepResult.responseHeaders);
+                                    for (let i = 0; i < rHeaderKeys.length; i++) {
+                                        executionContext[`${cleanName}.response.headers.${rHeaderKeys[i]}`] = stepResult.responseHeaders[rHeaderKeys[i]];
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    const totalTime = Math.round(performance.now() - chainStartTime);
-                    const lastStep = steps[steps.length - 1];
+                        const totalTime = Math.round(performance.now() - chainStartTime);
+                        const lastStep = steps[steps.length - 1];
 
-                    const resultPayload = {
-                        status: chainFailed ? "error" : "success",
-                        statusCode: lastStep?.statusCode || 0,
-                        responseTimeMs: totalTime,
-                        requestUrl: steps[0]?.requestUrl || null,
-                        requestMethod: steps[0]?.requestMethod || null,
-                        requestHeaders: steps[0]?.requestHeaders || null,
-                        requestParams: steps[0]?.requestParams || null,
-                        requestBody: steps[0]?.requestBody || null,
-                        responseBody: lastStep?.responseBody || null,
-                        responseHeaders: lastStep?.responseHeaders || null,
-                        responseType: lastStep?.responseType || null,
-                        responseRedirected: lastStep?.responseRedirected || null,
-                        responseStatusText: lastStep?.responseStatusText || null,
-                        ipAddress: lastStep?.ipAddress || null,
-                        steps,
-                        error: chainFailed ? steps.filter(s => s.error).map(s => s.error).join("; ") : undefined,
-                    };
+                        const resultPayload = {
+                            status: chainFailed ? "error" : "success",
+                            statusCode: lastStep?.statusCode || 0,
+                            responseTimeMs: totalTime,
+                            requestUrl: steps[0]?.requestUrl || null,
+                            requestMethod: steps[0]?.requestMethod || null,
+                            requestHeaders: steps[0]?.requestHeaders || null,
+                            requestParams: steps[0]?.requestParams || null,
+                            requestBody: steps[0]?.requestBody || null,
+                            responseBody: lastStep?.responseBody || null,
+                            responseHeaders: lastStep?.responseHeaders || null,
+                            responseType: lastStep?.responseType || null,
+                            responseRedirected: lastStep?.responseRedirected || null,
+                            responseStatusText: lastStep?.responseStatusText || null,
+                            ipAddress: lastStep?.ipAddress || null,
+                            steps,
+                            error: chainFailed ? steps.filter(s => s.error).map(s => s.error).join("; ") : undefined,
+                        };
 
-                    completed++;
-                    self.postMessage({
-                        type: "PROGRESS",
-                        index,
-                        iteration: iter,
-                        resultPayload,
-                        completed,
-                        total
+                        completed++;
+                        self.postMessage({
+                            type: "PROGRESS",
+                            index,
+                            iteration: iter,
+                            resultPayload,
+                            completed,
+                            total
+                        });
                     });
-                }));
+                };
+                tasks.push(runTask());
             }
         });
 
         try {
             await Promise.all(tasks);
-        } catch (err) {
+        } catch {
             // Silence aborted errors in concurrent execution promise
         }
 
