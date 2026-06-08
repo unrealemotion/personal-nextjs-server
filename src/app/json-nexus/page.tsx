@@ -1,16 +1,19 @@
 "use client";
 
-import React from "react";
-import Link from "next/link";
+import React, { useState } from "react";
+import { useLocalTransition } from "@/lib/transitions";
+import { LoadingTransition } from "@/components/layout/LoadingTransition";
 import { JSONToTable } from "@/components/json-nexus/JSONToTable";
 import { JSONCompare } from "@/components/json-nexus/JSONCompare";
-import { Table as TableIcon, ArrowRightLeft, Layers, Sparkles, BookOpen } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Table as TableIcon, ArrowRightLeft, Sparkles } from "lucide-react";
 
 export default function JSONNexusPage() {
-  return (
-    <div className="min-h-screen relative bg-[#050505] text-white font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+  const [activeTab, setActiveTab] = useState("to-table");
+  const [isPending, startLocalTransition] = useLocalTransition();
 
+  return (
+    <div className="flex flex-col flex-grow relative bg-[#050505] text-white font-sans selection:bg-indigo-500/30">
+      
       {/* Premium Ambient Background Effects */}
       <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/10 blur-[130px] animate-pulse" />
@@ -18,49 +21,60 @@ export default function JSONNexusPage() {
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808008_1px,transparent_1px),linear-gradient(to_bottom,#80808008_1px,transparent_1px)] bg-[size:32px_32px]" />
       </div>
 
-      <main className="container mx-auto max-w-7xl px-6 py-8 md:py-12 relative z-10">
-        {/* Hero Section */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6">
-          <div className="max-w-3xl">
-            <h2 className="text-3xl md:text-5xl font-black tracking-tight leading-none mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/50">
-              JSON Nexus
-            </h2>
-            <p className="text-sm md:text-base text-white/50 leading-relaxed font-light">
-              An environment to compare complex JSON structures side-by-side or convert, flatten, and split nested objects and lists recursively into dynamic grids.
-            </p>
+      {/* Compact Sticky Header */}
+      <header className="sticky top-16 z-45 w-full bg-neutral-950/80 backdrop-blur-md border-b border-white/5 shadow-sm shrink-0">
+        <div className="w-full px-4 lg:px-8 xl:px-12 py-2 flex items-center justify-between gap-4">
+          <div className="flex items-center space-x-2 text-xs font-bold text-white/60">
+            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <span>JSON Nexus Workspace</span>
           </div>
+
+          {/* View Switcher Tabs */}
+          <div className="flex items-center bg-neutral-900/50 p-0.5 rounded-xl border border-white/5">
+            <button
+              onClick={() => startLocalTransition(() => setActiveTab("to-table"))}
+              className={`px-3.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                activeTab === "to-table"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                  : "text-white/50 hover:text-white"
+              }`}
+            >
+              <span className="flex items-center gap-1.5">
+                <TableIcon className="w-3.5 h-3.5" />
+                JSON to Table
+              </span>
+            </button>
+            <button
+              onClick={() => startLocalTransition(() => setActiveTab("compare"))}
+              className={`px-3.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                activeTab === "compare"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                  : "text-white/50 hover:text-white"
+              }`}
+            >
+              <span className="flex items-center gap-1.5">
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                JSON Compare
+              </span>
+            </button>
+          </div>
+
+          <div className="w-24 hidden md:block" />
         </div>
+      </header>
 
-        {/* Tab Selection */}
-        <Tabs defaultValue="to-table" className="space-y-8">
-          <div className="flex justify-center md:justify-start">
-            <TabsList className="bg-neutral-900/80 border border-white/5 p-1 rounded-xl h-11">
-              <TabsTrigger
-                value="to-table"
-                className="px-5 py-2 text-xs font-bold gap-2 tracking-wide uppercase duration-300 data-[state=active]:bg-white/10"
-              >
-                <TableIcon className="w-3.5 h-3.5 text-indigo-400" />
-                JSON to Table Grid
-              </TabsTrigger>
-              <TabsTrigger
-                value="compare"
-                className="px-5 py-2 text-xs font-bold gap-2 tracking-wide uppercase duration-300 data-[state=active]:bg-white/10"
-              >
-                <ArrowRightLeft className="w-3.5 h-3.5 text-fuchsia-400" />
-                JSON Compare & Diff
-              </TabsTrigger>
-            </TabsList>
-          </div>
-
-          <TabsContent value="to-table" className="outline-none focus:outline-none">
+      {/* Main Feature Container */}
+      <main className="flex-grow w-full px-4 lg:px-8 xl:px-12 py-6 relative z-10 flex flex-col min-h-0">
+        <div className="relative flex-grow flex flex-col min-h-[500px]">
+          <LoadingTransition local isLoading={isPending} />
+          {activeTab === "to-table" ? (
             <JSONToTable />
-          </TabsContent>
-
-          <TabsContent value="compare" className="outline-none focus:outline-none">
+          ) : (
             <JSONCompare />
-          </TabsContent>
-        </Tabs>
+          )}
+        </div>
       </main>
+
     </div>
   );
 }

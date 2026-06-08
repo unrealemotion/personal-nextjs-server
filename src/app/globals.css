@@ -123,6 +123,20 @@
   body {
     @apply bg-background text-foreground;
   }
+  button,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"] {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role="button"]:disabled,
+  input[type="button"]:disabled,
+  input[type="submit"]:disabled,
+  [disabled] {
+    cursor: not-allowed;
+  }
 }
 
 /* Custom premium dark scrollbar utility */
@@ -228,4 +242,30 @@
 @keyframes ringExpand {
   0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.6; }
   100% { transform: translate(-50%, -50%) scale(2.5); opacity: 0; }
+}
+
+/* Ethereal Loading Transition Keyframes */
+@keyframes shimmer-bar {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes core-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; filter: brightness(1); }
+  50% { transform: scale(1.18); opacity: 1; filter: brightness(1.2); }
+}
+
+@keyframes orbit-particle {
+  0% { transform: rotate(0deg) translate(64px) rotate(0deg); }
+  100% { transform: rotate(360deg) translate(64px) rotate(-360deg); }
+}
+
+@keyframes text-pulse {
+  0%, 100% { opacity: 0.4; letter-spacing: 0.4em; }
+  50% { opacity: 0.85; letter-spacing: 0.43em; }
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }

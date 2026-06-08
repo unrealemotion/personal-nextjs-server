@@ -9,6 +9,8 @@ import { ResultsTable } from "@/components/results/ResultsTable";
 import { ApiClientWorkspace } from "@/components/api-client/ApiClientWorkspace";
 import { Layers, Sparkles, Download, Upload, Trash2, AlertTriangle, BookOpen } from "lucide-react";
 import { exportState, importState, resetStore, hydrateStore, store, setCurrentView } from "@/lib/store";
+import { useLocalTransition } from "@/lib/transitions";
+import { LoadingTransition } from "@/components/layout/LoadingTransition";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import {
@@ -25,6 +27,7 @@ import {
 export default function SurgePage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const currentView = useStore(store, (state) => state.currentView || "api_client");
+    const [isPending, startLocalTransition] = useLocalTransition();
 
     useEffect(() => {
         hydrateStore();
@@ -76,7 +79,7 @@ export default function SurgePage() {
                     {/* View Switcher Tabs */}
                     <div className="flex items-center bg-neutral-900/50 p-0.5 rounded-xl border border-white/5">
                         <button
-                            onClick={() => setCurrentView("api_client")}
+                            onClick={() => startLocalTransition(() => setCurrentView("api_client"))}
                             className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                                 currentView === "api_client"
                                     ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
@@ -86,7 +89,7 @@ export default function SurgePage() {
                             API Client
                         </button>
                         <button
-                            onClick={() => setCurrentView("bulk")}
+                            onClick={() => startLocalTransition(() => setCurrentView("bulk"))}
                             className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                                 currentView === "bulk"
                                     ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
@@ -160,6 +163,7 @@ export default function SurgePage() {
             </header>
 
             <main className="flex-grow w-full px-4 lg:px-8 xl:px-12 py-6 space-y-6 relative z-10 flex flex-col min-h-0">
+                <LoadingTransition local isLoading={isPending} />
                 {currentView === "api_client" ? (
                     <ApiClientWorkspace />
                 ) : (

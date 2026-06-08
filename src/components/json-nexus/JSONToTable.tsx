@@ -561,48 +561,80 @@ export function JSONToTable() {
   });
 
   return (
-    <div className="space-y-6">
-      {/* Configuration Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div className="space-y-6 flex-grow flex flex-col min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch flex-grow lg:h-[calc(100vh-180px)] min-h-0">
         
-        {/* Editor Inputs */}
-        <div className="lg:col-span-8 flex flex-col space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-sm text-white/90 flex items-center gap-2">
-              <TableIcon className="w-4 h-4 text-indigo-400" />
-              Source JSON Editor
+        {/* Left Column: Input Editor & Configuration */}
+        <div className="lg:col-span-4 flex flex-col gap-4 lg:h-full min-h-0">
+          
+          {/* Source JSON Card */}
+          <Card className="flex flex-col p-4 bg-[#0a0a0a] border border-white/10 rounded-2xl space-y-3 lg:flex-grow min-h-0">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-xs text-white/90 flex items-center gap-1.5">
+                <TableIcon className="w-3.5 h-3.5 text-indigo-400" />
+                Source JSON
+              </h3>
+              <div className="flex items-center space-x-1.5">
+                <Button 
+                  variant="ghost" 
+                  size="xs" 
+                  onClick={loadSample}
+                  className="text-[10px] h-6 px-2 text-white/60 hover:text-white bg-white/5 border border-white/5 hover:bg-white/10"
+                >
+                  Sample
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="xs" 
+                  onClick={clearAll}
+                  className="text-[10px] h-6 px-2 text-red-400/80 hover:text-red-400 hover:bg-red-950/20 bg-red-950/10"
+                >
+                  Clear
+                </Button>
+              </div>
+            </div>
+            
+            <div className="w-full h-72 lg:h-0 lg:flex-grow rounded-xl border border-white/5 overflow-hidden bg-neutral-950 p-1">
+              <Editor
+                height="100%"
+                defaultLanguage="json"
+                theme="vs-dark"
+                value={jsonInput}
+                onChange={(value) => {
+                  setJsonInput(value ?? "");
+                  setIsConverted(false);
+                }}
+                onMount={(editor, monaco) => {
+                  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+                    convertRef.current();
+                  });
+                }}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 12,
+                  fontFamily: "var(--font-geist-mono), monospace",
+                  lineNumbersMinChars: 3,
+                  wordWrap: "on",
+                  formatOnPaste: true,
+                  automaticLayout: true,
+                  scrollBeyondLastLine: false,
+                }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
               {isValidJson === true && (
-                <span className="text-[10px] text-green-400 bg-green-500/10 border border-green-500/25 px-1.5 py-0.5 rounded font-mono font-bold uppercase flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" /> Valid JSON
+                <span className="text-[9px] text-green-400 bg-green-500/10 border border-green-500/25 px-1.5 py-0.5 rounded font-mono font-bold uppercase flex items-center gap-1">
+                  <span className="w-1 h-1 rounded-full bg-green-400 animate-pulse" /> Valid JSON
                 </span>
               )}
               {isValidJson === false && (
-                <span className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/25 px-1.5 py-0.5 rounded font-mono font-bold uppercase flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-400" /> Syntax Error
+                <span className="text-[9px] text-red-400 bg-red-500/10 border border-red-500/25 px-1.5 py-0.5 rounded font-mono font-bold uppercase flex items-center gap-1">
+                  <span className="w-1 h-1 rounded-full bg-red-400" /> Syntax Error
                 </span>
               )}
-            </h3>
-            <div className="flex items-center space-x-2">
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={loadSample}
-                className="text-xs text-white/60 hover:text-white"
-              >
-                <Sparkles className="w-3.5 h-3.5 mr-1 text-indigo-400" />
-                Load Sample
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={clearAll}
-                className="text-xs text-red-400/80 hover:text-red-400 hover:bg-red-950/20"
-              >
-                <Trash2 className="w-3.5 h-3.5 mr-1" />
-                Clear
-              </Button>
-              <label className="h-8 px-3 text-xs bg-white/5 border border-white/5 hover:bg-white/10 rounded-md flex items-center justify-center cursor-pointer font-medium text-white/80 hover:text-white transition-colors">
-                <Upload className="w-3.5 h-3.5 mr-1.5" />
+              <label className="h-7 px-2.5 text-[10px] bg-white/5 border border-white/5 hover:bg-white/10 rounded-md flex items-center justify-center cursor-pointer font-medium text-white/80 hover:text-white transition-colors ml-auto">
+                <Upload className="w-3.5 h-3.5 mr-1" />
                 Upload File
                 <input 
                   type="file" 
@@ -612,316 +644,295 @@ export function JSONToTable() {
                 />
               </label>
             </div>
-          </div>
+
+            {jsonError && (
+              <div className="text-[10px] text-red-400 bg-red-950/20 border border-red-900/50 rounded-xl p-2.5 flex items-start gap-1.5 font-mono animate-in fade-in duration-300">
+                <Info className="w-3.5 h-3.5 mt-0.5 text-red-400 shrink-0" />
+                <span>{jsonError}</span>
+              </div>
+            )}
+          </Card>
           
-          <div className="w-full h-80 rounded-2xl border border-white/5 overflow-hidden bg-neutral-950 p-1">
-            <Editor
-              height="100%"
-              defaultLanguage="json"
-              theme="vs-dark"
-              value={jsonInput}
-              onChange={(value) => {
-                setJsonInput(value ?? "");
-                setIsConverted(false);
-              }}
-              onMount={(editor, monaco) => {
-                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-                  convertRef.current();
-                });
-              }}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 12,
-                fontFamily: "var(--font-geist-mono), monospace",
-                lineNumbersMinChars: 3,
-                wordWrap: "on",
-                formatOnPaste: true,
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-              }}
-            />
-          </div>
-          {jsonError && (
-            <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/50 rounded-xl p-3 flex items-start gap-2 font-mono animate-in fade-in duration-300">
-              <Info className="w-4 h-4 mt-0.5 text-red-400 shrink-0" />
-              <span>{jsonError}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Configuration Panel */}
-        <div className="lg:col-span-4 flex flex-col space-y-4">
-          <Card className="p-6 bg-[#0a0a0a] border border-white/10 rounded-2xl h-full flex flex-col justify-between">
-            <div className="space-y-6">
-              <h3 className="font-bold text-sm text-white/90 border-b border-white/5 pb-2">
-                Conversion Options
-              </h3>
-
-              {/* Toggles */}
-              <div className="space-y-5">
-                <div className="flex items-start space-x-3">
-                  <Checkbox 
-                    id="flatten" 
-                    checked={flattenObjects} 
-                    onCheckedChange={(checked) => {
-                      setFlattenObjects(!!checked);
-                    }}
-                    className="border-white/20 mt-0.5 data-[state=checked]:bg-indigo-500 data-[state=checked]:border-indigo-500"
-                  />
-                  <div className="grid gap-1.5 leading-none">
-                    <Label htmlFor="flatten" className="text-sm font-bold text-white/85 cursor-pointer">
-                      Flatten Nested Objects
-                    </Label>
-                    <p className="text-xs text-white/40 leading-relaxed">
-                      Converts sub-objects recursively using dot-notation schemas (e.g. `info.fullName`).
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start space-x-3">
-                  <Checkbox 
-                    id="split" 
-                    checked={splitArrays} 
-                    onCheckedChange={(checked) => {
-                      setSplitArrays(!!checked);
-                    }}
-                    className="border-white/20 mt-0.5 data-[state=checked]:bg-fuchsia-500 data-[state=checked]:border-fuchsia-500"
-                  />
-                  <div className="grid gap-1.5 leading-none">
-                    <Label htmlFor="split" className="text-sm font-bold text-white/85 cursor-pointer">
-                      Split Arrays into Rows
-                    </Label>
-                    <p className="text-xs text-white/40 leading-relaxed">
-                      Breaks multiple values in lists (e.g. `skills: [TS, Bun]`) recursively into distinct parallel lines.
-                    </p>
-                  </div>
+          {/* Settings Card */}
+          <Card className="p-4 bg-[#0a0a0a] border border-white/10 rounded-2xl flex flex-col gap-4 shrink-0">
+            <h3 className="font-bold text-xs text-white/90 border-b border-white/5 pb-2">
+              Grid Settings
+            </h3>
+            
+            <div className="space-y-4">
+              <div className="flex items-start space-x-2.5">
+                <Checkbox 
+                  id="flatten" 
+                  checked={flattenObjects} 
+                  onCheckedChange={(checked) => {
+                    setFlattenObjects(!!checked);
+                  }}
+                  className="border-white/20 mt-0.5 data-[state=checked]:bg-indigo-500 data-[state=checked]:border-indigo-500"
+                />
+                <div className="grid gap-1 leading-none">
+                  <Label htmlFor="flatten" className="text-xs font-bold text-white/85 cursor-pointer">
+                    Flatten Objects
+                  </Label>
+                  <p className="text-[10px] text-white/40 leading-relaxed">
+                    Recursive dot schemas (e.g. `user.profile.name`).
+                  </p>
                 </div>
               </div>
 
-              {/* Informative Alert */}
-              <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-3.5 flex items-start space-x-2.5">
-                <Info className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
-                <p className="text-[11px] text-white/50 leading-normal">
-                  Skipped configurations will stringify items into raw fields (e.g. JSON strings), preserving the record boundary structure.
-                </p>
+              <div className="flex items-start space-x-2.5">
+                <Checkbox 
+                  id="split" 
+                  checked={splitArrays} 
+                  onCheckedChange={(checked) => {
+                    setSplitArrays(!!checked);
+                  }}
+                  className="border-white/20 mt-0.5 data-[state=checked]:bg-fuchsia-500 data-[state=checked]:border-fuchsia-500"
+                />
+                <div className="grid gap-1 leading-none">
+                  <Label htmlFor="split" className="text-xs font-bold text-white/85 cursor-pointer">
+                    Split Arrays to Rows
+                  </Label>
+                  <p className="text-[10px] text-white/40 leading-relaxed">
+                    Creates separate lines for array records.
+                  </p>
+                </div>
               </div>
             </div>
 
             <Button
               onClick={handleConvert}
               disabled={!jsonInput.trim() || isProcessing}
-              className="w-full mt-6 bg-gradient-to-r from-indigo-500 to-fuchsia-500 hover:from-indigo-600 hover:to-fuchsia-600 text-white font-bold h-11 rounded-xl shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+              className="w-full bg-gradient-to-r from-indigo-500 to-fuchsia-500 hover:from-indigo-600 hover:to-fuchsia-600 text-white font-bold h-9 rounded-xl shadow-lg shadow-indigo-500/10 flex items-center justify-center gap-1.5 text-xs transition-all"
             >
               {isProcessing ? (
                 <>
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Processing...
+                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Converting...
                 </>
               ) : (
-                "Generate Table Grid"
+                "Convert JSON to Grid"
               )}
             </Button>
           </Card>
         </div>
-      </div>
 
-      {/* Grid Results Section */}
-      {isConverted && convertedRows.length > 0 && (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          
-          {/* Stats Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Card className="p-4 bg-[#0a0a0a] border border-white/5 flex items-center space-x-3.5 rounded-xl">
-              <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center text-green-400">
-                <CheckCircle2 className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-xs text-white/40">Generated Rows</div>
-                <div className="font-bold text-white text-lg flex items-baseline space-x-1.5">
-                  <span>{convertedRows.length}</span>
-                  {convertedRows.length > originalCount && (
-                    <span className="text-[10px] text-green-400 bg-green-500/10 px-1 rounded">
-                      +{convertedRows.length - originalCount} expanded
-                    </span>
-                  )}
-                </div>
-              </div>
-            </Card>
-
-            <Card className="p-4 bg-[#0a0a0a] border border-white/5 flex items-center space-x-3.5 rounded-xl">
-              <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
-                <SlidersHorizontal className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-xs text-white/40">Unique Columns</div>
-                <div className="font-bold text-white text-lg">{tableColumns.length} fields</div>
-              </div>
-            </Card>
-
-            <Card className="p-4 bg-[#0a0a0a] border border-white/5 flex items-center space-x-3.5 rounded-xl">
-              <div className="w-10 h-10 rounded-lg bg-fuchsia-500/10 flex items-center justify-center text-fuchsia-400">
-                <SlidersHorizontal className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-xs text-white/40">Input Records</div>
-                <div className="font-bold text-white text-lg">{originalCount} original items</div>
-              </div>
-            </Card>
-          </div>
-
-          {/* Grid Toolbar */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-neutral-900/40 border border-white/5 backdrop-blur-md">
-            
-            {/* Left: Search input */}
-            <div className="relative max-w-sm w-full">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
-              <Input
-                placeholder="Search across all fields..."
-                value={globalFilter ?? ""}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                className="pl-10 h-9 bg-neutral-950 border-white/10 text-white rounded-lg text-xs placeholder:text-white/20 focus:border-indigo-500/50"
-              />
-            </div>
-
-            {/* Right: Columns hide/show & Download Exports */}
-            <div className="flex items-center space-x-3">
-              {/* Export CSV */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleExportCSV}
-                className="h-9 text-xs border-white/10 text-white/80 hover:text-white bg-neutral-950 hover:bg-neutral-900 gap-1.5 rounded-lg"
-              >
-                <FileText className="w-3.5 h-3.5 text-orange-400" />
-                Export CSV
-              </Button>
-
-              {/* Export Excel */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleExportExcel}
-                className="h-9 text-xs border-white/10 text-white/80 hover:text-white bg-neutral-950 hover:bg-neutral-900 gap-1.5 rounded-lg"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-green-400" />
-                Export Excel
-              </Button>
-            </div>
-          </div>
-
-          {/* Table Container */}
-          <Card className="border border-white/5 rounded-2xl bg-[#080808] overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <tr key={headerGroup.id} className="border-b border-white/5 bg-[#0a0a0a]">
-                      {headerGroup.headers.map((header) => (
-                        <th 
-                          key={header.id} 
-                          className="px-4 py-3 text-xs font-bold text-white/70 tracking-wide select-none"
-                        >
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(
-                                header.column.columnDef.header,
-                                header.getContext()
-                              )}
-                        </th>
-                      ))}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {table.getRowModel().rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={tableColumns.length} className="px-4 py-12 text-center text-xs text-white/30 italic">
-                        No rows found matching search query
-                      </td>
-                    </tr>
-                  ) : (
-                    table.getRowModel().rows.map((row) => (
-                      <ObservedRow key={row.id} row={row}>
-                        {row.getVisibleCells().map((cell) => (
-                          <td key={cell.id} className="px-4 py-3 text-xs align-middle">
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </ObservedRow>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination controls */}
-            {table.getPageCount() > 1 && (
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t border-white/5 bg-[#0a0a0a]">
-                <div className="flex items-center gap-4 text-xs text-white/40 flex-wrap">
-                  <span>
-                    Showing page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()} ({convertedRows.length} rows)
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <span>Rows per page:</span>
-                    <select
-                      value={table.getState().pagination.pageSize}
-                      onChange={(e) => {
-                        table.setPageSize(Number(e.target.value));
-                      }}
-                      className="bg-neutral-950 border border-white/10 text-white rounded px-2 py-0.5 text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    >
-                      {[10, 50, 100, 500, 1000].map((size) => (
-                        <option key={size} value={size}>
-                          {size}
-                        </option>
-                      ))}
-                    </select>
+        {/* Right Column: Results Table */}
+        <div className="lg:col-span-8 flex flex-col lg:h-full min-h-0">
+          {isConverted && convertedRows.length > 0 ? (
+            <div className="flex flex-col gap-4 lg:h-full min-h-0 animate-in fade-in slide-in-from-bottom-4 duration-300">
+              
+              {/* Stats Bar */}
+              <div className="grid grid-cols-3 gap-3 shrink-0">
+                <div className="p-2.5 bg-[#0a0a0a] border border-white/5 flex items-center space-x-2.5 rounded-xl min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-green-500/10 flex items-center justify-center text-green-400 shrink-0">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[9px] text-white/40 uppercase font-semibold tracking-wider">Rows</div>
+                    <div className="font-bold text-white text-xs flex items-center gap-1 mt-0.5">
+                      {convertedRows.length}
+                      {convertedRows.length > originalCount && (
+                        <span className="text-[8px] text-green-400 bg-green-500/10 px-1 rounded font-normal shrink-0">
+                          +{convertedRows.length - originalCount}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-                
-                <div className="flex items-center space-x-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => table.setPageIndex(0)}
-                    disabled={!table.getCanPreviousPage()}
-                    className="w-8 h-8 rounded-md bg-white/5 border border-white/5 hover:bg-white/10"
-                  >
-                    <ChevronsLeft className="w-3.5 h-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => table.previousPage()}
-                    disabled={!table.getCanPreviousPage()}
-                    className="w-8 h-8 rounded-md bg-white/5 border border-white/5 hover:bg-white/10"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => table.nextPage()}
-                    disabled={!table.getCanNextPage()}
-                    className="w-8 h-8 rounded-md bg-white/5 border border-white/5 hover:bg-white/10"
-                  >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => table.setPageIndex(table.getPageCount() - 1)}
-                    disabled={!table.getCanNextPage()}
-                    className="w-8 h-8 rounded-md bg-white/5 border border-white/5 hover:bg-white/10"
-                  >
-                    <ChevronsRight className="w-3.5 h-3.5" />
-                  </Button>
+
+                <div className="p-2.5 bg-[#0a0a0a] border border-white/5 flex items-center space-x-2.5 rounded-xl min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 shrink-0">
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[9px] text-white/40 uppercase font-semibold tracking-wider">Fields</div>
+                    <div className="font-bold text-white text-xs mt-0.5">{tableColumns.length} cols</div>
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-[#0a0a0a] border border-white/5 flex items-center space-x-2.5 rounded-xl min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-fuchsia-500/10 flex items-center justify-center text-fuchsia-400 shrink-0">
+                    <Info className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[9px] text-white/40 uppercase font-semibold tracking-wider">Input Records</div>
+                    <div className="font-bold text-white text-xs mt-0.5">{originalCount} items</div>
+                  </div>
                 </div>
               </div>
-            )}
-          </Card>
+
+              {/* Table Card */}
+              <Card className="p-4 bg-[#0a0a0a] border border-white/10 rounded-2xl lg:flex-grow flex flex-col min-h-0 space-y-4">
+                {/* Search & Export actions */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-1 shrink-0">
+                  <div className="relative max-w-xs w-full">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                    <Input
+                      placeholder="Search grid data..."
+                      value={globalFilter ?? ""}
+                      onChange={(e) => setGlobalFilter(e.target.value)}
+                      className="pl-9 h-8 bg-neutral-950 border-white/10 text-white rounded-lg text-xs placeholder:text-white/20 focus:border-indigo-500/50"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={handleExportCSV}
+                      className="h-8 text-[11px] border-white/10 text-white/80 hover:text-white bg-neutral-950 hover:bg-neutral-900 gap-1.5 rounded-lg px-2.5"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-orange-400" />
+                      CSV
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={handleExportExcel}
+                      className="h-8 text-[11px] border-white/10 text-white/80 hover:text-white bg-neutral-950 hover:bg-neutral-900 gap-1.5 rounded-lg px-2.5"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-green-400" />
+                      Excel
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Tanstack Table Grid */}
+                <div className="border border-white/5 rounded-xl overflow-hidden bg-neutral-950/40 lg:flex-grow flex flex-col min-h-0">
+                  <div className="overflow-auto lg:flex-grow h-0 min-h-0 custom-scrollbar">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        {table.getHeaderGroups().map((headerGroup) => (
+                          <tr key={headerGroup.id} className="border-b border-white/5 bg-[#0a0a0a]">
+                            {headerGroup.headers.map((header) => (
+                              <th 
+                                key={header.id} 
+                                className="px-4 py-2 text-xs font-bold text-white/70 tracking-wide select-none"
+                              >
+                                {header.isPlaceholder
+                                  ? null
+                                  : flexRender(
+                                      header.column.columnDef.header,
+                                      header.getContext()
+                                    )}
+                              </th>
+                            ))}
+                          </tr>
+                        ))}
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {table.getRowModel().rows.length === 0 ? (
+                          <tr>
+                            <td colSpan={tableColumns.length} className="px-4 py-12 text-center text-xs text-white/30 italic">
+                              No rows found matching search query
+                            </td>
+                          </tr>
+                        ) : (
+                          table.getRowModel().rows.map((row) => (
+                            <ObservedRow key={row.id} row={row}>
+                              {row.getVisibleCells().map((cell) => (
+                                <td key={cell.id} className="px-4 py-2 text-xs align-middle">
+                                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                </td>
+                              ))}
+                            </ObservedRow>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Pagination */}
+                {table.getPageCount() > 1 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-white/5 bg-[#0a0a0a]/20 shrink-0">
+                    <div className="flex items-center gap-4 text-[11px] text-white/40 flex-wrap">
+                      <span>
+                        Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()} ({convertedRows.length} rows)
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span>Show:</span>
+                        <select
+                          value={table.getState().pagination.pageSize}
+                          onChange={(e) => {
+                            table.setPageSize(Number(e.target.value));
+                          }}
+                          className="bg-neutral-950 border border-white/10 text-white rounded px-2 py-0.5 text-[11px] focus:outline-none focus:border-indigo-500 cursor-pointer"
+                        >
+                          {[10, 50, 100, 500].map((size) => (
+                            <option key={size} value={size}>
+                              {size}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center space-x-1.5">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => table.setPageIndex(0)}
+                        disabled={!table.getCanPreviousPage()}
+                        className="w-7 h-7 rounded-md bg-white/5 border border-white/5 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-white/5"
+                      >
+                        <ChevronsLeft className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => table.previousPage()}
+                        disabled={!table.getCanPreviousPage()}
+                        className="w-7 h-7 rounded-md bg-white/5 border border-white/5 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-white/5"
+                      >
+                        <ChevronLeft className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => table.nextPage()}
+                        disabled={!table.getCanNextPage()}
+                        className="w-7 h-7 rounded-md bg-white/5 border border-white/5 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-white/5"
+                      >
+                        <ChevronRight className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+                        disabled={!table.getCanNextPage()}
+                        className="w-7 h-7 rounded-md bg-white/5 border border-white/5 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-white/5"
+                      >
+                        <ChevronsRight className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            </div>
+          ) : (
+            /* Empty State */
+            <Card className="flex-grow min-h-[460px] border border-dashed border-white/10 bg-[#0a0a0a]/20 rounded-2xl flex flex-col items-center justify-center p-8 text-center h-full">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-500/5 border border-indigo-500/15 flex items-center justify-center text-indigo-400 mb-4 animate-pulse">
+                <TableIcon className="w-6 h-6" />
+              </div>
+              <h3 className="text-white font-bold text-sm mb-1">Convert JSON to Grid View</h3>
+              <p className="text-xs text-white/40 max-w-xs leading-relaxed mb-4">
+                Paste raw nested JSON structures in the left editor and hit generate. This visual tool splits arrays and flattens objects recursively into a spreadsheet view.
+              </p>
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={loadSample}
+                className="border-white/10 text-white/80 hover:text-white bg-neutral-950 hover:bg-neutral-900 px-4 h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg"
+              >
+                Load Sample JSON
+              </Button>
+            </Card>
+          )}
         </div>
-      )}
+
+      </div>
     </div>
   );
 }
