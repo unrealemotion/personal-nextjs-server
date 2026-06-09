@@ -27,6 +27,8 @@ import Editor from "@monaco-editor/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, stripJsonComments } from "@/lib/utils";
 import { toast } from "sonner";
+import { CopyableText } from "@/components/ui/CopyableText";
+
 
 function SearchableSelect({ value, onChange, options, placeholder, className }: {
     value: string;
@@ -1089,31 +1091,16 @@ export function ResultsTable() {
                             </Badge>
                         );
                     }
-                    return <div className="max-w-[200px] truncate text-xs" title={String(value)}>{value}</div>;
+                    const stringValue = String(value ?? "");
+                    if (!stringValue) return null;
+                    return (
+                        <CopyableText
+                            value={stringValue}
+                            className="max-w-[200px] text-xs"
+                        />
+                    );
                 }
             });
-        });
-
-        dynamicCols.push({
-            id: "actions",
-            header: "Actions",
-            cell: ({ row }) => {
-                const internalId = row.original.__id;
-                const iteration = row.original.__iteration ?? 1;
-                return (
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                            setSelectedDetail({ rowId: internalId, iteration });
-                            setIsDialogOpen(true);
-                        }}
-                        title="View Raw Details"
-                    >
-                        <Eye className="w-4 h-4 text-primary" />
-                    </Button>
-                )
-            }
         });
 
         return dynamicCols;
@@ -1412,6 +1399,13 @@ export function ResultsTable() {
                                     <TableRow
                                         key={row.id}
                                         data-state={row.getIsSelected() && "selected"}
+                                        className="cursor-pointer"
+                                        onClick={() => {
+                                            const internalId = row.original.__id;
+                                            const iteration = row.original.__iteration ?? 1;
+                                            setSelectedDetail({ rowId: internalId, iteration });
+                                            setIsDialogOpen(true);
+                                        }}
                                     >
                                         {row.getVisibleCells().map((cell) => (
                                             <TableCell key={cell.id}>
