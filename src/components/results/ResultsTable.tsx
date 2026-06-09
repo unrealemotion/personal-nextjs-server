@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useStore } from "@tanstack/react-store";
 import { store, setColumnMappings, setTableFilterConfig } from "@/lib/store";
-import { type ColumnMapping, type TableFilterConfig } from "@/lib/schema";
+import { type ColumnMapping, type TableFilterConfig, type ExecutionResult } from "@/lib/schema";
 import {
     flexRender,
     getCoreRowModel,
@@ -74,17 +74,299 @@ function SearchableSelect({ value, onChange, options, placeholder, className }: 
     );
 }
 
+const pathSegmentsCache = new Map<string, string[]>();
+function getSegments(path: string): string[] {
+    let segments = pathSegmentsCache.get(path);
+    if (!segments) {
+        const normalizedPath = path.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
+        segments = normalizedPath.split('.');
+        pathSegmentsCache.set(path, segments);
+    }
+    return segments;
+}
+
 function getByDotNotation(obj: any, path: string): string {
     if (!obj || !path) return "";
     try {
-        const normalizedPath = path.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
-        const value = normalizedPath.split('.').reduce((acc, part) => acc && acc[part], obj);
+        const segments = getSegments(path);
+        const value = segments.reduce((acc, part) => acc && acc[part], obj);
         if (value === undefined || value === null) return "";
         if (typeof value === "object") return JSON.stringify(value);
         return String(value);
     } catch (e) {
         return "";
     }
+}
+
+type SuggestionItem = {
+    label: string;
+    value: string;
+};
+
+function getValueByPath(obj: any, path: string): any {
+    if (!obj) return undefined;
+    if (!path) return obj;
+    try {
+        const normalizedPath = path.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
+        const parts = normalizedPath.split('.');
+        let current = obj;
+        for (const part of parts) {
+            if (current === null || current === undefined) return undefined;
+            current = current[part];
+        }
+        return current;
+    } catch (e) {
+        return undefined;
+    }
+}
+
+function getValueChildren(val: any): string[] {
+    if (val === null || val === undefined) return [];
+    if (Array.isArray(val)) {
+        return val.map((_, idx) => String(idx));
+    }
+    if (typeof val === "object") {
+        return Object.keys(val);
+    }
+    return [];
+}
+
+function getJsonBodiesForMapping(col: ColumnMapping, results: ExecutionResult[]): any[] {
+    const bodies: any[] = [];
+    for (const res of results) {
+        if (bodies.length >= 5) break;
+        const steps = res.steps || [];
+        let body: any = null;
+        if (col.source === "response") {
+            const step = col.stepId
+                ? steps.find(s => s.stepId === col.stepId)
+                : steps[steps.length - 1];
+            body = step?.responseBody ?? res.responseBody;
+        } else if (col.source === "request_body") {
+            const step = col.stepId
+                ? steps.find(s => s.stepId === col.stepId)
+                : steps[0];
+            body = step?.requestBody;
+        }
+
+        if (body !== undefined && body !== null) {
+            if (typeof body === "string") {
+                const trimmed = body.trim();
+                if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+                    try {
+                        bodies.push(JSON.parse(trimmed));
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+            } else {
+                bodies.push(body);
+            }
+        }
+    }
+    return bodies;
+}
+
+function getChildrenForPath(bodies: any[], path: string): string[] {
+    const keysSet = new Set<string>();
+    bodies.forEach((body) => {
+        const val = getValueByPath(body, path);
+        const children = getValueChildren(val);
+        children.forEach(child => keysSet.add(child));
+    });
+    return Array.from(keysSet);
+}
+
+function getSuggestionsForInput(inputVal: string, bodies: any[]): SuggestionItem[] {
+    const suggestions: SuggestionItem[] = [];
+    const trimmed = inputVal.trim();
+
+    // 1. If it's a valid path, suggest its children prefixed with a dot
+    if (trimmed) {
+        const children = getChildrenForPath(bodies, trimmed);
+        children.forEach(child => {
+            suggestions.push({
+                label: `.${child}`,
+                value: `${trimmed}.${child}`
+            });
+        });
+    }
+
+    // 2. Parse parent path and filter based on last dot
+    const lastDotIdx = trimmed.lastIndexOf(".");
+    let parentPath = "";
+    let filter = trimmed;
+    let isRoot = true;
+
+    if (lastDotIdx !== -1) {
+        parentPath = trimmed.substring(0, lastDotIdx);
+        filter = trimmed.substring(lastDotIdx + 1);
+        isRoot = false;
+    }
+
+    const parentChildren = getChildrenForPath(bodies, parentPath);
+    parentChildren.forEach(child => {
+        if (child.toLowerCase().startsWith(filter.toLowerCase())) {
+            const label = isRoot ? child : `.${child}`;
+            const value = isRoot ? child : `${parentPath}.${child}`;
+            if (!suggestions.some(s => s.value === value)) {
+                suggestions.push({ label, value });
+            }
+        }
+    });
+
+    return suggestions.filter(s => s.value !== trimmed);
+}
+
+interface PathAutocompleteInputProps {
+    value: string;
+    onChange: (val: string) => void;
+    placeholder: string;
+    col: ColumnMapping;
+    results: ExecutionResult[];
+}
+
+function PathAutocompleteInput({ value, onChange, placeholder, col, results }: PathAutocompleteInputProps) {
+    const [localValue, setLocalValue] = useState(value);
+    const [isOpen, setIsOpen] = useState(false);
+    const [highlightedIndex, setHighlightedIndex] = useState(0);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Sync localValue with prop value from parent
+    useEffect(() => {
+        setLocalValue(value);
+    }, [value]);
+
+    const bodies = useMemo(() => {
+        return getJsonBodiesForMapping(col, results);
+    }, [col, results]);
+
+    // Use localValue to calculate suggestions
+    const suggestions = useMemo(() => {
+        if (!isOpen) return [];
+        return getSuggestionsForInput(localValue, bodies);
+    }, [localValue, bodies, isOpen]);
+
+    useEffect(() => {
+        setHighlightedIndex(0);
+    }, [suggestions]);
+
+    const localValueRef = useRef(localValue);
+    const valueRef = useRef(value);
+
+    // Sync refs
+    useEffect(() => {
+        localValueRef.current = localValue;
+    }, [localValue]);
+
+    useEffect(() => {
+        valueRef.current = value;
+    }, [value]);
+
+    // Cleanup timer on unmount
+    useEffect(() => {
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+        };
+    }, []);
+
+    // Helper to commit changes immediately
+    const commitValue = (val: string) => {
+        if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+        }
+        if (val !== valueRef.current) {
+            onChange(val);
+        }
+    };
+
+    // Debounce updates while typing
+    const handleLocalValueChange = (newVal: string) => {
+        setLocalValue(newVal);
+        setIsOpen(true);
+
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => {
+            onChange(newVal);
+        }, 300); // 300ms debounce during continuous typing
+    };
+
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+                // Commit immediately on blur
+                commitValue(localValueRef.current);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (!isOpen || suggestions.length === 0) {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                setIsOpen(true);
+            }
+            return;
+        }
+
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlightedIndex((prev) => (prev + 1) % suggestions.length);
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlightedIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+        } else if (e.key === "Enter" || e.key === "Tab") {
+            e.preventDefault();
+            const selected = suggestions[highlightedIndex];
+            if (selected) {
+                setLocalValue(selected.value);
+                commitValue(selected.value);
+            } else {
+                commitValue(localValue);
+            }
+            setIsOpen(false);
+        } else if (e.key === "Escape") {
+            setIsOpen(false);
+        }
+    };
+
+    return (
+        <div ref={containerRef} className="relative flex-1 min-w-[120px]">
+            <Input
+                value={localValue}
+                onChange={(e) => handleLocalValueChange(e.target.value)}
+                onFocus={() => setIsOpen(true)}
+                onKeyDown={handleKeyDown}
+                placeholder={placeholder}
+                className="w-full font-mono text-sm"
+            />
+            {isOpen && suggestions.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto z-50 bg-neutral-950/95 backdrop-blur-md text-popover-foreground border border-white/10 rounded-md shadow-lg py-1 font-mono text-xs">
+                    {suggestions.map((s, idx) => (
+                        <button
+                            key={s.value}
+                            type="button"
+                            onClick={() => {
+                                setLocalValue(s.value);
+                                commitValue(s.value);
+                                containerRef.current?.querySelector("input")?.focus();
+                            }}
+                            className={cn(
+                                "w-full text-left px-3 py-1.5 hover:bg-white/10 hover:text-white flex items-center justify-between cursor-pointer border-0 bg-transparent text-white/80",
+                                highlightedIndex === idx && "bg-white/10 text-white"
+                            )}
+                        >
+                            <span>{s.label}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
 }
 
 function formatBody(body: any): string {
@@ -109,11 +391,11 @@ function formatBody(body: any): string {
 function ColumnHeaderWithFilter({
     colId,
     colName,
-    uniqueValues,
+    rawTableData,
 }: {
     colId: string;
     colName: string;
-    uniqueValues: string[];
+    rawTableData: any[];
 }) {
     const tableFilterConfig = useStore(store, (state) => state.tableFilterConfig);
     const activeFilters = tableFilterConfig.columnFilters[colId] || [];
@@ -122,6 +404,16 @@ function ColumnHeaderWithFilter({
 
     const [popoverOpen, setPopoverOpen] = useState(false);
     const [filterSearch, setFilterSearch] = useState("");
+
+    const uniqueValues = useMemo(() => {
+        if (!popoverOpen) return [];
+        const values = new Set<string>();
+        rawTableData.forEach(row => {
+            const val = String(row[colId] ?? "");
+            values.add(val);
+        });
+        return Array.from(values).sort();
+    }, [rawTableData, colId, popoverOpen]);
 
     const handleSort = (direction: "asc" | "desc" | null) => {
         setTableFilterConfig({ sortBy: direction ? colId : null, sortOrder: direction });
@@ -296,6 +588,25 @@ export function ResultsTable() {
     const tableFilterConfig = useStore(store, (state) => state.tableFilterConfig);
     const fileName = useStore(store, (state) => state.fileName);
 
+    const [localMappings, setLocalMappings] = useState(columnMappings);
+
+    // Sync localMappings when store's columnMappings changes from outside (reset, hydration, etc.)
+    useEffect(() => {
+        setLocalMappings(columnMappings);
+    }, [columnMappings]);
+
+    // Debounce syncing localMappings back to the store
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (JSON.stringify(localMappings) !== JSON.stringify(columnMappings)) {
+                React.startTransition(() => {
+                    setColumnMappings(localMappings);
+                });
+            }
+        }, 400); // 400ms debounce
+        return () => clearTimeout(timer);
+    }, [localMappings, columnMappings]);
+
     const [selectedDetail, setSelectedDetail] = useState<{ rowId: number; iteration: number } | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -426,17 +737,8 @@ export function ResultsTable() {
     }, [rawTableData, tableFilterConfig]);
 
     const columns = useMemo<ColumnDef<any>[]>(() => {
-        const getUniqueValues = (colId: string) => {
-            const values = new Set<string>();
-            rawTableData.forEach(row => {
-                const val = String(row[colId] ?? "");
-                values.add(val);
-            });
-            return Array.from(values).sort();
-        };
-
         const dynamicCols: ColumnDef<any>[] = [];
-
+ 
         // Prepend built-in Row # / Run Grouping Column
         dynamicCols.push({
             id: "row_number",
@@ -451,7 +753,7 @@ export function ResultsTable() {
                 );
             }
         });
-
+ 
         columnMappings.forEach((col, idx) => {
             const colId = `col_${idx}`;
             const colName = col.name || `Column ${idx + 1}`;
@@ -462,7 +764,7 @@ export function ResultsTable() {
                     <ColumnHeaderWithFilter
                         colId={colId}
                         colName={colName}
-                        uniqueValues={getUniqueValues(colId)}
+                        rawTableData={rawTableData}
                     />
                 ),
                 cell: (info) => {
@@ -585,18 +887,18 @@ export function ResultsTable() {
     };
 
     const addColumnMapping = () => {
-        setColumnMappings([...columnMappings, { name: `Column ${columnMappings.length + 1}`, source: "variable", path: originalHeaders[0] || "" }]);
+        setLocalMappings([...localMappings, { name: `Column ${localMappings.length + 1}`, source: "variable", path: originalHeaders[0] || "" }]);
     };
 
-    const updateColumnMapping = (index: number, updates: Partial<typeof columnMappings[0]>) => {
-        const newMappings = [...columnMappings];
+    const updateColumnMapping = (index: number, updates: Partial<typeof localMappings[0]>) => {
+        const newMappings = [...localMappings];
         newMappings[index] = { ...newMappings[index], ...updates };
-        setColumnMappings(newMappings);
+        setLocalMappings(newMappings);
     };
 
     const removeColumnMapping = (index: number) => {
-        const newMappings = columnMappings.filter((_, i) => i !== index);
-        setColumnMappings(newMappings);
+        const newMappings = localMappings.filter((_, i) => i !== index);
+        setLocalMappings(newMappings);
     };
 
     return (
@@ -620,7 +922,7 @@ export function ResultsTable() {
                 <div className="space-y-4 p-4 rounded-lg bg-muted/30 border">
                     <h4 className="text-sm font-semibold">Column Mappings</h4>
                     <div className="space-y-3">
-                        {columnMappings.map((col, idx) => (
+                        {localMappings.map((col, idx) => (
                             <div key={idx} className="flex flex-col sm:flex-row sm:space-x-2 items-stretch sm:items-center flex-wrap gap-2 sm:gap-y-2">
                                 <Input
                                     value={col.name}
@@ -688,11 +990,12 @@ export function ResultsTable() {
                                                 className="w-full sm:w-[140px]"
                                             />
                                         )}
-                                        <Input
-                                            value={col.path}
-                                            onChange={(e) => updateColumnMapping(idx, { path: e.target.value })}
+                                        <PathAutocompleteInput
+                                            value={col.path || ""}
+                                            onChange={(val) => updateColumnMapping(idx, { path: val })}
                                             placeholder={col.source === "request_body" ? "e.g. name" : "e.g. data.id"}
-                                            className="flex-1 font-mono text-sm min-w-[120px]"
+                                            col={col}
+                                            results={results}
                                         />
                                     </>
                                 )}
