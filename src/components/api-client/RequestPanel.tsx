@@ -13,7 +13,8 @@ import {
     updateTabLoading,
     saveCollectionRequest,
     updateCollection,
-    markActiveTabClean
+    markActiveTabClean,
+    generateId
 } from "@/lib/store";
 import { runPreRequestScript, runTestScript, resolveVariables } from "@/lib/sandbox";
 import { parseCurl } from "@/lib/curl";
@@ -28,37 +29,9 @@ import { type ApiRequest, type KeyValuePair, type ApiCollection, type ApiFolder 
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { stripJsonComments, cn, processTemplateForFormatting, addItemToCollectionTree } from "@/lib/utils";
-import { generateId } from "@/lib/store";
+import { sendToExtension } from "@/lib/extension";
 
 const abortControllers = new Map<string, AbortController>();
-
-function sendToExtension(payload: any): Promise<any> {
-    return new Promise((resolve) => {
-        const requestId = Math.random().toString(36).substring(2, 15);
-        
-        const timeout = setTimeout(() => {
-            window.removeEventListener("message", handler);
-            resolve({ success: false, error: "Extension timeout" });
-        }, 2000);
-
-        const handler = (event: MessageEvent) => {
-            if (event.source !== window) return;
-            const data = event.data;
-            if (data && data.source === "surge-extension" && data.requestId === requestId) {
-                clearTimeout(timeout);
-                window.removeEventListener("message", handler);
-                resolve(data.payload);
-            }
-        };
-        
-        window.addEventListener("message", handler);
-        window.postMessage({
-            source: "surge-page",
-            requestId,
-            payload
-        }, "*");
-    });
-}
 
 
 const RAW_LANGUAGES = [

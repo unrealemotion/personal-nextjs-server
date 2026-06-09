@@ -26,8 +26,9 @@ import * as xlsx from "xlsx";
 import Editor from "@monaco-editor/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, stripJsonComments } from "@/lib/utils";
-import { toast } from "sonner";
 import { CopyableText } from "@/components/ui/CopyableText";
+import { sendToExtension } from "@/lib/extension";
+import { toast } from "sonner";
 
 
 function SearchableSelect({ value, onChange, options, placeholder, className }: {
@@ -825,15 +826,6 @@ const ResultsTableView = React.memo(function ResultsTableView({
     tableFilterConfig: TableFilterConfig;
     onRowClick: (row: any) => void;
 }) {
-    const [isFiltering, setIsFiltering] = useState(false);
-
-    useEffect(() => {
-        setIsFiltering(true);
-        const timer = setTimeout(() => {
-            setIsFiltering(false);
-        }, 300);
-        return () => clearTimeout(timer);
-    }, [data, columns]);
 
     const table = useReactTable({
         data,
@@ -898,17 +890,8 @@ const ResultsTableView = React.memo(function ResultsTableView({
             </div>
 
             {/* Data Table */}
-            <div className={cn("relative rounded-md border overflow-x-auto w-full min-h-[450px]", isFiltering && "pointer-events-none")}>
-                {isFiltering && (
-                    <div className="absolute inset-0 bg-neutral-950/40 backdrop-blur-[2px] flex items-center justify-center z-10 animate-in fade-in duration-200 rounded-md">
-                        <div className="flex items-center gap-2 bg-neutral-950/80 border border-white/10 px-4 py-2 rounded-lg shadow-xl">
-                            <Loader2 className="w-4 h-4 text-indigo-400 animate-spin" />
-                            <span className="text-xs font-medium text-white/90">Applying filters...</span>
-                        </div>
-                    </div>
-                )}
-                
-                <Table className={cn("transition-opacity duration-300", isFiltering ? "opacity-30" : "opacity-100")}>
+            <div className="relative rounded-md border overflow-x-auto w-full min-h-[450px]">
+                <Table className="transition-opacity duration-300">
                     <TableHeader>
                         {table.getHeaderGroups().map((headerGroup) => (
                             <TableRow key={headerGroup.id}>
@@ -1423,35 +1406,83 @@ export function ResultsTable() {
             let responseRedirected = false;
             let ipAddress: string | null = null;
 
-            try {
-                const res = await fetch(url, {
-                    method: editMethod,
-                    headers,
-                    body: bodyInit
-                });
+            const isExtensionActive = typeof document !== "undefined" &&
+                document.documentElement.getAttribute("data-surge-extension-active") === "true";
 
-                statusCode = res.status;
-                responseStatusText = res.statusText;
-                responseType = res.type;
-                responseRedirected = res.redirected;
-
-                res.headers.forEach((val, key) => {
-                    responseHeaders[key] = val;
-                });
-
+            let extensionRuleId: number | null = null;
+            if (isExtensionActive) {
                 try {
-                    ipAddress = await resolveHostnameIpClient(url);
-                } catch (e) {}
+                    let urlFilter = "*";
+                    try {
+                        let urlStr = url.trim();
+                        if (!/^https?:\/\//i.test(urlStr)) {
+                            urlStr = "http://" + urlStr;
+                        }
+                        const parsed = new URL(urlStr);
+                        urlFilter = parsed.hostname;
+                    } catch (e) {}
 
-                const contentType = res.headers.get("content-type");
-                if (contentType && contentType.includes("application/json")) {
-                    responseBody = await res.json();
-                } else {
-                    responseBody = await res.text();
+                    const extHeaders = Object.entries(reqHeaders).map(([key, value]) => ({
+                        name: key,
+                        value: value
+                    }));
+
+                    const res = await sendToExtension({
+                        action: "setupRequestRules",
+                        urlFilter,
+                        headers: extHeaders,
+                        initiatorOrigin: window.location.origin
+                    });
+                    if (res && res.success) {
+                        extensionRuleId = res.ruleId;
+                    }
+                } catch (e) {
+                    console.warn("Failed to setup extension rules for rerun:", e);
                 }
+            }
 
-                if (!res.ok) {
-                    errorMsg = `HTTP ${res.status}`;
+            try {
+                try {
+                    const res = await fetch(url, {
+                        method: editMethod,
+                        headers,
+                        body: bodyInit
+                    });
+
+                    statusCode = res.status;
+                    responseStatusText = res.statusText;
+                    responseType = res.type;
+                    responseRedirected = res.redirected;
+
+                    res.headers.forEach((val, key) => {
+                        responseHeaders[key] = val;
+                    });
+
+                    try {
+                        ipAddress = await resolveHostnameIpClient(url);
+                    } catch (e) {}
+
+                    const contentType = res.headers.get("content-type");
+                    if (contentType && contentType.includes("application/json")) {
+                        responseBody = await res.json();
+                    } else {
+                        responseBody = await res.text();
+                    }
+
+                    if (!res.ok) {
+                        errorMsg = `HTTP ${res.status}`;
+                    }
+                } finally {
+                    if (extensionRuleId !== null) {
+                        try {
+                            await sendToExtension({
+                                action: "clearRequestRules",
+                                ruleId: extensionRuleId
+                            });
+                        } catch (e) {
+                            console.warn("Failed to clear extension rules for rerun:", e);
+                        }
+                    }
                 }
             } catch (err: any) {
                 errorMsg = err.message || String(err);
