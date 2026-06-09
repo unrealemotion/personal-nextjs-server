@@ -910,9 +910,19 @@ export function ResultsTable() {
     }, [results]);
 
     const rawTableData = useMemo(() => {
+        // Pre-calculate runs count per rowId and iteration using a lookup map
+        const runsCountMap = new Map<string, number>();
+        results.forEach(r => {
+            const runKey = `${r.rowId}_${r.iteration ?? 1}`;
+            runsCountMap.set(runKey, (runsCountMap.get(runKey) || 0) + 1);
+        });
+
         return activeResults.map((res) => {
             const rowData = fileData[res.rowId] || {};
             const rowMap: Record<string, any> = {};
+            const runKey = `${res.rowId}_${res.iteration ?? 1}`;
+            const runsCount = runsCountMap.get(runKey) || 0;
+            const isModified = runsCount > 1;
 
             columnMappings.forEach((col, idx) => {
                 const key = `col_${idx}`;
@@ -958,18 +968,16 @@ export function ResultsTable() {
                         rowMap[key] = res.status === "pending" ? "..." : "";
                     }
                 } else if (col.source === "modified") {
-                    const runs = results.filter(
-                        (r) => r.rowId === res.rowId && (r.iteration ?? 1) === (res.iteration ?? 1)
-                    );
-                    rowMap[key] = runs.length > 1 ? "modified" : "original";
+                    rowMap[key] = isModified ? "modified" : "original";
                 }
             });
+            rowMap.__isModified = isModified;
             rowMap.__status = res.status;
             rowMap.__id = res.rowId;
             rowMap.__iteration = res.iteration;
             return rowMap;
         });
-    }, [results, fileData, columnMappings]);
+    }, [results, activeResults, fileData, columnMappings]);
 
     const data = useMemo(() => {
         let filtered = [...rawTableData];
@@ -1197,6 +1205,61 @@ export function ResultsTable() {
         setLocalMappings(newMappings);
     };
 
+    const memoizedTable = useMemo(() => {
+        return (
+            <Table>
+                <TableHeader>
+                    {table.getHeaderGroups().map((headerGroup) => (
+                        <TableRow key={headerGroup.id}>
+                            {headerGroup.headers.map((header) => (
+                                <TableHead key={header.id}>
+                                    {header.isPlaceholder
+                                        ? null
+                                        : flexRender(
+                                            header.column.columnDef.header,
+                                            header.getContext()
+                                        )}
+                                </TableHead>
+                            ))}
+                        </TableRow>
+                    ))}
+                </TableHeader>
+                <TableBody>
+                    {table.getRowModel().rows?.length ? (
+                        table.getRowModel().rows.map((row) => (
+                            <TableRow
+                                key={row.id}
+                                data-state={row.getIsSelected() && "selected"}
+                                className={cn(
+                                    "cursor-pointer",
+                                    row.original.__isModified && "bg-yellow-500/10 hover:bg-yellow-500/20 data-[state=selected]:bg-yellow-500/20"
+                                )}
+                                onClick={() => {
+                                    const internalId = row.original.__id;
+                                    const iteration = row.original.__iteration ?? 1;
+                                    setSelectedDetail({ rowId: internalId, iteration });
+                                    setIsDialogOpen(true);
+                                }}
+                            >
+                                {row.getVisibleCells().map((cell) => (
+                                    <TableCell key={cell.id}>
+                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                    </TableCell>
+                                ))}
+                            </TableRow>
+                        ))
+                    ) : (
+                        <TableRow>
+                            <TableCell colSpan={columns.length} className="h-24 text-center">
+                                No results mapped.
+                            </TableCell>
+                        </TableRow>
+                    )}
+                </TableBody>
+            </Table>
+        );
+    }, [table, columns, setSelectedDetail, setIsDialogOpen]);
+
     return (
         <Card className="w-full shadow-lg shadow-black/5 rounded-xl bg-card/60 backdrop-blur-sm border-muted-foreground/20">
             <CardHeader>
@@ -1376,53 +1439,7 @@ export function ResultsTable() {
 
                 {/* Data Table */}
                 <div className="rounded-md border overflow-x-auto w-full">
-                    <Table>
-                        <TableHeader>
-                            {table.getHeaderGroups().map((headerGroup) => (
-                                <TableRow key={headerGroup.id}>
-                                    {headerGroup.headers.map((header) => (
-                                        <TableHead key={header.id}>
-                                            {header.isPlaceholder
-                                                ? null
-                                                : flexRender(
-                                                    header.column.columnDef.header,
-                                                    header.getContext()
-                                                )}
-                                        </TableHead>
-                                    ))}
-                                </TableRow>
-                            ))}
-                        </TableHeader>
-                        <TableBody>
-                            {table.getRowModel().rows?.length ? (
-                                table.getRowModel().rows.map((row) => (
-                                    <TableRow
-                                        key={row.id}
-                                        data-state={row.getIsSelected() && "selected"}
-                                        className="cursor-pointer"
-                                        onClick={() => {
-                                            const internalId = row.original.__id;
-                                            const iteration = row.original.__iteration ?? 1;
-                                            setSelectedDetail({ rowId: internalId, iteration });
-                                            setIsDialogOpen(true);
-                                        }}
-                                    >
-                                        {row.getVisibleCells().map((cell) => (
-                                            <TableCell key={cell.id}>
-                                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                            </TableCell>
-                                        ))}
-                                    </TableRow>
-                                ))
-                            ) : (
-                                <TableRow>
-                                    <TableCell colSpan={columns.length} className="h-24 text-center">
-                                        No results mapped.
-                                    </TableCell>
-                                </TableRow>
-                            )}
-                        </TableBody>
-                    </Table>
+                    {memoizedTable}
                 </div>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                     <div className="flex items-center space-x-2 text-sm text-muted-foreground">
