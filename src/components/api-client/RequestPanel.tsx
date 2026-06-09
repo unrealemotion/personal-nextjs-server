@@ -16,6 +16,7 @@ import {
     markActiveTabClean
 } from "@/lib/store";
 import { runPreRequestScript, runTestScript, resolveVariables } from "@/lib/sandbox";
+import { parseCurl } from "@/lib/curl";
 import { getMethodColor } from "./CollectionSidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,35 @@ import { stripJsonComments, cn, processTemplateForFormatting, addItemToCollectio
 import { generateId } from "@/lib/store";
 
 const abortControllers = new Map<string, AbortController>();
+
+function sendToExtension(payload: any): Promise<any> {
+    return new Promise((resolve) => {
+        const requestId = Math.random().toString(36).substring(2, 15);
+        
+        const timeout = setTimeout(() => {
+            window.removeEventListener("message", handler);
+            resolve({ success: false, error: "Extension timeout" });
+        }, 2000);
+
+        const handler = (event: MessageEvent) => {
+            if (event.source !== window) return;
+            const data = event.data;
+            if (data && data.source === "surge-extension" && data.requestId === requestId) {
+                clearTimeout(timeout);
+                window.removeEventListener("message", handler);
+                resolve(data.payload);
+            }
+        };
+        
+        window.addEventListener("message", handler);
+        window.postMessage({
+            source: "surge-page",
+            requestId,
+            payload
+        }, "*");
+    });
+}
+
 
 const RAW_LANGUAGES = [
     { label: "Text", value: "text" },
@@ -171,6 +201,17 @@ export function RequestPanel() {
     const [isCreatingFolder, setIsCreatingFolder] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
     const [isSaveAsPopoverOpen, setIsSaveAsPopoverOpen] = useState(false);
+    const [isExtensionActive, setIsExtensionActive] = useState(false);
+
+    useEffect(() => {
+        const checkExtension = () => {
+            const active = document.documentElement.getAttribute("data-surge-extension-active") === "true";
+            setIsExtensionActive(active);
+        };
+        checkExtension();
+        const timer = setTimeout(checkExtension, 150);
+        return () => clearTimeout(timer);
+    }, []);
 
     const editorRef = useRef<any>(null);
     const monacoRef = useRef<any>(null);
@@ -451,6 +492,54 @@ export function RequestPanel() {
         const params = [...parsedParams, ...existingDisabled];
 
         updateActiveTabRequest({ url, params });
+    };
+
+    const handleUrlPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+        const pastedText = e.clipboardData.getData("text");
+        if (pastedText.trim().startsWith("curl ")) {
+            e.preventDefault();
+            const parsed = parseCurl(pastedText);
+            if (parsed) {
+                const mappedHeaders = (parsed.headers || []).map(h => ({
+                    key: h.key,
+                    value: h.value,
+                    enabled: true
+                }));
+                const mappedParams = (parsed.params || []).map(p => ({
+                    key: p.key,
+                    value: p.value,
+                    enabled: true
+                }));
+                
+                const mappedBody = {
+                    mode: parsed.body?.mode || "none",
+                    raw: parsed.body?.raw || "",
+                    rawLanguage: parsed.body?.rawLanguage || "json",
+                    formdata: (parsed.body?.formdata || []).map((f: any) => ({
+                        key: f.key,
+                        value: f.value,
+                        enabled: true,
+                        type: f.type || "text"
+                    })),
+                    urlencoded: (parsed.body?.urlencoded || []).map((u: any) => ({
+                        key: u.key,
+                        value: u.value,
+                        enabled: true
+                    }))
+                };
+
+                updateActiveTabRequest({
+                    method: parsed.method || "GET",
+                    url: parsed.url || "",
+                    headers: mappedHeaders,
+                    params: mappedParams,
+                    body: mappedBody
+                });
+                toast.success("cURL command imported and parsed!");
+            } else {
+                toast.error("Invalid or unsupported cURL command");
+            }
+        }
     };
 
     const rebuildUrlFromParams = (baseUrl: string, params: KeyValuePair[]) => {
@@ -777,14 +866,62 @@ export function RequestPanel() {
                 throw new Error("URL is empty.");
             }
 
+            let extensionRuleId: number | null = null;
+            if (isExtensionActive) {
+                try {
+                    let urlFilter = "*";
+                    try {
+                        let urlStr = interpolatedUrl.trim();
+                        if (!/^https?:\/\//i.test(urlStr)) {
+                            urlStr = "http://" + urlStr;
+                        }
+                        const parsed = new URL(urlStr);
+                        urlFilter = parsed.hostname;
+                    } catch (e) {}
+
+                    const extHeaders = Object.entries(rawHeadersMap).map(([key, value]) => ({
+                        name: key,
+                        value: value
+                    }));
+
+                    const res = await sendToExtension({
+                        action: "setupRequestRules",
+                        urlFilter,
+                        headers: extHeaders,
+                        initiatorOrigin: window.location.origin
+                    });
+                    if (res && res.success) {
+                        extensionRuleId = res.ruleId;
+                    } else if (res && res.error) {
+                        toast.error(res.error);
+                    }
+                } catch (e) {
+                    console.warn("Failed to setup extension rules:", e);
+                }
+            }
+
             const startTime = performance.now();
-            const fetchRes = await fetch(interpolatedUrl, {
-                method: request.method,
-                headers,
-                body: fetchBody,
-                mode: "cors", // browser request
-                signal: controller.signal
-            });
+            let fetchRes;
+            try {
+                fetchRes = await fetch(interpolatedUrl, {
+                    method: request.method,
+                    headers,
+                    body: fetchBody,
+                    mode: "cors", // browser request
+                    signal: controller.signal
+                });
+            } finally {
+                if (extensionRuleId !== null) {
+                    try {
+                        await sendToExtension({
+                            action: "clearRequestRules",
+                            ruleId: extensionRuleId
+                        });
+                    } catch (e) {
+                        console.warn("Failed to clear extension rules:", e);
+                    }
+                }
+            }
             const endTime = performance.now();
 
             const text = await fetchRes.text();
@@ -1008,13 +1145,28 @@ export function RequestPanel() {
 
             {/* Request controls */}
             <div className="space-y-3 shrink-0">
-                {/* Request Name input */}
-                <Input
-                    value={request.name}
-                    onChange={(e) => updateActiveTabRequest({ name: e.target.value })}
-                    className="text-sm font-bold bg-transparent border-transparent hover:border-white/5 focus:border-indigo-500/50 p-0 h-auto shadow-none focus-visible:ring-0"
-                    placeholder="Untitled Request"
-                />
+                {/* Request Name input & Extension Status */}
+                <div className="flex justify-between items-center">
+                    <Input
+                        value={request.name}
+                        onChange={(e) => updateActiveTabRequest({ name: e.target.value })}
+                        className="text-sm font-bold bg-transparent border-transparent hover:border-white/5 focus:border-indigo-500/50 p-0 h-auto shadow-none focus-visible:ring-0 flex-grow"
+                        placeholder="Untitled Request"
+                    />
+                    <div className="flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full border bg-neutral-900 border-white/5 select-none shrink-0">
+                        {isExtensionActive ? (
+                            <>
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span className="text-emerald-400 font-bold uppercase tracking-wider">Extension Connected (CORS Bypassed)</span>
+                            </>
+                        ) : (
+                            <>
+                                <span className="w-1.5 h-1.5 rounded-full bg-white/20" />
+                                <span className="text-white/40 font-semibold uppercase tracking-wider" title="Install the helper extension to bypass CORS and inject cookies. Check the /extension directory for instructions.">Extension Disconnected</span>
+                            </>
+                        )}
+                    </div>
+                </div>
 
                 {/* HTTP Method + URL Input */}
                 <div className="flex gap-2">
@@ -1033,6 +1185,7 @@ export function RequestPanel() {
                         placeholder="https://api.example.com/users"
                         value={request.url}
                         onChange={(e) => handleUrlChange(e.target.value)}
+                        onPaste={handleUrlPaste}
                         className="flex-grow font-mono text-xs bg-neutral-950/60 border-white/5 focus-visible:ring-indigo-500"
                     />
 

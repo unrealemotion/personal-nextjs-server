@@ -63,8 +63,8 @@ export function parseCurl(curlCommand: string): Partial<RequestTemplate> | null 
             return null; // Invalid if no URL found
         }
 
-        // 2. Extract Method
-        const methodMatch = normalizedCmd.match(/(-X|--request)\s+([A-Z]+)/);
+        // 2. Extract Method (supporting quotes, e.g. -X 'PUT' or -X "POST")
+        const methodMatch = normalizedCmd.match(/(-X|--request)\s+['"]?([A-Z]+)['"]?/);
         if (methodMatch && methodMatch[2]) {
             template.method = methodMatch[2] as any;
         }
@@ -81,6 +81,16 @@ export function parseCurl(curlCommand: string): Partial<RequestTemplate> | null 
                     const value = headerStr.substring(colonIdx + 1).trim();
                     template.headers?.push({ key, value });
                 }
+            }
+        }
+
+        // 3b. Extract Cookies from -b or --cookie option
+        const cookieRegex = /(?:-b|--cookie)\s+(['"])(.*?)\1|(?:-b|--cookie)\s+([^\s'"]+)/g;
+        let cMatch;
+        while ((cMatch = cookieRegex.exec(normalizedCmd)) !== null) {
+            const cookieStr = cMatch[2] || cMatch[3];
+            if (cookieStr) {
+                template.headers?.push({ key: "Cookie", value: cookieStr });
             }
         }
 
