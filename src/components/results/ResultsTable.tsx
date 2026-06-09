@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Download, Plus, Trash2, Eye, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play } from "lucide-react";
+import { Download, Plus, Trash2, Eye, EyeOff, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play, Settings, Database, ArrowUpRight, ArrowDownLeft, Activity, AlertCircle, Clock, Sparkles } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as xlsx from "xlsx";
 import Editor from "@monaco-editor/react";
@@ -401,12 +401,13 @@ function ColumnHeaderWithFilter({
     rawTableData: any[];
 }) {
     const tableFilterConfig = useStore(store, (state) => state.tableFilterConfig);
-    const activeFilters = tableFilterConfig.columnFilters[colId] || [];
+    const activeFilters = tableFilterConfig.columnFilters ? tableFilterConfig.columnFilters[colId] : undefined; // can be undefined
     const sortBy = tableFilterConfig.sortBy;
     const sortOrder = tableFilterConfig.sortOrder;
 
     const [popoverOpen, setPopoverOpen] = useState(false);
     const [filterSearch, setFilterSearch] = useState("");
+    const [localActiveFilters, setLocalActiveFilters] = useState<string[] | undefined>(undefined);
 
     const uniqueValues = useMemo(() => {
         if (!popoverOpen) return [];
@@ -422,58 +423,68 @@ function ColumnHeaderWithFilter({
         setTableFilterConfig({ sortBy: direction ? colId : null, sortOrder: direction });
     };
 
-    const toggleValue = (val: string) => {
-        let newFilters = [...activeFilters];
-        if (activeFilters.length === 0) {
-            newFilters = uniqueValues.filter(v => v !== val);
+    const handleOpenChange = (open: boolean) => {
+        setPopoverOpen(open);
+        if (open) {
+            setLocalActiveFilters(activeFilters);
         } else {
-            if (activeFilters.includes(val)) {
-                newFilters = activeFilters.filter(v => v !== val);
-            } else {
-                newFilters.push(val);
-            }
-        }
-
-        if (newFilters.length === uniqueValues.length || newFilters.length === 0) {
+            setFilterSearch("");
             const updatedFilters = { ...tableFilterConfig.columnFilters };
-            delete updatedFilters[colId];
+            if (localActiveFilters === undefined) {
+                delete updatedFilters[colId];
+            } else {
+                updatedFilters[colId] = localActiveFilters;
+            }
             setTableFilterConfig({ columnFilters: updatedFilters });
-        } else {
-            setTableFilterConfig({
-                columnFilters: {
-                    ...tableFilterConfig.columnFilters,
-                    [colId]: newFilters,
-                },
-            });
         }
     };
 
-    const isChecked = (val: string) => {
-        if (activeFilters.length === 0) return true;
-        return activeFilters.includes(val);
+    const toggleValueLocal = (val: string) => {
+        const currentFilters = localActiveFilters !== undefined && !localActiveFilters.includes("__NONE_SELECTED__")
+            ? localActiveFilters 
+            : [];
+            
+        let newFilters = localActiveFilters !== undefined ? [...currentFilters] : [...uniqueValues];
+        
+        if (newFilters.includes(val)) {
+            newFilters = newFilters.filter(v => v !== val);
+        } else {
+            newFilters.push(val);
+        }
+
+        if (newFilters.length === uniqueValues.length) {
+            setLocalActiveFilters(undefined);
+        } else if (newFilters.length === 0) {
+            setLocalActiveFilters(["__NONE_SELECTED__"]);
+        } else {
+            setLocalActiveFilters(newFilters);
+        }
     };
 
-    const handleSelectAll = () => {
-        const updatedFilters = { ...tableFilterConfig.columnFilters };
-        delete updatedFilters[colId];
-        setTableFilterConfig({ columnFilters: updatedFilters });
+    const isCheckedLocal = (val: string) => {
+        if (localActiveFilters === undefined) return true;
+        if (localActiveFilters.includes("__NONE_SELECTED__")) return false;
+        return localActiveFilters.includes(val);
     };
 
-    const handleClearAll = () => {
-        setTableFilterConfig({
-            columnFilters: {
-                ...tableFilterConfig.columnFilters,
-                [colId]: ["__NON_EXISTENT_VALUE__"],
-            },
-        });
+    const handleSelectAllLocal = () => {
+        setLocalActiveFilters(undefined);
+    };
+
+    const handleClearAllLocal = () => {
+        setLocalActiveFilters(["__NONE_SELECTED__"]);
     };
 
     const filteredValues = uniqueValues.filter(val =>
         String(val).toLowerCase().includes(filterSearch.toLowerCase())
     );
 
+    const visibleValues = useMemo(() => {
+        return filteredValues.slice(0, 100);
+    }, [filteredValues]);
+
     const isSorted = sortBy === colId;
-    const hasFilter = activeFilters.length > 0;
+    const hasFilter = activeFilters !== undefined;
 
     return (
         <div className="flex items-center space-x-1.5 group select-none">
@@ -487,10 +498,7 @@ function ColumnHeaderWithFilter({
                 )}
             </span>
 
-            <Popover open={popoverOpen} onOpenChange={(open) => {
-                setPopoverOpen(open);
-                if (!open) setFilterSearch("");
-            }}>
+            <Popover open={popoverOpen} onOpenChange={handleOpenChange}>
                 <PopoverTrigger asChild>
                     <Button
                         variant="ghost"
@@ -539,13 +547,13 @@ function ColumnHeaderWithFilter({
 
                         <div className="flex items-center justify-between text-[10px] px-1">
                             <button
-                                onClick={handleSelectAll}
+                                onClick={handleSelectAllLocal}
                                 className="text-primary hover:underline font-semibold"
                             >
                                 Select All
                             </button>
                             <button
-                                onClick={handleClearAll}
+                                onClick={handleClearAllLocal}
                                 className="text-muted-foreground hover:underline font-semibold"
                             >
                                 Clear All
@@ -553,21 +561,25 @@ function ColumnHeaderWithFilter({
                         </div>
 
                         <div className="max-h-[120px] overflow-y-auto space-y-1 scrollbar-hide py-1 border-t border-b border-muted">
-                            {filteredValues.length > 0 ? (
-                                filteredValues.map((val, idx) => (
-                                    <label
+                            {visibleValues.length > 0 ? (
+                                visibleValues.map((val, idx) => (
+                                    <div
                                         key={idx}
-                                        className="flex items-center space-x-2 rounded-md px-1 py-0.5 hover:bg-muted/50 cursor-pointer text-[11px]"
+                                        className="flex items-center space-x-2 rounded-md px-1 py-0.5 hover:bg-muted/50 text-[11px]"
                                     >
                                         <Checkbox
-                                            checked={isChecked(val)}
-                                            onCheckedChange={() => toggleValue(val)}
+                                            checked={isCheckedLocal(val)}
+                                            onCheckedChange={() => toggleValueLocal(val)}
                                             className="w-3.5 h-3.5"
                                         />
-                                        <span className="truncate max-w-[140px]" title={val}>
+                                        <span 
+                                            className="truncate max-w-[140px] cursor-pointer select-none" 
+                                            title={val}
+                                            onClick={() => toggleValueLocal(val)}
+                                        >
                                             {val === "" ? <em className="text-muted-foreground/60">(Blank)</em> : val}
                                         </span>
-                                    </label>
+                                    </div>
                                 ))
                             ) : (
                                 <div className="text-center text-[10px] text-muted-foreground py-1">
@@ -575,12 +587,91 @@ function ColumnHeaderWithFilter({
                                 </div>
                             )}
                         </div>
+                        {filteredValues.length > 100 && (
+                            <div className="text-[9px] text-muted-foreground text-center pt-0.5 italic select-none">
+                                Showing first 100 of {filteredValues.length} values. Search to refine.
+                            </div>
+                        )}
                     </div>
                 </PopoverContent>
             </Popover>
         </div>
     );
 }
+
+const sourceConfig: Record<string, {
+    label: string;
+    bgColor: string;
+    borderColor: string;
+    borderLeft: string;
+    textColor: string;
+    icon: React.ComponentType<{ className?: string }>;
+}> = {
+    variable: {
+        label: "Variable",
+        bgColor: "bg-emerald-500/5 hover:bg-emerald-500/10",
+        borderColor: "border-emerald-500/15 hover:border-emerald-500/30",
+        borderLeft: "border-l-emerald-500/70",
+        textColor: "text-emerald-400",
+        icon: Database
+    },
+    request_body: {
+        label: "Req Body",
+        bgColor: "bg-purple-500/5 hover:bg-purple-500/10",
+        borderColor: "border-purple-500/15 hover:border-purple-500/30",
+        borderLeft: "border-l-purple-500/70",
+        textColor: "text-purple-400",
+        icon: ArrowUpRight
+    },
+    request_param: {
+        label: "Req Param",
+        bgColor: "bg-cyan-500/5 hover:bg-cyan-500/10",
+        borderColor: "border-cyan-500/15 hover:border-cyan-500/30",
+        borderLeft: "border-l-cyan-500/70",
+        textColor: "text-cyan-400",
+        icon: ArrowUpRight
+    },
+    response: {
+        label: "Response",
+        bgColor: "bg-indigo-500/5 hover:bg-indigo-500/10",
+        borderColor: "border-indigo-500/15 hover:border-indigo-500/30",
+        borderLeft: "border-l-indigo-500/70",
+        textColor: "text-indigo-400",
+        icon: ArrowDownLeft
+    },
+    status: {
+        label: "Status Code",
+        bgColor: "bg-sky-500/5 hover:bg-sky-500/10",
+        borderColor: "border-sky-500/15 hover:border-sky-500/30",
+        borderLeft: "border-l-sky-500/70",
+        textColor: "text-sky-400",
+        icon: Activity
+    },
+    error: {
+        label: "Error Msg",
+        bgColor: "bg-rose-500/5 hover:bg-rose-500/10",
+        borderColor: "border-rose-500/15 hover:border-rose-500/30",
+        borderLeft: "border-l-rose-500/70",
+        textColor: "text-rose-400",
+        icon: AlertCircle
+    },
+    response_time: {
+        label: "Duration",
+        bgColor: "bg-amber-500/5 hover:bg-amber-500/10",
+        borderColor: "border-amber-500/15 hover:border-amber-500/30",
+        borderLeft: "border-l-amber-500/70",
+        textColor: "text-amber-400",
+        icon: Clock
+    },
+    modified: {
+        label: "Modified",
+        bgColor: "bg-pink-500/5 hover:bg-pink-500/10",
+        borderColor: "border-pink-500/15 hover:border-pink-500/30",
+        borderLeft: "border-l-pink-500/70",
+        textColor: "text-pink-400",
+        icon: Sparkles
+    }
+};
 
 export function ResultsTable() {
     const results = useStore(store, (state) => state.results);
@@ -613,6 +704,7 @@ export function ResultsTable() {
     const [selectedDetail, setSelectedDetail] = useState<{ rowId: number; iteration: number } | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [exportDialogOpen, setExportDialogOpen] = useState(false);
+    const [isMappingDialogOpen, setIsMappingDialogOpen] = useState(false);
 
     // Edit/Rerun states
     const [isEditing, setIsEditing] = useState(false);
@@ -983,7 +1075,7 @@ export function ResultsTable() {
         let filtered = [...rawTableData];
 
         Object.entries(tableFilterConfig.columnFilters).forEach(([colKey, allowedValues]) => {
-            if (allowedValues && allowedValues.length > 0) {
+            if (allowedValues !== undefined) {
                 filtered = filtered.filter(row => {
                     const val = String(row[colKey] ?? "");
                     return allowedValues.includes(val);
@@ -1066,6 +1158,7 @@ export function ResultsTable() {
         });
  
         columnMappings.forEach((col, idx) => {
+            if (col.visible === false) return;
             const colId = `col_${idx}`;
             const colName = col.name || `Column ${idx + 1}`;
             dynamicCols.push({
@@ -1125,6 +1218,11 @@ export function ResultsTable() {
         }
     });
 
+    // Reset page index when search query or column filters change
+    useEffect(() => {
+        table.setPageIndex(0);
+    }, [tableFilterConfig.searchQuery, tableFilterConfig.columnFilters, table]);
+
     const executeExport = (onlyFiltered: boolean) => {
         const dataToExport = onlyFiltered ? data : rawTableData;
         if (dataToExport.length === 0) {
@@ -1137,6 +1235,7 @@ export function ResultsTable() {
             cleanRow["Source Row"] = row.__id + 1;
             cleanRow["Run Iteration"] = row.__iteration ?? 1;
             columnMappings.forEach((col, idx) => {
+                if (col.visible === false) return;
                 const colName = col.name || `Column ${idx + 1}`;
                 const finalName = cleanRow[colName] !== undefined ? `${colName} (${idx})` : colName;
                 cleanRow[finalName] = row[`col_${idx}`];
@@ -1178,9 +1277,7 @@ export function ResultsTable() {
 
         const hasActiveFilters = !!(
             tableFilterConfig.searchQuery.trim() ||
-            Object.keys(tableFilterConfig.columnFilters).some(
-                (k) => tableFilterConfig.columnFilters[k]?.length > 0
-            )
+            Object.keys(tableFilterConfig.columnFilters).length > 0
         );
 
         if (hasActiveFilters) {
@@ -1205,60 +1302,7 @@ export function ResultsTable() {
         setLocalMappings(newMappings);
     };
 
-    const memoizedTable = useMemo(() => {
-        return (
-            <Table>
-                <TableHeader>
-                    {table.getHeaderGroups().map((headerGroup) => (
-                        <TableRow key={headerGroup.id}>
-                            {headerGroup.headers.map((header) => (
-                                <TableHead key={header.id}>
-                                    {header.isPlaceholder
-                                        ? null
-                                        : flexRender(
-                                            header.column.columnDef.header,
-                                            header.getContext()
-                                        )}
-                                </TableHead>
-                            ))}
-                        </TableRow>
-                    ))}
-                </TableHeader>
-                <TableBody>
-                    {table.getRowModel().rows?.length ? (
-                        table.getRowModel().rows.map((row) => (
-                            <TableRow
-                                key={row.id}
-                                data-state={row.getIsSelected() && "selected"}
-                                className={cn(
-                                    "cursor-pointer",
-                                    row.original.__isModified && "bg-yellow-500/10 hover:bg-yellow-500/20 data-[state=selected]:bg-yellow-500/20"
-                                )}
-                                onClick={() => {
-                                    const internalId = row.original.__id;
-                                    const iteration = row.original.__iteration ?? 1;
-                                    setSelectedDetail({ rowId: internalId, iteration });
-                                    setIsDialogOpen(true);
-                                }}
-                            >
-                                {row.getVisibleCells().map((cell) => (
-                                    <TableCell key={cell.id}>
-                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                    </TableCell>
-                                ))}
-                            </TableRow>
-                        ))
-                    ) : (
-                        <TableRow>
-                            <TableCell colSpan={columns.length} className="h-24 text-center">
-                                No results mapped.
-                            </TableCell>
-                        </TableRow>
-                    )}
-                </TableBody>
-            </Table>
-        );
-    }, [table, columns, setSelectedDetail, setIsDialogOpen]);
+
 
     return (
         <Card className="w-full shadow-lg shadow-black/5 rounded-xl bg-card/60 backdrop-blur-sm border-muted-foreground/20">
@@ -1277,120 +1321,258 @@ export function ResultsTable() {
                 </div>
             </CardHeader>
             <CardContent className="space-y-6">
-                {/* Mapping Configurator */}
-                <div className="space-y-4 p-4 rounded-lg bg-muted/30 border">
-                    <h4 className="text-sm font-semibold">Column Mappings</h4>
-                    <div className="space-y-3">
-                        {localMappings.map((col, idx) => (
-                            <div key={idx} className="flex flex-col sm:flex-row sm:space-x-2 items-stretch sm:items-center flex-wrap gap-2 sm:gap-y-2">
-                                <Input
-                                    value={col.name}
-                                    onChange={(e) => updateColumnMapping(idx, { name: e.target.value })}
-                                    placeholder="Column Name"
-                                    className="w-full sm:w-[180px]"
-                                />
-                                <Select value={col.source} onValueChange={(val: any) => updateColumnMapping(idx, { source: val, path: "", stepId: undefined })}>
-                                    <SelectTrigger className="w-full sm:w-[150px]">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="variable">Variable (Row)</SelectItem>
-                                        <SelectItem value="request_body">Request Body</SelectItem>
-                                        <SelectItem value="request_param">Request Param</SelectItem>
-                                        <SelectItem value="response">Response JSON</SelectItem>
-                                        <SelectItem value="status">Status Code</SelectItem>
-                                        <SelectItem value="error">Error Message</SelectItem>
-                                        <SelectItem value="response_time">Response Time (ms)</SelectItem>
-                                        <SelectItem value="modified">Modified (true/false)</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                {col.source === "variable" && (
-                                    <SearchableSelect
-                                        value={col.path || ""}
-                                        onChange={(val) => updateColumnMapping(idx, { path: val })}
-                                        options={originalHeaders.map(h => ({ label: h, value: h }))}
-                                        placeholder="Select variable"
-                                        className="w-full sm:w-[160px]"
-                                    />
-                                )}
-                                {col.source === "request_param" && (() => {
-                                    // Gather all unique param keys from all templates
-                                    const allParams = Array.from(
-                                        new Set(templates.flatMap(t => (t.params || []).map(p => p.key).filter(Boolean)))
-                                    );
-                                    return (
-                                        <>
-                                            {templates.length > 1 && (
-                                                <SearchableSelect
-                                                    value={col.stepId || ""}
-                                                    onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
-                                                    options={[{ label: "All", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
-                                                    placeholder="All steps"
-                                                    className="w-full sm:w-[140px]"
-                                                />
-                                            )}
+                {/* Mapping Configurator Summary */}
+                <div
+                    onClick={() => setIsMappingDialogOpen(true)}
+                    className="group flex flex-col gap-3.5 p-5 rounded-xl bg-neutral-900/40 border border-white/5 hover:border-indigo-500/30 hover:bg-neutral-900/60 transition-all duration-300 cursor-pointer shadow-sm relative overflow-hidden"
+                >
+                    {/* Subtle glow effect */}
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none group-hover:bg-indigo-500/10 transition-all duration-300" />
+                    
+                    <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2.5">
+                            <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 group-hover:scale-105 transition-transform duration-300">
+                                <Settings className="w-4 h-4" />
+                            </div>
+                            <div>
+                                <h4 className="text-xs uppercase tracking-wider font-bold text-white/40">Active Column Mappings</h4>
+                                <p className="text-xs text-white/80 group-hover:text-indigo-400 transition-colors mt-0.5 font-medium">
+                                    {localMappings.length} {localMappings.length === 1 ? "Column" : "Columns"} configured to format the results table
+                                </p>
+                            </div>
+                        </div>
+                        <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider px-2 py-1 rounded bg-indigo-500/10 border border-indigo-500/20 group-hover:bg-indigo-650 group-hover:text-white transition-all duration-300">
+                            Configure
+                        </span>
+                    </div>
+
+                    {/* Summary Node Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2.5 pt-1">
+                        {localMappings.map((col, idx) => {
+                            const isVisible = col.visible !== false;
+                            const cfg = sourceConfig[col.source] || {
+                                label: col.source,
+                                bgColor: "bg-white/5 hover:bg-white/10",
+                                borderColor: "border-white/10 hover:border-white/20",
+                                borderLeft: "border-l-white/40",
+                                textColor: "text-white/80",
+                                icon: Database
+                            };
+                            const IconComponent = cfg.icon;
+                            
+                            return (
+                                <div
+                                    key={idx}
+                                    className={cn(
+                                        "relative flex flex-col justify-between p-2.5 rounded-lg border border-white/5 border-l-[3px]",
+                                        cfg.borderLeft,
+                                        cfg.bgColor,
+                                        cfg.borderColor,
+                                        "transition-all duration-200 hover:scale-[1.02] hover:shadow-md hover:shadow-black/25 min-h-[64px] min-w-0",
+                                        !isVisible && "opacity-40 saturate-50 hover:opacity-70"
+                                    )}
+                                >
+                                    {/* Visibility Toggle Button */}
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const newMappings = [...localMappings];
+                                            newMappings[idx] = { ...newMappings[idx], visible: !isVisible };
+                                            setLocalMappings(newMappings);
+                                        }}
+                                        className="absolute top-1.5 right-1.5 p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-all duration-150 shrink-0"
+                                        title={isVisible ? "Hide column from table & export" : "Show column in table & export"}
+                                    >
+                                        {isVisible ? (
+                                            <Eye className="w-3.5 h-3.5 text-white/50 hover:text-white" />
+                                        ) : (
+                                            <EyeOff className="w-3.5 h-3.5 text-rose-400" />
+                                        )}
+                                    </button>
+
+                                    <div className="flex items-start justify-between gap-1 w-full min-w-0 pr-5">
+                                        <span className="font-semibold text-[11px] text-white/95 truncate leading-tight select-none w-full" title={col.name || `Column ${idx + 1}`}>
+                                            {col.name || `Column ${idx + 1}`}
+                                        </span>
+                                    </div>
+                                    <div className="flex flex-col mt-1.5 w-full min-w-0">
+                                        <div className="flex items-center gap-1 w-full min-w-0">
+                                            <IconComponent className={cn("w-3 h-3 shrink-0", cfg.textColor)} />
+                                            <span className={cn("text-[9px] font-bold uppercase tracking-wider select-none", cfg.textColor)}>
+                                                {cfg.label}
+                                            </span>
+                                        </div>
+                                        {col.path && (
+                                            <span 
+                                                className="text-[9px] text-white/35 font-mono truncate mt-1 pt-0.5 border-t border-white/5 w-full block" 
+                                                title={col.path}
+                                            >
+                                                {col.path}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        {localMappings.length === 0 && (
+                            <div className="col-span-full text-xs text-muted-foreground italic py-3 text-center bg-neutral-950/20 border border-dashed border-white/5 rounded-lg w-full">
+                                No columns mapped. Click here to configure mappings.
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Column Mappings Dialog */}
+                <Dialog open={isMappingDialogOpen} onOpenChange={setIsMappingDialogOpen}>
+                    <DialogContent className="w-[95vw] max-w-[95vw] sm:!max-w-[90vw] md:!max-w-[85vw] h-[85vh] flex flex-col overflow-hidden bg-neutral-950 text-white border-neutral-800">
+                        <DialogHeader>
+                            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+                                <Settings className="w-5 h-5 text-indigo-400" />
+                                <span>Configure Column Mappings</span>
+                            </DialogTitle>
+                            <DialogDescription className="text-xs text-neutral-400">
+                                Define the mappings to extract values from variables or API results and render them as columns.
+                            </DialogDescription>
+                        </DialogHeader>
+                        
+                        <div className="flex-1 overflow-y-auto pr-1 py-4 space-y-4 min-h-0 border-t border-b border-white/5 my-2">
+                            <div className="space-y-3">
+                                {localMappings.map((col, idx) => (
+                                    <div key={idx} className="flex flex-col sm:flex-row sm:space-x-2 items-stretch sm:items-center flex-wrap gap-2 sm:gap-y-2 bg-neutral-900/30 p-2.5 rounded-lg border border-white/5">
+                                        <Input
+                                            value={col.name}
+                                            onChange={(e) => updateColumnMapping(idx, { name: e.target.value })}
+                                            placeholder="Column Name"
+                                            className="w-full sm:w-[180px] bg-neutral-950 border-white/10 text-white"
+                                        />
+                                        <Select value={col.source} onValueChange={(val: any) => updateColumnMapping(idx, { source: val, path: "", stepId: undefined })}>
+                                            <SelectTrigger className="w-full sm:w-[150px] bg-neutral-950 border-white/10 text-white">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent className="bg-neutral-950 border-white/10 text-white">
+                                                <SelectItem value="variable">Variable (Row)</SelectItem>
+                                                <SelectItem value="request_body">Request Body</SelectItem>
+                                                <SelectItem value="request_param">Request Param</SelectItem>
+                                                <SelectItem value="response">Response JSON</SelectItem>
+                                                <SelectItem value="status">Status Code</SelectItem>
+                                                <SelectItem value="error">Error Message</SelectItem>
+                                                <SelectItem value="response_time">Response Time (ms)</SelectItem>
+                                                <SelectItem value="modified">Modified (true/false)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        {col.source === "variable" && (
                                             <SearchableSelect
                                                 value={col.path || ""}
                                                 onChange={(val) => updateColumnMapping(idx, { path: val })}
-                                                options={allParams.map(p => ({ label: p, value: p }))}
-                                                placeholder="Select param"
-                                                className="w-full sm:w-[160px]"
-                                            />
-                                        </>
-                                    );
-                                })()}
-                                {(col.source === "request_body" || col.source === "response") && (
-                                    <>
-                                        {templates.length > 1 && (
-                                            <SearchableSelect
-                                                value={col.stepId || ""}
-                                                onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
-                                                options={[{ label: "All (Last)", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
-                                                placeholder="All / Last"
-                                                className="w-full sm:w-[140px]"
+                                                options={originalHeaders.map(h => ({ label: h, value: h }))}
+                                                placeholder="Select variable"
+                                                className="w-full sm:w-[160px] bg-neutral-950 border-white/10 text-white"
                                             />
                                         )}
-                                        <PathAutocompleteInput
-                                            value={col.path || ""}
-                                            onChange={(val) => updateColumnMapping(idx, { path: val })}
-                                            placeholder={col.source === "request_body" ? "e.g. name" : "e.g. data.id"}
-                                            col={col}
-                                            results={results}
-                                        />
-                                    </>
-                                )}
-                                {col.source === "response_time" && (
-                                    <>
-                                        {templates.length > 1 ? (
-                                            <SearchableSelect
-                                                value={col.stepId || ""}
-                                                onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
-                                                options={[{ label: "All (Last)", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
-                                                placeholder="All / Last"
-                                                className="w-full sm:w-[140px]"
-                                            />
-                                        ) : null}
-                                        <div className="flex-1 text-sm text-muted-foreground flex items-center px-3 border border-transparent">
-                                            Automatic Value (Response Time)
-                                        </div>
-                                    </>
-                                )}
-                                {(col.source === "status" || col.source === "error" || col.source === "modified") && (
-                                    <div className="flex-1 text-sm text-muted-foreground flex items-center px-3 border border-transparent">
-                                        Automatic Value
+                                        {col.source === "request_param" && (() => {
+                                            const allParams = Array.from(
+                                                new Set(templates.flatMap(t => (t.params || []).map(p => p.key).filter(Boolean)))
+                                            );
+                                            return (
+                                                <>
+                                                    {templates.length > 1 && (
+                                                        <SearchableSelect
+                                                            value={col.stepId || ""}
+                                                            onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
+                                                            options={[{ label: "All", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
+                                                            placeholder="All steps"
+                                                            className="w-full sm:w-[140px] bg-neutral-950 border-white/10 text-white"
+                                                        />
+                                                    )}
+                                                    <SearchableSelect
+                                                        value={col.path || ""}
+                                                        onChange={(val) => updateColumnMapping(idx, { path: val })}
+                                                        options={allParams.map(p => ({ label: p, value: p }))}
+                                                        placeholder="Select param"
+                                                        className="w-full sm:w-[160px] bg-neutral-950 border-white/10 text-white"
+                                                    />
+                                                </>
+                                            );
+                                        })()}
+                                        {(col.source === "request_body" || col.source === "response") && (
+                                            <>
+                                                {templates.length > 1 && (
+                                                    <SearchableSelect
+                                                        value={col.stepId || ""}
+                                                        onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
+                                                        options={[{ label: "All (Last)", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
+                                                        placeholder="All / Last"
+                                                        className="w-full sm:w-[140px] bg-neutral-950 border-white/10 text-white"
+                                                    />
+                                                )}
+                                                <PathAutocompleteInput
+                                                    value={col.path || ""}
+                                                    onChange={(val) => updateColumnMapping(idx, { path: val })}
+                                                    placeholder={col.source === "request_body" ? "e.g. name" : "e.g. data.id"}
+                                                    col={col}
+                                                    results={results}
+                                                />
+                                            </>
+                                        )}
+                                        {col.source === "response_time" && (
+                                            <>
+                                                {templates.length > 1 ? (
+                                                    <SearchableSelect
+                                                        value={col.stepId || ""}
+                                                        onChange={(val) => updateColumnMapping(idx, { stepId: val || undefined })}
+                                                        options={[{ label: "All (Last)", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
+                                                        placeholder="All / Last"
+                                                        className="w-full sm:w-[140px] bg-neutral-950 border-white/10 text-white"
+                                                    />
+                                                ) : null}
+                                                <div className="flex-1 text-xs text-muted-foreground flex items-center px-3 border border-transparent">
+                                                    Automatic Value (Response Time)
+                                                </div>
+                                            </>
+                                        )}
+                                        {(col.source === "status" || col.source === "error" || col.source === "modified") && (
+                                            <div className="flex-1 text-xs text-muted-foreground flex items-center px-3 border border-transparent">
+                                                Automatic Value
+                                            </div>
+                                        )}
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => updateColumnMapping(idx, { visible: col.visible !== false ? false : true })}
+                                            className={cn(
+                                                "shrink-0",
+                                                col.visible !== false 
+                                                    ? "text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/20" 
+                                                    : "text-muted-foreground hover:text-rose-400 hover:bg-rose-950/20"
+                                            )}
+                                            title={col.visible !== false ? "Hide column from table & export" : "Show column in table & export"}
+                                        >
+                                            {col.visible !== false ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                                        </Button>
+                                        <Button variant="ghost" size="icon" onClick={() => removeColumnMapping(idx)} className="text-muted-foreground hover:text-destructive shrink-0">
+                                            <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                ))}
+                                {localMappings.length === 0 && (
+                                    <div className="text-center py-8 text-sm text-muted-foreground">
+                                        No columns mapped. Click "Add Column" below to map a new column.
                                     </div>
                                 )}
-                                <Button variant="ghost" size="icon" onClick={() => removeColumnMapping(idx)} className="text-muted-foreground hover:text-destructive shrink-0">
-                                    <Trash2 className="w-4 h-4" />
-                                </Button>
                             </div>
-                        ))}
-                        <Button variant="outline" size="sm" onClick={addColumnMapping} className="border-dashed">
-                            <Plus className="w-4 h-4 mr-2" />
-                            Add Column
-                        </Button>
-                    </div>
-                </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 shrink-0">
+                            <Button variant="outline" size="sm" onClick={addColumnMapping} className="border-dashed bg-transparent border-white/10 hover:bg-neutral-900 text-white">
+                                <Plus className="w-4 h-4 mr-2" />
+                                Add Column
+                            </Button>
+                            <Button variant="default" size="sm" onClick={() => setIsMappingDialogOpen(false)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                                Done
+                            </Button>
+                        </div>
+                    </DialogContent>
+                </Dialog>
 
                 {/* Search & Global Filter Bar */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 p-3 rounded-lg bg-muted/20 border border-muted-foreground/10">
@@ -1419,7 +1601,7 @@ export function ResultsTable() {
                         >
                             .* Regex
                         </Button>
-                        {Object.keys(tableFilterConfig.columnFilters).some(k => tableFilterConfig.columnFilters[k]?.length > 0) || tableFilterConfig.searchQuery || tableFilterConfig.sortBy ? (
+                        {Object.keys(tableFilterConfig.columnFilters).length > 0 || tableFilterConfig.searchQuery || tableFilterConfig.sortBy ? (
                             <Button
                                 variant="ghost"
                                 size="sm"
@@ -1439,7 +1621,56 @@ export function ResultsTable() {
 
                 {/* Data Table */}
                 <div className="rounded-md border overflow-x-auto w-full">
-                    {memoizedTable}
+                    <Table>
+                        <TableHeader>
+                            {table.getHeaderGroups().map((headerGroup) => (
+                                <TableRow key={headerGroup.id}>
+                                    {headerGroup.headers.map((header) => (
+                                        <TableHead key={header.id}>
+                                            {header.isPlaceholder
+                                                ? null
+                                                : flexRender(
+                                                    header.column.columnDef.header,
+                                                    header.getContext()
+                                                )}
+                                        </TableHead>
+                                    ))}
+                                </TableRow>
+                            ))}
+                        </TableHeader>
+                        <TableBody>
+                            {table.getRowModel().rows?.length ? (
+                                table.getRowModel().rows.map((row) => (
+                                    <TableRow
+                                        key={row.id}
+                                        data-state={row.getIsSelected() && "selected"}
+                                        className={cn(
+                                            "cursor-pointer",
+                                            row.original.__isModified && "bg-yellow-500/10 hover:bg-yellow-500/20 data-[state=selected]:bg-yellow-500/20"
+                                        )}
+                                        onClick={() => {
+                                            const internalId = row.original.__id;
+                                            const iteration = row.original.__iteration ?? 1;
+                                            setSelectedDetail({ rowId: internalId, iteration });
+                                            setIsDialogOpen(true);
+                                        }}
+                                    >
+                                        {row.getVisibleCells().map((cell) => (
+                                            <TableCell key={cell.id}>
+                                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                            </TableCell>
+                                        ))}
+                                    </TableRow>
+                                ))
+                            ) : (
+                                <TableRow>
+                                    <TableCell colSpan={columns.length} className="h-24 text-center">
+                                        No results mapped.
+                                    </TableCell>
+                                </TableRow>
+                            )}
+                        </TableBody>
+                    </Table>
                 </div>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                     <div className="flex items-center space-x-2 text-sm text-muted-foreground">

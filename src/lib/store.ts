@@ -151,56 +151,347 @@ const defaultState: AppState = {
 
 
 // --- Hydration & Persistence ---
+const DB_NAME = "SurgeWorkspaceDB";
+const STORE_NAME = "stateStore";
+const DB_KEY = "workspaceState";
+
+let dbInstance: IDBDatabase | null = null;
+
+function getDB(): Promise<IDBDatabase> {
+    if (dbInstance) return Promise.resolve(dbInstance);
+    return new Promise((resolve, reject) => {
+        if (typeof window === "undefined") {
+            reject(new Error("Browser environment required for IndexedDB"));
+            return;
+        }
+        const request = indexedDB.open(DB_NAME, 1);
+        request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME);
+            }
+        };
+        request.onsuccess = () => {
+            dbInstance = request.result;
+            dbInstance.onversionchange = () => {
+                dbInstance?.close();
+                dbInstance = null;
+            };
+            resolve(dbInstance);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+function saveToDB(value: any, key: string = DB_KEY): Promise<void> {
+    return getDB().then((db) => {
+        return new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, "readwrite");
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.put(value, key);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    });
+}
+
+function loadFromDB(key: string = DB_KEY): Promise<any> {
+    return getDB().then((db) => {
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, "readonly");
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.get(key);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }).catch((e) => {
+        console.warn(`Failed to load key ${key} from IndexedDB:`, e);
+        return null;
+    });
+}
+
+function deleteFromDB(key: string): Promise<void> {
+    return getDB().then((db) => {
+        return new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, "readwrite");
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.delete(key);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    });
+}
+
+function clearDB(): Promise<void> {
+    return getDB().then((db) => {
+        return new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, "readwrite");
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.clear();
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    });
+}
+
 export const store = new Store<AppState>(defaultState);
 
-export const hydrateStore = () => {
-    if (typeof window === "undefined") return;
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (!saved) return;
-    try {
-        const parsed = JSON.parse(saved);
-        const apiTabs = Array.isArray(parsed.apiTabs) ? parsed.apiTabs : [];
-        
-        let results = Array.isArray(parsed.results) ? parsed.results : [];
-        const nowMs = Date.now();
-        results = results.map((r: any, idx: number) => ({
-            ...r,
-            timestamp: r.timestamp || new Date(nowMs - (results.length - idx) * 1000).toISOString(),
-            active: r.active !== undefined ? r.active : true
-        }));
+let isHydrated = false;
+let prevConfigState: any = null;
+let prevDataState: any = null;
+let prevResultsState: any = null;
 
-        store.setState(() => ({
-            ...defaultState,
-            ...parsed,
-            results,
-            apiTabs
-        }));
+export const hydrateStore = async () => {
+    if (typeof window === "undefined") return;
+    try {
+        let config = await loadFromDB("workspaceConfig");
+        let data = await loadFromDB("workspaceData");
+        let results = await loadFromDB("workspaceResults");
+
+        let parsed: any = null;
+
+        if (config || data || results) {
+            parsed = {
+                ...(config || {}),
+                ...(data || {}),
+                results: results || []
+            };
+        } else {
+            // Fallback: load old unified state from DB
+            const legacyState = await loadFromDB("workspaceState");
+            if (legacyState) {
+                parsed = legacyState;
+                await saveToDB(parsed, "workspaceConfig");
+                await saveToDB(parsed, "workspaceData");
+                await saveToDB(parsed.results || [], "workspaceResults");
+                await deleteFromDB("workspaceState");
+            } else {
+                // Fallback: load from localStorage
+                const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (saved) {
+                    try {
+                        parsed = JSON.parse(saved);
+                        await saveToDB(parsed, "workspaceConfig");
+                        await saveToDB(parsed, "workspaceData");
+                        await saveToDB(parsed.results || [], "workspaceResults");
+                        localStorage.removeItem(LOCAL_STORAGE_KEY);
+                    } catch (err) {
+                        console.error("Failed to parse state from localStorage:", err);
+                    }
+                }
+            }
+        }
+
+        if (parsed) {
+            const apiTabs = Array.isArray(parsed.apiTabs) ? parsed.apiTabs : [];
+            let resultsList = Array.isArray(parsed.results) ? parsed.results : [];
+            const nowMs = Date.now();
+            resultsList = resultsList.map((r: any, idx: number) => ({
+                ...r,
+                timestamp: r.timestamp || new Date(nowMs - (resultsList.length - idx) * 1000).toISOString(),
+                active: r.active !== undefined ? r.active : true
+            }));
+
+            const importedFilterConfig = parsed.tableFilterConfig || {};
+            const tableFilterConfig = {
+                ...defaultState.tableFilterConfig,
+                ...importedFilterConfig,
+                columnFilters: {
+                    ...defaultState.tableFilterConfig.columnFilters,
+                    ...(importedFilterConfig.columnFilters || {})
+                }
+            };
+
+            store.setState(() => ({
+                ...defaultState,
+                ...parsed,
+                tableFilterConfig,
+                results: resultsList,
+                apiTabs
+            }));
+
+            // Initialize prevStates
+            prevConfigState = {
+                templates: parsed.templates || defaultState.templates,
+                activeTemplateId: parsed.activeTemplateId || defaultState.activeTemplateId,
+                maxRetries: parsed.maxRetries || defaultState.maxRetries,
+                retryStatusCodes: parsed.retryStatusCodes || defaultState.retryStatusCodes,
+                stopOnFailure: parsed.stopOnFailure || defaultState.stopOnFailure,
+                throttleDelayMs: parsed.throttleDelayMs || defaultState.throttleDelayMs,
+                rowIterations: parsed.rowIterations || defaultState.rowIterations,
+                columnMappings: parsed.columnMappings || defaultState.columnMappings,
+                tableFilterConfig,
+                currentView: parsed.currentView || defaultState.currentView,
+                collections: parsed.collections || defaultState.collections,
+                environments: parsed.environments || defaultState.environments,
+                activeEnvironmentId: parsed.activeEnvironmentId || defaultState.activeEnvironmentId,
+                apiTabs,
+                activeTabId: parsed.activeTabId || defaultState.activeTabId
+            };
+
+            prevDataState = {
+                fileData: parsed.fileData || defaultState.fileData,
+                originalData: parsed.originalData || defaultState.originalData,
+                headers: parsed.headers || defaultState.headers,
+                headerTypes: parsed.headerTypes || defaultState.headerTypes,
+                fileName: parsed.fileName || defaultState.fileName
+            };
+
+            prevResultsState = {
+                results: resultsList
+            };
+        }
     } catch (e) {
-        console.error("Failed to hydrate state:", e);
+        console.error("Failed to hydrate state from IndexedDB:", e);
+    } finally {
+        isHydrated = true;
     }
 };
 
 // --- Persistence ---
-let saveTimeout: NodeJS.Timeout | null = null;
+let configTimeout: NodeJS.Timeout | null = null;
+const saveConfigDebounced = () => {
+    if (configTimeout) clearTimeout(configTimeout);
+    configTimeout = setTimeout(async () => {
+        try {
+            const state = store.state;
+            const config = {
+                templates: state.templates,
+                activeTemplateId: state.activeTemplateId,
+                maxRetries: state.maxRetries,
+                retryStatusCodes: state.retryStatusCodes,
+                stopOnFailure: state.stopOnFailure,
+                throttleDelayMs: state.throttleDelayMs,
+                rowIterations: state.rowIterations,
+                columnMappings: state.columnMappings,
+                tableFilterConfig: state.tableFilterConfig,
+                currentView: state.currentView,
+                collections: state.collections,
+                environments: state.environments,
+                activeEnvironmentId: state.activeEnvironmentId,
+                apiTabs: (state.apiTabs || []).map(tab => ({
+                    ...tab,
+                    response: null
+                })),
+                activeTabId: state.activeTabId
+            };
+            await saveToDB(config, "workspaceConfig");
+        } catch (e) {
+            console.error("Failed to save config to IndexedDB:", e);
+        }
+    }, 500);
+};
+
+let dataTimeout: NodeJS.Timeout | null = null;
+const saveDataDebounced = () => {
+    if (dataTimeout) clearTimeout(dataTimeout);
+    dataTimeout = setTimeout(async () => {
+        try {
+            const state = store.state;
+            const data = {
+                fileData: state.fileData,
+                originalData: state.originalData,
+                headers: state.headers,
+                headerTypes: state.headerTypes,
+                fileName: state.fileName
+            };
+            await saveToDB(data, "workspaceData");
+        } catch (e) {
+            console.error("Failed to save data to IndexedDB:", e);
+        }
+    }, 500);
+};
+
+let resultsTimeout: NodeJS.Timeout | null = null;
+const saveResultsDebounced = () => {
+    if (resultsTimeout) clearTimeout(resultsTimeout);
+    resultsTimeout = setTimeout(async () => {
+        try {
+            const state = store.state;
+            await saveToDB(state.results, "workspaceResults");
+        } catch (e) {
+            console.error("Failed to save results to IndexedDB:", e);
+        }
+    }, 500);
+};
+
 if (typeof window !== "undefined") {
     store.subscribe(() => {
-        if (saveTimeout) clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(() => {
-            const state = store.state;
-            try {
-                // Strip response bodies/payloads before persisting to keep storage minimal
-                const sanitizedState = {
-                    ...state,
-                    apiTabs: (state.apiTabs || []).map(tab => ({
-                        ...tab,
-                        response: null // Response data is transient and shouldn't fill localstorage
-                    }))
-                };
-                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(sanitizedState));
-            } catch (e) {
-                console.warn("Storage limit reached, results might not be saved.", e);
-            }
-        }, 500); // 500ms debounce to prevent freezing on frequent updates (e.g., run switching)
+        if (!isHydrated) return;
+        
+        const state = store.state;
+
+        // 1. Check if Config changed
+        const hasConfigChanged = 
+            !prevConfigState ||
+            state.templates !== prevConfigState.templates ||
+            state.activeTemplateId !== prevConfigState.activeTemplateId ||
+            state.maxRetries !== prevConfigState.maxRetries ||
+            state.retryStatusCodes !== prevConfigState.retryStatusCodes ||
+            state.stopOnFailure !== prevConfigState.stopOnFailure ||
+            state.throttleDelayMs !== prevConfigState.throttleDelayMs ||
+            state.rowIterations !== prevConfigState.rowIterations ||
+            state.columnMappings !== prevConfigState.columnMappings ||
+            state.tableFilterConfig !== prevConfigState.tableFilterConfig ||
+            state.currentView !== prevConfigState.currentView ||
+            state.collections !== prevConfigState.collections ||
+            state.environments !== prevConfigState.environments ||
+            state.activeEnvironmentId !== prevConfigState.activeEnvironmentId ||
+            state.apiTabs !== prevConfigState.apiTabs ||
+            state.activeTabId !== prevConfigState.activeTabId;
+
+        // 2. Check if Data changed
+        const hasDataChanged =
+            !prevDataState ||
+            state.fileData !== prevDataState.fileData ||
+            state.originalData !== prevDataState.originalData ||
+            state.headers !== prevDataState.headers ||
+            state.headerTypes !== prevDataState.headerTypes ||
+            state.fileName !== prevDataState.fileName;
+
+        // 3. Check if Results changed
+        const hasResultsChanged =
+            !prevResultsState ||
+            state.results !== prevResultsState.results;
+
+        if (hasConfigChanged) {
+            prevConfigState = {
+                templates: state.templates,
+                activeTemplateId: state.activeTemplateId,
+                maxRetries: state.maxRetries,
+                retryStatusCodes: state.retryStatusCodes,
+                stopOnFailure: state.stopOnFailure,
+                throttleDelayMs: state.throttleDelayMs,
+                rowIterations: state.rowIterations,
+                columnMappings: state.columnMappings,
+                tableFilterConfig: state.tableFilterConfig,
+                currentView: state.currentView,
+                collections: state.collections,
+                environments: state.environments,
+                activeEnvironmentId: state.activeEnvironmentId,
+                apiTabs: state.apiTabs,
+                activeTabId: state.activeTabId
+            };
+            saveConfigDebounced();
+        }
+
+        if (hasDataChanged) {
+            prevDataState = {
+                fileData: state.fileData,
+                originalData: state.originalData,
+                headers: state.headers,
+                headerTypes: state.headerTypes,
+                fileName: state.fileName
+            };
+            saveDataDebounced();
+        }
+
+        if (hasResultsChanged) {
+            prevResultsState = {
+                results: state.results
+            };
+            saveResultsDebounced();
+        }
     });
 }
 
@@ -239,8 +530,9 @@ const applyTypes = (data: Array<Record<string, any>>, types: Record<string, Vari
 
 // --- Workspace actions ---
 
-export const resetStore = () => {
+export const resetStore = async () => {
     localStorage.removeItem(LOCAL_STORAGE_KEY);
+    await clearDB().catch((e) => console.error("Failed to clear DB on reset:", e));
     const currentView = store.state.currentView;
     store.setState(() => ({ ...defaultState, currentView }));
 };
@@ -274,10 +566,21 @@ export const importState = (json: string) => {
         if (!parsed.templates || !Array.isArray(parsed.templates)) {
             throw new Error("Invalid workspace file");
         }
+        const importedFilterConfig = parsed.tableFilterConfig || {};
+        const tableFilterConfig = {
+            ...defaultState.tableFilterConfig,
+            ...importedFilterConfig,
+            columnFilters: {
+                ...defaultState.tableFilterConfig.columnFilters,
+                ...(importedFilterConfig.columnFilters || {})
+            }
+        };
+
         const currentView = store.state.currentView;
         store.setState(() => ({
             ...defaultState, // Start with default to ensure all keys are present
             ...parsed,
+            tableFilterConfig,
             currentView
         }));
     } catch (e) {

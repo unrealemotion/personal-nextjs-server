@@ -69,6 +69,7 @@ export type ColumnMapping = {
   source: "variable" | "request_body" | "request_param" | "response" | "status" | "error" | "response_time" | "modified";
   path: string;
   stepId?: string;
+  visible?: boolean;
 };
 
 export type TableFilterConfig = {
