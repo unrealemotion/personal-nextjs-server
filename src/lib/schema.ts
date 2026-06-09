@@ -65,6 +65,7 @@ export type ExecutionResult = {
 };
 
 export type ColumnMapping = {
+  id?: string;
   name: string;
   source: "variable" | "request_body" | "request_param" | "response" | "status" | "error" | "response_time" | "modified";
   path: string;

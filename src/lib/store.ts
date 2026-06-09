@@ -130,8 +130,8 @@ const defaultState: AppState = {
     throttleDelayMs: 0,
     rowIterations: 1,
     columnMappings: [
-        { name: "Status Code", source: "status", path: "" },
-        { name: "Error", source: "error", path: "" },
+        { id: "col_status", name: "Status Code", source: "status", path: "" },
+        { id: "col_error", name: "Error", source: "error", path: "" },
     ],
     tableFilterConfig: {
         searchQuery: "",
@@ -302,9 +302,16 @@ export const hydrateStore = async () => {
                 }
             };
 
+            let columnMappings = parsed.columnMappings || defaultState.columnMappings;
+            columnMappings = columnMappings.map((col: any) => ({
+                ...col,
+                id: col.id || `col_${generateId()}`
+            }));
+
             store.setState(() => ({
                 ...defaultState,
                 ...parsed,
+                columnMappings,
                 tableFilterConfig,
                 results: resultsList,
                 apiTabs
@@ -319,7 +326,7 @@ export const hydrateStore = async () => {
                 stopOnFailure: parsed.stopOnFailure || defaultState.stopOnFailure,
                 throttleDelayMs: parsed.throttleDelayMs || defaultState.throttleDelayMs,
                 rowIterations: parsed.rowIterations || defaultState.rowIterations,
-                columnMappings: parsed.columnMappings || defaultState.columnMappings,
+                columnMappings,
                 tableFilterConfig,
                 currentView: parsed.currentView || defaultState.currentView,
                 collections: parsed.collections || defaultState.collections,
@@ -576,10 +583,17 @@ export const importState = (json: string) => {
             }
         };
 
+        let columnMappings = parsed.columnMappings || defaultState.columnMappings;
+        columnMappings = columnMappings.map((col: any) => ({
+            ...col,
+            id: col.id || `col_${generateId()}`
+        }));
+
         const currentView = store.state.currentView;
         store.setState(() => ({
             ...defaultState, // Start with default to ensure all keys are present
             ...parsed,
+            columnMappings,
             tableFilterConfig,
             currentView
         }));
@@ -831,7 +845,36 @@ export const saveRerunResult = (
 };
 
 export const setColumnMappings = (mappings: ColumnMapping[]) => {
-    store.setState((state) => ({ ...state, columnMappings: mappings }));
+    const sanitizedMappings = mappings.map((col) => ({
+        ...col,
+        id: col.id || `col_${generateId()}`
+    }));
+    store.setState((state) => {
+        const activeIds = new Set(sanitizedMappings.map((col) => col.id!));
+        const newFilters = { ...state.tableFilterConfig.columnFilters };
+        let filtersChanged = false;
+        Object.keys(newFilters).forEach(key => {
+            if (!activeIds.has(key)) {
+                delete newFilters[key];
+                filtersChanged = true;
+            }
+        });
+        
+        let newSortBy = state.tableFilterConfig.sortBy;
+        if (newSortBy && !activeIds.has(newSortBy)) {
+            newSortBy = null;
+        }
+
+        return {
+            ...state,
+            columnMappings: sanitizedMappings,
+            tableFilterConfig: {
+                ...state.tableFilterConfig,
+                columnFilters: newFilters,
+                sortBy: newSortBy
+            }
+        };
+    });
 };
 
 export const setTableFilterConfig = (updates: Partial<TableFilterConfig>) => {
