@@ -60,11 +60,13 @@ export type ExecutionResult = {
   ipAddress?: string | null;
   steps: StepResult[];
   error?: string;
+  timestamp?: string;
+  active?: boolean;
 };
 
 export type ColumnMapping = {
   name: string;
-  source: "variable" | "request_body" | "request_param" | "response" | "status" | "error" | "response_time";
+  source: "variable" | "request_body" | "request_param" | "response" | "status" | "error" | "response_time" | "modified";
   path: string;
   stepId?: string;
 };

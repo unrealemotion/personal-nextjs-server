@@ -2,8 +2,8 @@
 
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useStore } from "@tanstack/react-store";
-import { store, setColumnMappings, setTableFilterConfig } from "@/lib/store";
-import { type ColumnMapping, type TableFilterConfig, type ExecutionResult } from "@/lib/schema";
+import { store, setColumnMappings, setTableFilterConfig, setActiveResultInstance, duplicateResultAsNewRow, saveRerunResult } from "@/lib/store";
+import { type ColumnMapping, type TableFilterConfig, type ExecutionResult, type StepResult } from "@/lib/schema";
 import {
     flexRender,
     getCoreRowModel,
@@ -20,12 +20,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Download, Plus, Trash2, Eye, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter } from "lucide-react";
+import { Download, Plus, Trash2, Eye, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as xlsx from "xlsx";
 import Editor from "@monaco-editor/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
+import { cn, stripJsonComments } from "@/lib/utils";
+import { toast } from "sonner";
 
 function SearchableSelect({ value, onChange, options, placeholder, className }: {
     value: string;
@@ -611,8 +612,303 @@ export function ResultsTable() {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
+    // Edit/Rerun states
+    const [isEditing, setIsEditing] = useState(false);
+    const [editMethod, setEditMethod] = useState("GET");
+    const [editUrl, setEditUrl] = useState("");
+    const [editParams, setEditParams] = useState<{ key: string; value: string }[]>([]);
+    const [editHeaders, setEditHeaders] = useState<{ key: string; value: string }[]>([]);
+    const [editBody, setEditBody] = useState("");
+    const [isRerunning, setIsRerunning] = useState(false);
+    const [selectedTimestamp, setSelectedTimestamp] = useState<string | null>(null);
+    const [activeStepId, setActiveStepId] = useState<string>("");
+    const [isMakeNewRowOpen, setIsMakeNewRowOpen] = useState(false);
+    const [targetRowNum, setTargetRowNum] = useState<number>(1);
+    const [insertPosition, setInsertPosition] = useState<"before" | "after">("after");
+
+    const getRowSignature = (rowId: number): string => {
+        const rowData = fileData[rowId];
+        if (!rowData) return "";
+        const keys = Object.keys(rowData).filter(k => !k.startsWith("__"));
+        if (keys.length === 0) return "No variables";
+        return keys.map(k => `${k}=${rowData[k]}`).join(", ");
+    };
+
+    // Resolve IP address using Cloudflare DNS JSON API
+    const resolveHostnameIpClient = async (urlStr: string): Promise<string | null> => {
+        try {
+            const urlObj = new URL(urlStr);
+            const hostname = urlObj.hostname;
+            if (/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) || hostname === "localhost" || hostname.endsWith(".local")) {
+                return null;
+            }
+            const dnsUrl = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=A`;
+            const res = await fetch(dnsUrl, {
+                headers: { "accept": "application/dns-json" }
+            });
+            if (res.ok) {
+                const dnsData = await res.json();
+                if (dnsData && dnsData.Answer && dnsData.Answer.length > 0) {
+                    const aRecord = dnsData.Answer.find((ans: any) => ans.type === 1);
+                    if (aRecord) {
+                        return aRecord.data;
+                    }
+                }
+            }
+        } catch (e) {}
+        return null;
+    };
+
+    // Helper to format timestamps down to the second
+    const formatTimestamp = (isoString?: string) => {
+        if (!isoString) return "Unknown Time";
+        try {
+            const date = new Date(isoString);
+            if (isNaN(date.getTime())) return "Unknown Time";
+            const pad = (n: number) => String(n).padStart(2, "0");
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+        } catch (e) {
+            return "Unknown Time";
+        }
+    };
+
+    const matchingResults = useMemo(() => {
+        if (selectedDetail === null) return [];
+        const filtered = results.filter(
+            (r) =>
+                r.rowId === selectedDetail.rowId &&
+                (r.iteration ?? 1) === selectedDetail.iteration
+        );
+        // Explicitly sort chronologically by timestamp (ascending)
+        return [...filtered].sort((a, b) => {
+            const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return timeA - timeB;
+        });
+    }, [results, selectedDetail]);
+
+    const activeInstance = useMemo(() => {
+        const active = matchingResults.find((r) => r.active);
+        return active || matchingResults[matchingResults.length - 1];
+    }, [matchingResults]);
+
+    const currentResult = useMemo(() => {
+        if (!selectedTimestamp) return activeInstance;
+        return matchingResults.find((r) => r.timestamp === selectedTimestamp) || activeInstance;
+    }, [matchingResults, selectedTimestamp, activeInstance]);
+
+    // Initialize/sync selectedTimestamp when the dialog opens or row selection changes
+    useEffect(() => {
+        if (selectedDetail !== null && isDialogOpen) {
+            if (activeInstance) {
+                setSelectedTimestamp(activeInstance.timestamp || null);
+            } else {
+                setSelectedTimestamp(null);
+            }
+            setIsEditing(false);
+            setIsMakeNewRowOpen(false); // Reset row insertion states
+        }
+    }, [selectedDetail, isDialogOpen, activeInstance]);
+
+    // Initialize/sync activeStepId when result instance changes
+    useEffect(() => {
+        if (selectedDetail !== null && isDialogOpen && currentResult) {
+            const steps = currentResult.steps || [];
+            if (steps.length > 0) {
+                setActiveStepId(steps[0].stepId);
+            } else {
+                setActiveStepId("legacy");
+            }
+            setIsEditing(false);
+        }
+    }, [selectedDetail, isDialogOpen, currentResult]);
+
+    // Find the step we are looking at
+    const currentStep = useMemo(() => {
+        if (!currentResult) return null;
+        if (activeStepId === "legacy") return currentResult;
+        return (currentResult.steps || []).find(s => s.stepId === activeStepId) || null;
+    }, [currentResult, activeStepId]);
+
+    const selectValue = useMemo(() => {
+        if (!currentResult) return "";
+        const idx = matchingResults.indexOf(currentResult);
+        return currentResult.timestamp || `temp_${idx >= 0 ? idx : 0}`;
+    }, [matchingResults, currentResult]);
+
+    // Sync editing form fields when currentStep changes
+    useEffect(() => {
+        if (isDialogOpen && currentStep) {
+            setEditMethod(currentStep.requestMethod || "GET");
+            setEditUrl(currentStep.requestUrl || "");
+            
+            const paramsArray = Object.entries(currentStep.requestParams || {}).map(([k, v]) => ({ key: k, value: v }));
+            setEditParams(paramsArray.length > 0 ? paramsArray : [{ key: "", value: "" }]);
+
+            const headersArray = Object.entries(currentStep.requestHeaders || {}).map(([k, v]) => ({ key: k, value: v }));
+            setEditHeaders(headersArray.length > 0 ? headersArray : [{ key: "", value: "" }]);
+
+            setEditBody(formatBody(currentStep.requestBody));
+        }
+    }, [isDialogOpen, currentStep]);
+
+    const handleRerunExecute = async () => {
+        if (!editUrl.trim()) {
+            toast.error("URL is required");
+            return;
+        }
+        
+        setIsRerunning(true);
+        
+        try {
+            let url = editUrl;
+            const queryParts = editParams
+                .filter(p => p.key.trim())
+                .map(p => `${encodeURIComponent(p.key.trim())}=${encodeURIComponent(p.value)}`)
+                .join("&");
+            if (queryParts) {
+                url += (url.includes('?') ? '&' : '?') + queryParts;
+            }
+
+            const headers = new Headers();
+            const reqHeaders: Record<string, string> = {};
+            editHeaders.forEach(h => {
+                if (h.key.trim()) {
+                    headers.append(h.key.trim(), h.value);
+                    reqHeaders[h.key.trim()] = h.value;
+                }
+            });
+
+            let bodyInit: any = null;
+            let requestBodyForLog: any = null;
+            if (editMethod !== "GET" && editMethod !== "HEAD" && editBody.trim()) {
+                bodyInit = editBody;
+                requestBodyForLog = editBody;
+                const hasContentType = Object.keys(reqHeaders).some(k => k.toLowerCase() === "content-type");
+                if (!hasContentType) {
+                    headers.append("Content-Type", "application/json");
+                    reqHeaders["Content-Type"] = "application/json";
+                }
+                if (reqHeaders["Content-Type"]?.includes("application/json")) {
+                    const cleaned = stripJsonComments(editBody);
+                    bodyInit = cleaned;
+                    try {
+                        requestBodyForLog = JSON.parse(cleaned);
+                    } catch (e) {
+                        requestBodyForLog = editBody;
+                    }
+                }
+            }
+
+            const startTime = performance.now();
+            let statusCode = 0;
+            let responseStatusText = "";
+            let responseHeaders: Record<string, string> = {};
+            let responseBody: any = null;
+            let errorMsg: string | undefined = undefined;
+            let responseType = "";
+            let responseRedirected = false;
+            let ipAddress: string | null = null;
+
+            try {
+                const res = await fetch(url, {
+                    method: editMethod,
+                    headers,
+                    body: bodyInit
+                });
+
+                statusCode = res.status;
+                responseStatusText = res.statusText;
+                responseType = res.type;
+                responseRedirected = res.redirected;
+
+                res.headers.forEach((val, key) => {
+                    responseHeaders[key] = val;
+                });
+
+                try {
+                    ipAddress = await resolveHostnameIpClient(url);
+                } catch (e) {}
+
+                const contentType = res.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    responseBody = await res.json();
+                } else {
+                    responseBody = await res.text();
+                }
+
+                if (!res.ok) {
+                    errorMsg = `HTTP ${res.status}`;
+                }
+            } catch (err: any) {
+                errorMsg = err.message || String(err);
+            } finally {
+                const responseTimeMs = Math.round(performance.now() - startTime);
+                
+                const updatedStepResult: StepResult = {
+                    stepId: activeStepId,
+                    stepName: (currentStep as any)?.stepName || "Request",
+                    statusCode,
+                    responseTimeMs,
+                    requestUrl: url,
+                    requestMethod: editMethod,
+                    requestHeaders: reqHeaders,
+                    requestParams: editParams.filter(p => p.key.trim()).reduce((acc, p) => ({ ...acc, [p.key]: p.value }), {}),
+                    requestBody: requestBodyForLog,
+                    responseBody,
+                    responseHeaders,
+                    responseType,
+                    responseRedirected,
+                    responseStatusText,
+                    ipAddress,
+                    error: errorMsg
+                };
+
+                const newTimestamp = new Date().toISOString();
+                
+                saveRerunResult(
+                    selectedDetail!.rowId,
+                    selectedDetail!.iteration ?? 1,
+                    activeStepId,
+                    updatedStepResult,
+                    newTimestamp
+                );
+                
+                setSelectedTimestamp(newTimestamp);
+                setIsEditing(false);
+                toast.success("Rerun completed successfully!");
+            }
+        } catch (err: any) {
+            toast.error(`Rerun failed: ${err.message || err}`);
+        } finally {
+            setIsRerunning(false);
+        }
+    };
+
+    const activeResults = useMemo(() => {
+        const groups: Record<string, ExecutionResult[]> = {};
+        results.forEach((res) => {
+            const key = `${res.rowId}_${res.iteration ?? 1}`;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(res);
+        });
+
+        const activeList: ExecutionResult[] = [];
+        Object.values(groups).forEach((list) => {
+            const activeRes = list.find((r) => r.active) || list[list.length - 1];
+            if (activeRes) {
+                activeList.push(activeRes);
+            }
+        });
+
+        return activeList.sort((a, b) => {
+            if (a.rowId !== b.rowId) return a.rowId - b.rowId;
+            return (a.iteration ?? 1) - (b.iteration ?? 1);
+        });
+    }, [results]);
+
     const rawTableData = useMemo(() => {
-        return results.map((res) => {
+        return activeResults.map((res) => {
             const rowData = fileData[res.rowId] || {};
             const rowMap: Record<string, any> = {};
 
@@ -659,6 +955,11 @@ export function ResultsTable() {
                     } else {
                         rowMap[key] = res.status === "pending" ? "..." : "";
                     }
+                } else if (col.source === "modified") {
+                    const runs = results.filter(
+                        (r) => r.rowId === res.rowId && (r.iteration ?? 1) === (res.iteration ?? 1)
+                    );
+                    rowMap[key] = runs.length > 1 ? "modified" : "original";
                 }
             });
             rowMap.__status = res.status;
@@ -777,6 +1078,14 @@ export function ResultsTable() {
                         return (
                             <Badge variant={status >= 200 && status < 300 ? "default" : status === 0 ? "outline" : "destructive"}>
                                 {status || "Error"}
+                            </Badge>
+                        );
+                    }
+                    if (col.source === "modified") {
+                        const isMod = value === "modified";
+                        return (
+                            <Badge variant={isMod ? "default" : "outline"} className={isMod ? "bg-amber-500/20 text-amber-500 border-amber-500/30 hover:bg-amber-500/20" : "text-neutral-500 border-neutral-800"}>
+                                {isMod ? "modified" : "original"}
                             </Badge>
                         );
                     }
@@ -942,6 +1251,7 @@ export function ResultsTable() {
                                         <SelectItem value="status">Status Code</SelectItem>
                                         <SelectItem value="error">Error Message</SelectItem>
                                         <SelectItem value="response_time">Response Time (ms)</SelectItem>
+                                        <SelectItem value="modified">Modified (true/false)</SelectItem>
                                     </SelectContent>
                                 </Select>
                                 {col.source === "variable" && (
@@ -1015,7 +1325,7 @@ export function ResultsTable() {
                                         </div>
                                     </>
                                 )}
-                                {(col.source === "status" || col.source === "error") && (
+                                {(col.source === "status" || col.source === "error" || col.source === "modified") && (
                                     <div className="flex-1 text-sm text-muted-foreground flex items-center px-3 border border-transparent">
                                         Automatic Value
                                     </div>
@@ -1180,17 +1490,159 @@ export function ResultsTable() {
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogContent className="w-[95vw] max-w-[95vw] sm:!max-w-[95vw] h-[90vh] flex flex-col overflow-hidden">
                     <DialogHeader>
-                        <DialogTitle>Raw Execution Details</DialogTitle>
-                        <DialogDescription>
-                            Comparing the final interpolated JSON Request sent alongside the raw Response received.
-                        </DialogDescription>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full">
+                            <div>
+                                <DialogTitle className="flex flex-wrap items-center gap-2">
+                                    <span>Raw Execution Details</span>
+                                    {selectedDetail && (
+                                        <>
+                                            <Badge variant="outline" className="font-mono text-[10px] text-primary bg-primary/5 border-primary/20 h-5 px-1.5 flex items-center">
+                                                Row {selectedDetail.rowId + 1}
+                                            </Badge>
+                                            <Badge variant="outline" className="font-mono text-[10px] text-orange-400 bg-orange-400/5 border-orange-400/20 h-5 px-1.5 flex items-center">
+                                                Iteration {selectedDetail.iteration}
+                                            </Badge>
+                                        </>
+                                    )}
+                                </DialogTitle>
+                                <DialogDescription className="mt-1 flex flex-col gap-0.5">
+                                    <span className="text-xs text-neutral-400">
+                                        Comparing the final interpolated JSON Request sent alongside the raw Response received.
+                                    </span>
+                                    {selectedDetail && (
+                                        <span className="text-[10px] font-mono text-neutral-500 truncate max-w-[50vw] block select-all" title={getRowSignature(selectedDetail.rowId)}>
+                                            Signature: {getRowSignature(selectedDetail.rowId)}
+                                        </span>
+                                    )}
+                                </DialogDescription>
+                            </div>
+                            
+                            {/* Run select dropdown & duplicate button */}
+                            {matchingResults.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-2 shrink-0 bg-neutral-900/50 p-1.5 rounded-xl border border-white/5">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] uppercase font-bold text-white/50 px-1">Runs:</span>
+                                        <Select
+                                            value={selectValue}
+                                            onValueChange={(val) => {
+                                                setSelectedTimestamp(val);
+                                                setActiveResultInstance(selectedDetail!.rowId, selectedDetail!.iteration, val);
+                                                setIsEditing(false);
+                                            }}
+                                        >
+                                            <SelectTrigger className="h-8 text-xs font-mono bg-neutral-950 border-white/10 text-white min-w-[180px]">
+                                                <SelectValue placeholder="Select run..." />
+                                            </SelectTrigger>
+                                            <SelectContent position="popper" sideOffset={4} className="bg-neutral-950 border-white/10 text-white font-mono text-xs max-h-[300px]">
+                                                {matchingResults.map((r, i) => {
+                                                    const val = r.timestamp || `temp_${i}`;
+                                                    const name = formatTimestamp(r.timestamp) + (r.active ? " (Active)" : "");
+                                                    return (
+                                                        <SelectItem key={val} value={val}>
+                                                            {name}
+                                                        </SelectItem>
+                                                    );
+                                                })}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    
+                                    {isMakeNewRowOpen ? (
+                                        <div className="flex items-center gap-2 border-l border-white/10 pl-2">
+                                            <span className="text-[10px] font-bold text-white/70 uppercase">Insert</span>
+                                            <Select
+                                                value={insertPosition}
+                                                onValueChange={(val: "before" | "after") => setInsertPosition(val)}
+                                            >
+                                                <SelectTrigger className="h-8 w-[85px] text-xs bg-neutral-950 border-white/10 text-white font-mono">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent position="popper" sideOffset={4} className="bg-neutral-950 border-white/10 text-white font-mono text-xs">
+                                                    <SelectItem value="before">before</SelectItem>
+                                                    <SelectItem value="after">after</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <span className="text-[10px] font-bold text-white/70 uppercase">Row:</span>
+                                            <Input
+                                                type="number"
+                                                min={1}
+                                                max={fileData.length}
+                                                value={targetRowNum}
+                                                onChange={(e) => {
+                                                    const val = parseInt(e.target.value);
+                                                    if (!isNaN(val)) {
+                                                        setTargetRowNum(val);
+                                                    } else {
+                                                        setTargetRowNum("" as any);
+                                                    }
+                                                }}
+                                                className="h-8 w-[70px] text-xs bg-neutral-950 border-white/10 text-white font-mono text-center p-1"
+                                            />
+                                            <Button
+                                                variant="default"
+                                                size="sm"
+                                                className="h-8 px-3 text-[10px] font-bold uppercase tracking-tight bg-primary text-primary-foreground hover:bg-primary/90"
+                                                onClick={() => {
+                                                    const rowNum = Number(targetRowNum);
+                                                    if (isNaN(rowNum) || rowNum < 1 || rowNum > fileData.length) {
+                                                        toast.error(`Please enter a valid row number between 1 and ${fileData.length}`);
+                                                        return;
+                                                    }
+
+                                                    const insertIndex = insertPosition === "before" ? rowNum - 1 : rowNum;
+                                                    
+                                                    if (currentResult) {
+                                                        const originalRowId = selectedDetail!.rowId;
+                                                        duplicateResultAsNewRow(originalRowId, currentResult, insertIndex);
+                                                        
+                                                        if (insertIndex <= originalRowId) {
+                                                            setSelectedDetail({
+                                                                rowId: originalRowId + 1,
+                                                                iteration: selectedDetail!.iteration
+                                                            });
+                                                        }
+                                                        
+                                                        toast.success(`Successfully inserted new row ${insertPosition} row ${rowNum}!`);
+                                                        setIsMakeNewRowOpen(false);
+                                                    }
+                                                }}
+                                            >
+                                                Confirm
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-8 text-[10px] font-bold uppercase tracking-tight hover:bg-neutral-900 border-white/10 text-white/70 hover:text-white"
+                                                onClick={() => setIsMakeNewRowOpen(false)}
+                                            >
+                                                Cancel
+                                            </Button>
+                                        </div>
+                                    ) : (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-8 text-[10px] font-bold uppercase tracking-tight bg-neutral-950 hover:bg-neutral-900 border-white/10 text-white hover:text-white border border-white/10"
+                                            onClick={() => {
+                                                const current1BasedRow = selectedDetail!.rowId + 1;
+                                                setTargetRowNum(current1BasedRow);
+                                                setInsertPosition("after");
+                                                setIsMakeNewRowOpen(true);
+                                            }}
+                                        >
+                                            Make New Row
+                                        </Button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                     </DialogHeader>
                     {selectedDetail !== null && (() => {
-                        const result = results.find(r => r.rowId === selectedDetail.rowId && (r.iteration ?? 1) === selectedDetail.iteration);
+                        const result = currentResult;
                         const steps = result?.steps || [];
                         const hasSteps = steps.length > 0;
                         return (
-                            <Tabs defaultValue={hasSteps ? steps[0]?.stepId : "legacy"} className="flex-1 flex flex-col min-h-0 mt-4">
+                            <Tabs value={activeStepId} onValueChange={(val) => { setActiveStepId(val); setIsEditing(false); }} className="flex-1 flex flex-col min-h-0 mt-4">
                                 {hasSteps && steps.length > 1 && (
                                     <TabsList className="bg-muted/50 w-full justify-start rounded-none border-b pb-0 px-2 h-auto flex flex-wrap shrink-0">
                                         {steps.map((step, idx) => (
@@ -1204,27 +1656,58 @@ export function ResultsTable() {
                                         ))}
                                     </TabsList>
                                 )}
-                                {hasSteps ? steps.map((step) => (
-                                    <TabsContent key={step.stepId} value={step.stepId} className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-4 data-[state=active]:flex data-[state=active]:grid">
+                                {currentStep && (
+                                    <div className="flex-grow flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                                        {/* Request Details Panel */}
                                         <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
                                             <div className="bg-muted px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground flex flex-col gap-2">
                                                 <div className="flex items-center justify-between">
-                                                    <span>Request Details — {step.stepName}</span>
+                                                    <span>Request Details — {(currentStep as any).stepName || "Interpolated Request"}</span>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-6 text-[10px] uppercase font-bold tracking-wider hover:bg-neutral-900 border border-transparent hover:border-white/5 text-white/70 hover:text-white"
+                                                        onClick={() => setIsEditing(!isEditing)}
+                                                    >
+                                                        {isEditing ? "Cancel Edit" : "Edit & Rerun"}
+                                                    </Button>
                                                 </div>
-                                                {step.requestUrl && (
-                                                    <div className="flex items-center gap-2 font-mono text-[11px] bg-neutral-900/60 p-1.5 rounded border border-white/5 truncate select-all normal-case">
-                                                        <Badge variant="outline" className={cn(
-                                                            "text-[9px] font-bold px-1.5 py-0 uppercase shrink-0 border-transparent text-white",
-                                                            step.requestMethod === "GET" && "bg-sky-500/20 text-sky-300",
-                                                            step.requestMethod === "POST" && "bg-emerald-500/20 text-emerald-300",
-                                                            step.requestMethod === "PUT" && "bg-amber-500/20 text-amber-300",
-                                                            step.requestMethod === "DELETE" && "bg-rose-500/20 text-rose-300",
-                                                            !["GET", "POST", "PUT", "DELETE"].includes(step.requestMethod || "") && "bg-purple-500/20 text-purple-300"
-                                                        )}>
-                                                            {step.requestMethod || "GET"}
-                                                        </Badge>
-                                                        <span className="truncate text-neutral-300" title={step.requestUrl}>{step.requestUrl}</span>
+                                                {isEditing ? (
+                                                    <div className="flex gap-2 p-1.5 bg-neutral-900/60 rounded border border-white/5 items-center shrink-0">
+                                                        <Select value={editMethod} onValueChange={setEditMethod}>
+                                                            <SelectTrigger className="w-[100px] h-8 font-bold text-xs bg-neutral-950 border-white/10 text-white">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent className="bg-neutral-950 border-white/10 text-white text-xs font-bold">
+                                                                {["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"].map(m => (
+                                                                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                        
+                                                        <Input
+                                                            value={editUrl}
+                                                            onChange={(e) => setEditUrl(e.target.value)}
+                                                            placeholder="Enter request URL..."
+                                                            className="flex-grow h-8 text-xs font-mono bg-neutral-950 border-white/10 text-white"
+                                                        />
                                                     </div>
+                                                ) : (
+                                                    currentStep.requestUrl && (
+                                                        <div className="flex items-center gap-2 font-mono text-[11px] bg-neutral-900/60 p-1.5 rounded border border-white/5 truncate select-all normal-case">
+                                                            <Badge variant="outline" className={cn(
+                                                                "text-[9px] font-bold px-1.5 py-0 uppercase shrink-0 border-transparent text-white",
+                                                                currentStep.requestMethod === "GET" && "bg-sky-500/20 text-sky-300",
+                                                                currentStep.requestMethod === "POST" && "bg-emerald-500/20 text-emerald-300",
+                                                                currentStep.requestMethod === "PUT" && "bg-amber-500/20 text-amber-300",
+                                                                currentStep.requestMethod === "DELETE" && "bg-rose-500/20 text-rose-300",
+                                                                !["GET", "POST", "PUT", "DELETE"].includes(currentStep.requestMethod || "") && "bg-purple-500/20 text-purple-300"
+                                                            )}>
+                                                                {currentStep.requestMethod || "GET"}
+                                                            </Badge>
+                                                            <span className="truncate text-neutral-300" title={currentStep.requestUrl}>{currentStep.requestUrl}</span>
+                                                        </div>
+                                                    )
                                                 )}
                                             </div>
 
@@ -1232,10 +1715,10 @@ export function ResultsTable() {
                                                 <div className="bg-neutral-900/40 border-b px-2 shrink-0 h-8 flex items-center">
                                                     <TabsList className="bg-transparent h-7 p-0 gap-1">
                                                         <TabsTrigger value="params" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
-                                                            Params ({Object.keys(step.requestParams || {}).length})
+                                                            Params ({isEditing ? editParams.filter(p => p.key.trim()).length : Object.keys(currentStep.requestParams || {}).length})
                                                         </TabsTrigger>
                                                         <TabsTrigger value="headers" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
-                                                            Headers ({Object.keys(step.requestHeaders || {}).length})
+                                                            Headers ({isEditing ? editHeaders.filter(h => h.key.trim()).length : Object.keys(currentStep.requestHeaders || {}).length})
                                                         </TabsTrigger>
                                                         <TabsTrigger value="body" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
                                                             Body
@@ -1243,35 +1726,131 @@ export function ResultsTable() {
                                                     </TabsList>
                                                 </div>
                                                 <TabsContent value="params" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                                                    {step.requestParams && Object.keys(step.requestParams).length > 0 ? (
-                                                        <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
-                                                            {Object.entries(step.requestParams).map(([k, v]) => (
-                                                                <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
-                                                                    <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
-                                                                    <span className="text-neutral-200 break-all select-all">{v}</span>
+                                                    {isEditing ? (
+                                                        <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-2 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                            {editParams.map((p, idx) => (
+                                                                <div key={idx} className="flex gap-2 items-center">
+                                                                    <Input
+                                                                        placeholder="Key"
+                                                                        value={p.key}
+                                                                        onChange={(e) => {
+                                                                            const newParams = [...editParams];
+                                                                            newParams[idx].key = e.target.value;
+                                                                            setEditParams(newParams);
+                                                                        }}
+                                                                        className="h-8 text-xs font-mono bg-neutral-950 border-white/10 text-white w-[150px] shrink-0"
+                                                                    />
+                                                                    <Input
+                                                                        placeholder="Value"
+                                                                        value={p.value}
+                                                                        onChange={(e) => {
+                                                                            const newParams = [...editParams];
+                                                                            newParams[idx].value = e.target.value;
+                                                                            setEditParams(newParams);
+                                                                        }}
+                                                                        className="h-8 text-xs font-mono bg-neutral-950 border-white/10 text-white flex-grow"
+                                                                    />
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                                                                        onClick={() => {
+                                                                            const newParams = editParams.filter((_, i) => i !== idx);
+                                                                            setEditParams(newParams.length > 0 ? newParams : [{ key: "", value: "" }]);
+                                                                        }}
+                                                                    >
+                                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                                    </Button>
                                                                 </div>
                                                             ))}
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-7 border-dashed border-white/10 text-white hover:bg-neutral-900 mt-2 text-[10px] uppercase font-bold"
+                                                                onClick={() => setEditParams([...editParams, { key: "", value: "" }])}
+                                                            >
+                                                                <Plus className="w-3 h-3 mr-1" /> Add Parameter
+                                                            </Button>
                                                         </div>
                                                     ) : (
-                                                        <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
-                                                            No Request Parameters
-                                                        </div>
+                                                        currentStep.requestParams && Object.keys(currentStep.requestParams).length > 0 ? (
+                                                            <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                                {Object.entries(currentStep.requestParams).map(([k, v]) => (
+                                                                    <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
+                                                                        <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
+                                                                        <span className="text-neutral-200 break-all select-all">{v}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
+                                                                No Request Parameters
+                                                            </div>
+                                                        )
                                                     )}
                                                 </TabsContent>
                                                 <TabsContent value="headers" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                                                    {step.requestHeaders && Object.keys(step.requestHeaders).length > 0 ? (
-                                                        <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
-                                                            {Object.entries(step.requestHeaders).map(([k, v]) => (
-                                                                <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
-                                                                    <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
-                                                                    <span className="text-neutral-200 break-all select-all">{v}</span>
+                                                    {isEditing ? (
+                                                        <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-2 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                            {editHeaders.map((h, idx) => (
+                                                                <div key={idx} className="flex gap-2 items-center">
+                                                                    <Input
+                                                                        placeholder="Header"
+                                                                        value={h.key}
+                                                                        onChange={(e) => {
+                                                                            const newHeaders = [...editHeaders];
+                                                                            newHeaders[idx].key = e.target.value;
+                                                                            setEditHeaders(newHeaders);
+                                                                        }}
+                                                                        className="h-8 text-xs font-mono bg-neutral-950 border-white/10 text-white w-[150px] shrink-0"
+                                                                    />
+                                                                    <Input
+                                                                        placeholder="Value"
+                                                                        value={h.value}
+                                                                        onChange={(e) => {
+                                                                            const newHeaders = [...editHeaders];
+                                                                            newHeaders[idx].value = e.target.value;
+                                                                            setEditHeaders(newHeaders);
+                                                                        }}
+                                                                        className="h-8 text-xs font-mono bg-neutral-950 border-white/10 text-white flex-grow"
+                                                                    />
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                                                                        onClick={() => {
+                                                                            const newHeaders = editHeaders.filter((_, i) => i !== idx);
+                                                                            setEditHeaders(newHeaders.length > 0 ? newHeaders : [{ key: "", value: "" }]);
+                                                                        }}
+                                                                    >
+                                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                                    </Button>
                                                                 </div>
                                                             ))}
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-7 border-dashed border-white/10 text-white hover:bg-neutral-900 mt-2 text-[10px] uppercase font-bold"
+                                                                onClick={() => setEditHeaders([...editHeaders, { key: "", value: "" }])}
+                                                            >
+                                                                <Plus className="w-3 h-3 mr-1" /> Add Header
+                                                            </Button>
                                                         </div>
                                                     ) : (
-                                                        <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
-                                                            No Request Headers
-                                                        </div>
+                                                        currentStep.requestHeaders && Object.keys(currentStep.requestHeaders).length > 0 ? (
+                                                            <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                                {Object.entries(currentStep.requestHeaders).map(([k, v]) => (
+                                                                    <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
+                                                                        <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
+                                                                        <span className="text-neutral-200 break-all select-all">{v}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
+                                                                No Request Headers
+                                                            </div>
+                                                        )
                                                     )}
                                                 </TabsContent>
                                                 <TabsContent value="body" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
@@ -1279,39 +1858,80 @@ export function ResultsTable() {
                                                         height="100%"
                                                         defaultLanguage="json"
                                                         theme="vs-dark"
-                                                        value={
-                                                            step.requestBody
-                                                                ? formatBody(step.requestBody)
-                                                                : "No Request Body Content"
-                                                        }
+                                                        value={isEditing ? editBody : (currentStep.requestBody ? formatBody(currentStep.requestBody) : "No Request Body Content")}
+                                                        onChange={(val) => {
+                                                            if (isEditing) setEditBody(val || "");
+                                                        }}
+                                                        onMount={(editor, monaco) => {
+                                                            monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+                                                                validate: true,
+                                                                allowComments: true,
+                                                                comments: "ignore",
+                                                                trailingCommas: "ignore",
+                                                            });
+                                                        }}
                                                         options={{
                                                             automaticLayout: true,
-                                                            readOnly: true,
+                                                            readOnly: !isEditing,
                                                             minimap: { enabled: false },
                                                             wordWrap: "on",
                                                         }}
                                                     />
                                                 </TabsContent>
                                             </Tabs>
+
+                                            {isEditing && (
+                                                <div className="bg-neutral-900/80 px-3 py-2 border-t border-white/5 flex justify-end gap-2 shrink-0">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="h-8 text-xs font-semibold bg-transparent hover:bg-white/5 border-white/10 text-white hover:text-white"
+                                                        onClick={() => setIsEditing(false)}
+                                                        disabled={isRerunning}
+                                                    >
+                                                        Cancel
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        className="h-8 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white"
+                                                        onClick={handleRerunExecute}
+                                                        disabled={isRerunning}
+                                                    >
+                                                        {isRerunning ? (
+                                                            <>
+                                                                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                                                Running...
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Play className="w-3.5 h-3.5 mr-1.5" />
+                                                                Run / Update
+                                                            </>
+                                                        )}
+                                                    </Button>
+                                                </div>
+                                            )}
                                         </div>
+
+                                        {/* Response Details Panel */}
                                         <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
                                             <div className="bg-muted px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground flex flex-col gap-1.5">
                                                 <div className="flex items-center justify-between">
-                                                    <span>Response ({step.statusCode} {step.responseStatusText || ""}) — {step.responseTimeMs}ms</span>
+                                                    <span>Response ({currentStep.statusCode} {currentStep.responseStatusText || ""}) — {currentStep.responseTimeMs}ms</span>
                                                 </div>
-                                                {(step.ipAddress || step.responseType) && (
+                                                {(currentStep.ipAddress || currentStep.responseType) && (
                                                     <div className="flex flex-wrap gap-2 text-[10px] text-neutral-400 font-mono normal-case">
-                                                        {step.ipAddress && (
+                                                        {currentStep.ipAddress && (
                                                             <span className="bg-neutral-900/60 px-1.5 py-0.5 rounded border border-white/5">
-                                                                IP: <span className="text-neutral-200 select-all">{step.ipAddress}</span>
+                                                                IP: <span className="text-neutral-200 select-all">{currentStep.ipAddress}</span>
                                                             </span>
                                                         )}
-                                                        {step.responseType && (
+                                                        {currentStep.responseType && (
                                                             <span className="bg-neutral-900/60 px-1.5 py-0.5 rounded border border-white/5">
-                                                                Type: <span className="text-neutral-200">{step.responseType}</span>
+                                                                Type: <span className="text-neutral-200">{currentStep.responseType}</span>
                                                             </span>
                                                         )}
-                                                        {step.responseRedirected && (
+                                                        {currentStep.responseRedirected && (
                                                             <span className="bg-amber-500/10 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/10">
                                                                 Redirected
                                                             </span>
@@ -1326,7 +1946,7 @@ export function ResultsTable() {
                                                             Params (0)
                                                         </TabsTrigger>
                                                         <TabsTrigger value="headers" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
-                                                            Headers ({Object.keys(step.responseHeaders || {}).length})
+                                                            Headers ({Object.keys(currentStep.responseHeaders || {}).length})
                                                         </TabsTrigger>
                                                         <TabsTrigger value="body" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
                                                             Body
@@ -1339,9 +1959,9 @@ export function ResultsTable() {
                                                     </div>
                                                 </TabsContent>
                                                 <TabsContent value="headers" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                                                    {step.responseHeaders && Object.keys(step.responseHeaders).length > 0 ? (
+                                                    {currentStep.responseHeaders && Object.keys(currentStep.responseHeaders).length > 0 ? (
                                                         <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
-                                                            {Object.entries(step.responseHeaders).map(([k, v]) => (
+                                                            {Object.entries(currentStep.responseHeaders).map(([k, v]) => (
                                                                 <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
                                                                     <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
                                                                     <span className="text-neutral-200 break-all select-all">{v}</span>
@@ -1360,10 +1980,18 @@ export function ResultsTable() {
                                                         defaultLanguage="json"
                                                         theme="vs-dark"
                                                         value={
-                                                            step.responseBody !== null && step.responseBody !== undefined
-                                                                ? formatBody(step.responseBody)
-                                                                : step.error || "No Response Body Content"
+                                                            currentStep.responseBody !== null && currentStep.responseBody !== undefined
+                                                                ? formatBody(currentStep.responseBody)
+                                                                : currentStep.error || "No Response Body Content"
                                                         }
+                                                        onMount={(editor, monaco) => {
+                                                            monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+                                                                validate: true,
+                                                                allowComments: true,
+                                                                comments: "ignore",
+                                                                trailingCommas: "ignore",
+                                                            });
+                                                        }}
                                                         options={{
                                                             automaticLayout: true,
                                                             readOnly: true,
@@ -1374,178 +2002,7 @@ export function ResultsTable() {
                                                 </TabsContent>
                                             </Tabs>
                                         </div>
-                                    </TabsContent>
-                                )) : (
-                                    <TabsContent value="legacy" className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
-                                            <div className="bg-muted px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground flex flex-col gap-2">
-                                                <div className="flex items-center justify-between">
-                                                    <span>Interpolated Request Details</span>
-                                                </div>
-                                                {result?.requestUrl && (
-                                                    <div className="flex items-center gap-2 font-mono text-[11px] bg-neutral-900/60 p-1.5 rounded border border-white/5 truncate select-all normal-case">
-                                                        <Badge variant="outline" className={cn(
-                                                            "text-[9px] font-bold px-1.5 py-0 uppercase shrink-0 border-transparent text-white",
-                                                            result.requestMethod === "GET" && "bg-sky-500/20 text-sky-300",
-                                                            result.requestMethod === "POST" && "bg-emerald-500/20 text-emerald-300",
-                                                            result.requestMethod === "PUT" && "bg-amber-500/20 text-amber-300",
-                                                            result.requestMethod === "DELETE" && "bg-rose-500/20 text-rose-300",
-                                                            !["GET", "POST", "PUT", "DELETE"].includes(result.requestMethod || "") && "bg-purple-500/20 text-purple-300"
-                                                        )}>
-                                                            {result.requestMethod || "GET"}
-                                                        </Badge>
-                                                        <span className="truncate text-neutral-300" title={result.requestUrl}>{result.requestUrl}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            <Tabs defaultValue="params" className="flex-1 flex flex-col min-h-0">
-                                                <div className="bg-neutral-900/40 border-b px-2 shrink-0 h-8 flex items-center">
-                                                    <TabsList className="bg-transparent h-7 p-0 gap-1">
-                                                        <TabsTrigger value="params" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
-                                                            Params ({Object.keys(result?.requestParams || {}).length})
-                                                        </TabsTrigger>
-                                                        <TabsTrigger value="headers" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
-                                                            Headers ({Object.keys(result?.requestHeaders || {}).length})
-                                                        </TabsTrigger>
-                                                        <TabsTrigger value="body" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
-                                                            Body
-                                                        </TabsTrigger>
-                                                    </TabsList>
-                                                </div>
-                                                <TabsContent value="params" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                                                    {result?.requestParams && Object.keys(result.requestParams).length > 0 ? (
-                                                        <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
-                                                            {Object.entries(result.requestParams).map(([k, v]) => (
-                                                                <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
-                                                                    <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
-                                                                    <span className="text-neutral-200 break-all select-all">{v}</span>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
-                                                            No Request Parameters
-                                                        </div>
-                                                    )}
-                                                </TabsContent>
-                                                <TabsContent value="headers" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                                                    {result?.requestHeaders && Object.keys(result.requestHeaders).length > 0 ? (
-                                                        <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
-                                                            {Object.entries(result.requestHeaders).map(([k, v]) => (
-                                                                <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
-                                                                    <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
-                                                                    <span className="text-neutral-200 break-all select-all">{v}</span>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
-                                                            No Request Headers
-                                                        </div>
-                                                    )}
-                                                </TabsContent>
-                                                <TabsContent value="body" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                                                    <Editor
-                                                        height="100%"
-                                                        defaultLanguage="json"
-                                                        theme="vs-dark"
-                                                        value={
-                                                            result?.requestBody
-                                                                ? formatBody(result.requestBody)
-                                                                : "No Request Body Content"
-                                                        }
-                                                        options={{
-                                                            automaticLayout: true,
-                                                            readOnly: true,
-                                                            minimap: { enabled: false },
-                                                            wordWrap: "on",
-                                                        }}
-                                                    />
-                                                </TabsContent>
-                                            </Tabs>
-                                        </div>
-                                        <div className="flex flex-col border rounded-md min-h-0 overflow-hidden shadow-inner bg-[#1e1e1e]">
-                                            <div className="bg-muted px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b shrink-0 text-foreground flex flex-col gap-1.5">
-                                                <div className="flex items-center justify-between">
-                                                    <span>Response Details</span>
-                                                </div>
-                                                {(result?.ipAddress || result?.responseType) && (
-                                                    <div className="flex flex-wrap gap-2 text-[10px] text-neutral-400 font-mono normal-case">
-                                                        {result.ipAddress && (
-                                                            <span className="bg-neutral-900/60 px-1.5 py-0.5 rounded border border-white/5">
-                                                                IP: <span className="text-neutral-200 select-all">{result.ipAddress}</span>
-                                                            </span>
-                                                        )}
-                                                        {result.responseType && (
-                                                            <span className="bg-neutral-900/60 px-1.5 py-0.5 rounded border border-white/5">
-                                                                Type: <span className="text-neutral-200">{result.responseType}</span>
-                                                            </span>
-                                                        )}
-                                                        {result.responseRedirected && (
-                                                            <span className="bg-amber-500/10 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/10">
-                                                                Redirected
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <Tabs defaultValue="body" className="flex-1 flex flex-col min-h-0">
-                                                <div className="bg-neutral-900/40 border-b px-2 shrink-0 h-8 flex items-center">
-                                                    <TabsList className="bg-transparent h-7 p-0 gap-1">
-                                                        <TabsTrigger value="params" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
-                                                            Params (0)
-                                                        </TabsTrigger>
-                                                        <TabsTrigger value="headers" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
-                                                            Headers ({Object.keys(result?.responseHeaders || {}).length})
-                                                        </TabsTrigger>
-                                                        <TabsTrigger value="body" className="text-[10px] h-6 px-3 rounded data-[state=active]:bg-neutral-800 data-[state=active]:text-white">
-                                                            Body
-                                                        </TabsTrigger>
-                                                    </TabsList>
-                                                </div>
-                                                <TabsContent value="params" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                                                    <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
-                                                        No Response Parameters
-                                                    </div>
-                                                </TabsContent>
-                                                <TabsContent value="headers" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                                                    {result?.responseHeaders && Object.keys(result.responseHeaders).length > 0 ? (
-                                                        <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
-                                                            {Object.entries(result.responseHeaders).map(([k, v]) => (
-                                                                <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
-                                                                    <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
-                                                                    <span className="text-neutral-200 break-all select-all">{v}</span>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="p-4 text-center text-xs text-neutral-500 italic flex-1 flex items-center justify-center">
-                                                            No Response Headers
-                                                        </div>
-                                                    )}
-                                                </TabsContent>
-                                                <TabsContent value="body" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
-                                                    <Editor
-                                                        height="100%"
-                                                        defaultLanguage="json"
-                                                        theme="vs-dark"
-                                                        value={
-                                                            result?.responseBody !== null && result?.responseBody !== undefined
-                                                                ? formatBody(result.responseBody)
-                                                                : "No Response Body Content"
-                                                        }
-                                                        options={{
-                                                            automaticLayout: true,
-                                                            readOnly: true,
-                                                            minimap: { enabled: false },
-                                                            wordWrap: "on",
-                                                        }}
-                                                    />
-                                                </TabsContent>
-                                            </Tabs>
-                                        </div>
-                                    </TabsContent>
+                                    </div>
                                 )}
                             </Tabs>
                         );

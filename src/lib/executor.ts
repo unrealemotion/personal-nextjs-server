@@ -30,6 +30,8 @@ export async function runBulkExecution(
                 requestBody: null,
                 responseBody: null,
                 steps: [],
+                timestamp: new Date().toISOString(),
+                active: true,
             });
         }
     });
@@ -43,7 +45,9 @@ export async function runBulkExecution(
                 requestBody: null,
                 responseBody: null,
                 steps: [],
-                error: undefined
+                error: undefined,
+                timestamp: new Date().toISOString(),
+                active: true,
             }, iter);
         }
     } else {

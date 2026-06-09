@@ -2,6 +2,7 @@ import { Store } from "@tanstack/react-store";
 import {
     type RequestTemplate,
     type ExecutionResult,
+    type StepResult,
     type ColumnMapping,
     type TableFilterConfig,
     type ApiCollection,
@@ -159,9 +160,19 @@ export const hydrateStore = () => {
     try {
         const parsed = JSON.parse(saved);
         const apiTabs = Array.isArray(parsed.apiTabs) ? parsed.apiTabs : [];
+        
+        let results = Array.isArray(parsed.results) ? parsed.results : [];
+        const nowMs = Date.now();
+        results = results.map((r: any, idx: number) => ({
+            ...r,
+            timestamp: r.timestamp || new Date(nowMs - (results.length - idx) * 1000).toISOString(),
+            active: r.active !== undefined ? r.active : true
+        }));
+
         store.setState(() => ({
             ...defaultState,
             ...parsed,
+            results,
             apiTabs
         }));
     } catch (e) {
@@ -170,22 +181,26 @@ export const hydrateStore = () => {
 };
 
 // --- Persistence ---
+let saveTimeout: NodeJS.Timeout | null = null;
 if (typeof window !== "undefined") {
     store.subscribe(() => {
-        const state = store.state;
-        try {
-            // Strip response bodies/payloads before persisting to keep storage minimal
-            const sanitizedState = {
-                ...state,
-                apiTabs: (state.apiTabs || []).map(tab => ({
-                    ...tab,
-                    response: null // Response data is transient and shouldn't fill localstorage
-                }))
-            };
-            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(sanitizedState));
-        } catch (e) {
-            console.warn("Storage limit reached, results might not be saved.", e);
-        }
+        if (saveTimeout) clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+            const state = store.state;
+            try {
+                // Strip response bodies/payloads before persisting to keep storage minimal
+                const sanitizedState = {
+                    ...state,
+                    apiTabs: (state.apiTabs || []).map(tab => ({
+                        ...tab,
+                        response: null // Response data is transient and shouldn't fill localstorage
+                    }))
+                };
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(sanitizedState));
+            } catch (e) {
+                console.warn("Storage limit reached, results might not be saved.", e);
+            }
+        }, 500); // 500ms debounce to prevent freezing on frequent updates (e.g., run switching)
     });
 }
 
@@ -372,7 +387,10 @@ export const setResults = (results: ExecutionResult[]) => {
 export const updateResultByRowId = (rowId: number, resultUpdate: Partial<ExecutionResult>, iteration = 1) => {
     store.setState((state) => {
         const newResults = [...state.results];
-        const idx = newResults.findIndex((r) => r.rowId === rowId && (r.iteration ?? 1) === iteration);
+        let idx = newResults.findIndex((r) => r.rowId === rowId && (r.iteration ?? 1) === iteration && r.active !== false);
+        if (idx === -1) {
+            idx = newResults.findIndex((r) => r.rowId === rowId && (r.iteration ?? 1) === iteration);
+        }
         if (idx !== -1) {
             newResults[idx] = { ...newResults[idx], ...resultUpdate };
         } else {
@@ -385,6 +403,8 @@ export const updateResultByRowId = (rowId: number, resultUpdate: Partial<Executi
                 requestBody: null,
                 responseBody: null,
                 steps: [],
+                active: true,
+                timestamp: new Date().toISOString(),
                 ...resultUpdate
             } as ExecutionResult);
             newResults.sort((a, b) => {
@@ -393,6 +413,117 @@ export const updateResultByRowId = (rowId: number, resultUpdate: Partial<Executi
             });
         }
         return { ...state, results: newResults };
+    });
+};
+
+export const setActiveResultInstance = (rowId: number, iteration: number, timestamp: string) => {
+    store.setState((state) => {
+        const matchingIndices = state.results
+            .map((r, idx) => ({ r, idx }))
+            .filter(({ r }) => r.rowId === rowId && (r.iteration ?? 1) === iteration);
+            
+        const newResults = [...state.results];
+        matchingIndices.forEach(({ r, idx }, index) => {
+            const rTimestamp = r.timestamp || `temp_${index}`;
+            newResults[idx] = { ...r, active: rTimestamp === timestamp };
+        });
+        return { ...state, results: newResults };
+    });
+};
+
+export const duplicateResultAsNewRow = (rowId: number, result: ExecutionResult, targetRowIndex?: number) => {
+    store.setState((state) => {
+        const insertIndex = targetRowIndex !== undefined ? targetRowIndex : state.fileData.length;
+        
+        const newFileData = [...state.fileData];
+        const rowToCopy = state.fileData[rowId] ? { ...state.fileData[rowId] } : {};
+        newFileData.splice(insertIndex, 0, rowToCopy);
+        
+        const newOriginalData = [...state.originalData];
+        const originalRowToCopy = state.originalData[rowId] ? { ...state.originalData[rowId] } : {};
+        newOriginalData.splice(insertIndex, 0, originalRowToCopy);
+        
+        const newResults = state.results.map((r) => {
+            if (r.rowId >= insertIndex) {
+                return { ...r, rowId: r.rowId + 1 };
+            }
+            return r;
+        });
+        
+        const newResult: ExecutionResult = {
+            ...result,
+            rowId: insertIndex,
+            iteration: 1,
+            active: true,
+            timestamp: new Date().toISOString()
+        };
+        
+        return {
+            ...state,
+            fileData: newFileData,
+            originalData: newOriginalData,
+            results: [...newResults, newResult]
+        };
+    });
+};
+
+export const saveRerunResult = (
+    rowId: number,
+    iteration: number,
+    stepId: string,
+    updatedStepResult: StepResult,
+    newTimestamp: string
+) => {
+    store.setState((state) => {
+        const matching = state.results.filter(r => r.rowId === rowId && (r.iteration ?? 1) === iteration);
+        const baseResult = matching.find(r => r.active) || matching[matching.length - 1];
+        
+        if (!baseResult) return state;
+        
+        const updatedSteps = baseResult.steps.map(s => {
+            if (s.stepId === stepId || (stepId === "legacy" && baseResult.steps.length === 0)) {
+                return updatedStepResult;
+            }
+            return s;
+        });
+        
+        const chainFailed = updatedSteps.some(s => s.error);
+        const lastStep = updatedSteps[updatedSteps.length - 1];
+        const totalTime = updatedSteps.reduce((acc, s) => acc + s.responseTimeMs, 0);
+        
+        const newResult: ExecutionResult = {
+            ...baseResult,
+            status: chainFailed ? "error" : "success",
+            statusCode: lastStep?.statusCode ?? updatedStepResult.statusCode,
+            responseTimeMs: totalTime || updatedStepResult.responseTimeMs,
+            requestUrl: updatedSteps[0]?.requestUrl ?? updatedStepResult.requestUrl,
+            requestMethod: updatedSteps[0]?.requestMethod ?? updatedStepResult.requestMethod,
+            requestHeaders: updatedSteps[0]?.requestHeaders ?? updatedStepResult.requestHeaders,
+            requestParams: updatedSteps[0]?.requestParams ?? updatedStepResult.requestParams,
+            requestBody: updatedSteps[0]?.requestBody ?? updatedStepResult.requestBody,
+            responseBody: lastStep?.responseBody ?? updatedStepResult.responseBody,
+            responseHeaders: lastStep?.responseHeaders ?? updatedStepResult.responseHeaders,
+            responseType: lastStep?.responseType ?? updatedStepResult.responseType,
+            responseRedirected: lastStep?.responseRedirected ?? updatedStepResult.responseRedirected,
+            responseStatusText: lastStep?.responseStatusText ?? updatedStepResult.responseStatusText,
+            ipAddress: lastStep?.ipAddress ?? updatedStepResult.ipAddress,
+            error: chainFailed ? updatedSteps.filter(s => s.error).map(s => s.error).join("; ") : undefined,
+            steps: updatedSteps,
+            timestamp: newTimestamp,
+            active: true
+        };
+        
+        const newResults = state.results.map((r) => {
+            if (r.rowId === rowId && (r.iteration ?? 1) === iteration) {
+                return { ...r, active: false };
+            }
+            return r;
+        });
+        
+        return {
+            ...state,
+            results: [...newResults, newResult]
+        };
     });
 };
 
