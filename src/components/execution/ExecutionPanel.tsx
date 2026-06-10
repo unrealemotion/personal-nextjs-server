@@ -3,7 +3,7 @@
 import React, { useState, useRef } from "react";
 import { useStore } from "@tanstack/react-store";
 import { store, setMaxRetries, setRetryStatusCodes, setStopOnFailure, setThrottleDelayMs, setRowIterations } from "@/lib/store";
-import { runBulkExecution } from "@/lib/executor";
+import { runBulkExecution, pauseBulkExecution, resumeBulkExecution } from "@/lib/executor";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,9 @@ export function ExecutionPanel() {
     const [concurrency, setConcurrency] = useState(2);
     const [isRunning, setIsRunning] = useState(false);
     const [progress, setProgress] = useState(0);
+    const [isPaused, setIsPaused] = useState(false);
     const abortControllerRef = useRef<AbortController | null>(null);
+
 
     const totalRows = fileData.length;
     const canRun = totalRows > 0 && templates.some(t => t.url.trim().length > 0);
@@ -33,6 +35,7 @@ export function ExecutionPanel() {
         if (!canRun) return;
         setIsRunning(true);
         setProgress(0);
+        setIsPaused(false);
         abortControllerRef.current = new AbortController();
 
         try {
@@ -48,14 +51,17 @@ export function ExecutionPanel() {
             toast.error(err?.message || "Execution engine crashed");
         } finally {
             setIsRunning(false);
+            setIsPaused(false);
             abortControllerRef.current = null;
         }
     };
+
 
     const handleTestRun = async () => {
         if (!canRun) return;
         setIsRunning(true);
         setProgress(0);
+        setIsPaused(false);
         abortControllerRef.current = new AbortController();
 
         try {
@@ -71,9 +77,23 @@ export function ExecutionPanel() {
             toast.error(err?.message || "Test execution crashed");
         } finally {
             setIsRunning(false);
+            setIsPaused(false);
             abortControllerRef.current = null;
         }
     };
+
+    const handlePause = () => {
+        pauseBulkExecution();
+        setIsPaused(true);
+        toast.info("Execution paused");
+    };
+
+    const handleResume = () => {
+        resumeBulkExecution();
+        setIsPaused(false);
+        toast.info("Execution resumed");
+    };
+
 
     const handleStop = () => {
         if (abortControllerRef.current) {
@@ -191,55 +211,70 @@ export function ExecutionPanel() {
 
                     <div className="flex space-x-3 pt-1">
                         {!isRunning ? (
-                            <Button
-                                className="flex-1 h-11 border-primary/30 text-foreground hover:bg-primary/10 transition-colors"
-                                disabled={!canRun}
-                                onClick={handleTestRun}
-                                variant="outline"
-                            >
-                                <FlaskConical className="w-4 h-4 mr-2 text-primary" />
-                                Test Row 1
-                            </Button>
-                        ) : (
-                            <Button
-                                className="flex-1 h-11 border-destructive/30 text-destructive hover:bg-destructive/10 transition-colors"
-                                onClick={handleStop}
-                                variant="outline"
-                            >
-                                <StopCircle className="w-4 h-4 mr-2" />
-                                Stop Execution
-                            </Button>
-                        )}
+                            <>
+                                <Button
+                                    className="flex-1 h-11 border-primary/30 text-foreground hover:bg-primary/10 transition-colors"
+                                    disabled={!canRun}
+                                    onClick={handleTestRun}
+                                    variant="outline"
+                                >
+                                    <FlaskConical className="w-4 h-4 mr-2 text-primary" />
+                                    Test Row 1
+                                </Button>
 
-                        <Button
-                            className="flex-1 h-11 shadow-lg shadow-primary/20 bg-primary hover:bg-primary/90 text-primary-foreground transition-all"
-                            disabled={!canRun || isRunning}
-                            onClick={handleRun}
-                            variant={isRunning ? "secondary" : "default"}
-                        >
-                            {isRunning ? (
-                                <>
-                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                    Running...
-                                </>
-                            ) : (
-                                <>
+                                <Button
+                                    className="flex-1 h-11 shadow-lg shadow-primary/20 bg-primary hover:bg-primary/90 text-primary-foreground transition-all"
+                                    disabled={!canRun}
+                                    onClick={handleRun}
+                                    variant="default"
+                                >
                                     <Play className="w-4 h-4 mr-2" />
                                     Run Engine
-                                </>
-                            )}
-                        </Button>
+                                </Button>
+                            </>
+                        ) : (
+                            <>
+                                <Button
+                                    className="flex-1 h-11 border-destructive/30 text-destructive hover:bg-destructive/10 transition-colors"
+                                    onClick={handleStop}
+                                    variant="outline"
+                                >
+                                    <StopCircle className="w-4 h-4 mr-2" />
+                                    Stop
+                                </Button>
+
+                                {isPaused ? (
+                                    <Button
+                                        className="flex-1 h-11 bg-amber-600 hover:bg-amber-700 text-white shadow-lg shadow-amber-600/20 transition-all"
+                                        onClick={handleResume}
+                                    >
+                                        <Play className="w-4 h-4 mr-2" />
+                                        Resume
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        className="flex-1 h-11 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-600/20 transition-all"
+                                        onClick={handlePause}
+                                    >
+                                        <Loader2 className="w-4 h-4 mr-2 animate-pulse" />
+                                        Pause
+                                    </Button>
+                                )}
+                            </>
+                        )}
                     </div>
+
 
                     {isRunning && (
                         <div className="space-y-2">
                             <div className="flex justify-between text-sm text-muted-foreground">
-                                <span>Progress</span>
+                                <span>Progress {isPaused && "(Paused)"}</span>
                                 <span>{progress}%</span>
                             </div>
                             <Progress value={progress} className="h-2" />
                         </div>
                     )}
+
                 </div>
             </CardContent>
         </Card>

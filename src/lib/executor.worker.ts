@@ -1,10 +1,20 @@
 import { type RequestTemplate, type StepResult } from "./schema";
 
+let isPaused = false;
+const resumeListeners: (() => void)[] = [];
+
 function pLimit(concurrency: number) {
     const queue: Array<() => Promise<any>> = [];
     let activeCount = 0;
 
     const next = () => {
+        if (isPaused) {
+            const onResume = () => {
+                next();
+            };
+            resumeListeners.push(onResume);
+            return;
+        }
         if (activeCount < concurrency && queue.length > 0) {
             activeCount++;
             const fn = queue.shift()!;
@@ -416,6 +426,8 @@ self.onmessage = async (e: MessageEvent) => {
 
     if (type === "START") {
         const { fileData, templates, concurrencyLimit, singleRowIndex, maxRetries, retryStatusCodes, stopOnFailure, throttleDelayMs, rowIterations = 1 } = e.data;
+        isPaused = false;
+        resumeListeners.length = 0;
         abortController = new AbortController();
         const signal = abortController.signal;
 
@@ -460,6 +472,15 @@ self.onmessage = async (e: MessageEvent) => {
                         const executionContext = { ...row };
 
                         for (const tmpl of templates) {
+                            if (isPaused) {
+                                await new Promise<void>(resolveResume => {
+                                    const onResume = () => {
+                                        resolveResume();
+                                    };
+                                    resumeListeners.push(onResume);
+                                });
+                            }
+
                             if (signal.aborted) {
                                 steps.push({
                                     stepId: tmpl.id,
@@ -619,6 +640,15 @@ self.onmessage = async (e: MessageEvent) => {
     } else if (type === "ABORT") {
         if (abortController) {
             abortController.abort();
+        }
+    } else if (type === "PAUSE") {
+        isPaused = true;
+    } else if (type === "RESUME") {
+        if (isPaused) {
+            isPaused = false;
+            const listeners = [...resumeListeners];
+            resumeListeners.length = 0;
+            listeners.forEach(listener => listener());
         }
     }
 };

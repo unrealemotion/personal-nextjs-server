@@ -2,6 +2,20 @@ import { store, setResults, updateResultByRowId } from "./store";
 import { ExecutionResult } from "./schema";
 import { sendToExtension } from "./extension";
 
+let activeWorker: Worker | null = null;
+
+export function pauseBulkExecution() {
+    if (activeWorker) {
+        activeWorker.postMessage({ type: "PAUSE" });
+    }
+}
+
+export function resumeBulkExecution() {
+    if (activeWorker) {
+        activeWorker.postMessage({ type: "RESUME" });
+    }
+}
+
 export async function runBulkExecution(
     concurrencyLimit: number,
     onProgress?: (completed: number, total: number) => void,
@@ -173,6 +187,7 @@ export async function runBulkExecution(
 
     // Create the Web Worker instance
     const worker = new Worker(new URL("./executor.worker.ts", import.meta.url));
+    activeWorker = worker;
 
     try {
         await new Promise<void>((resolve, reject) => {
@@ -292,6 +307,7 @@ export async function runBulkExecution(
             });
         });
     } finally {
+        activeWorker = null;
         await clearRules();
     }
 }
