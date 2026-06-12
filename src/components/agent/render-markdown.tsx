@@ -32,6 +32,9 @@ export function renderMarkdown(text: string) {
             let inList = false;
             let listItems: React.ReactNode[] = [];
             const renderedElements: React.ReactNode[] = [];
+            
+            let inTable = false;
+            let tableData: string[][] = [];
 
             const parseInline = (lineText: string): React.ReactNode[] => {
                 // simple parser for bold, italic, inline code, and links
@@ -92,75 +95,135 @@ export function renderMarkdown(text: string) {
                 });
             };
 
+            const flushList = () => {
+                if (inList && listItems.length > 0) {
+                    renderedElements.push(
+                        <ul key={`list-${renderedElements.length}`} className="my-2 space-y-1">
+                            {listItems}
+                        </ul>
+                    );
+                    listItems = [];
+                }
+                inList = false;
+            };
+
+            const flushTable = () => {
+                if (inTable && tableData.length > 0) {
+                    const hasHeader = tableData.length > 1 && tableData[1].every(cell => cell.length > 0 && cell.match(/^[-: ]+$/));
+                    
+                    let thead = null;
+                    let tbodyRows = tableData;
+
+                    if (hasHeader) {
+                        thead = tableData[0];
+                        tbodyRows = tableData.slice(2); // Skip header and separator
+                    }
+
+                    renderedElements.push(
+                        <div key={`table-${renderedElements.length}`} className="my-3 overflow-x-auto border border-white/10 rounded-lg">
+                            <table className="w-full text-left border-collapse text-[10px]">
+                                {thead && (
+                                    <thead className="bg-white/5 border-b border-white/10">
+                                        <tr>
+                                            {thead.map((cell, i) => (
+                                                <th key={i} className="px-3 py-2 font-semibold text-white/90 border-r border-white/5 last:border-0">
+                                                    {parseInline(cell)}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                )}
+                                <tbody className="divide-y divide-white/5 bg-neutral-900/50">
+                                    {tbodyRows.map((row, rIdx) => (
+                                        <tr key={rIdx} className="hover:bg-white/5 transition-colors">
+                                            {row.map((cell, cIdx) => (
+                                                <td key={cIdx} className="px-3 py-2 text-white/80 border-r border-white/5 last:border-0">
+                                                    {parseInline(cell)}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+                    tableData = [];
+                }
+                inTable = false;
+            };
+
             lines.forEach((line, lineIdx) => {
                 const listMatch = line.match(/^\s*[-*+]\s+(.*)$/);
                 const orderedMatch = line.match(/^\s*(\d+)\.\s+(.*)$/);
                 const h3Match = line.match(/^###\s+(.*)$/);
                 const h2Match = line.match(/^##\s+(.*)$/);
                 const h1Match = line.match(/^#\s+(.*)$/);
+                
+                const trimmedLine = line.trim();
+                const isTableRow = trimmedLine.startsWith("|") && trimmedLine.endsWith("|");
+                const isEmptyLine = trimmedLine.length === 0;
 
-                if (listMatch) {
-                    inList = true;
-                    listItems.push(
-                        <li key={lineIdx} className="list-disc ml-4 mb-1 text-white/90">
-                            {parseInline(listMatch[1])}
-                        </li>
-                    );
-                } else if (orderedMatch) {
-                    inList = true;
-                    listItems.push(
-                        <li key={lineIdx} className="list-decimal ml-4 mb-1 text-white/90">
-                            {parseInline(orderedMatch[2])}
-                        </li>
-                    );
+                if (isTableRow) {
+                    flushList();
+                    inTable = true;
+                    const parts = trimmedLine.split("|");
+                    const cells = parts.slice(1, parts.length - 1).map(c => c.trim());
+                    tableData.push(cells);
+                } else if (isEmptyLine && inTable) {
+                    // Tolerate empty lines within table parsing
                 } else {
-                    if (inList) {
-                        renderedElements.push(
-                            <ul key={`list-${lineIdx}`} className="my-2 space-y-1">
-                                {listItems}
-                            </ul>
-                        );
-                        inList = false;
-                        listItems = [];
-                    }
+                    flushTable();
 
-                    if (h3Match) {
-                        renderedElements.push(
-                            <h3 key={lineIdx} className="text-sm font-bold text-white mt-4 mb-1">
-                                {parseInline(h3Match[1])}
-                            </h3>
+                    if (listMatch) {
+                        inList = true;
+                        listItems.push(
+                            <li key={lineIdx} className="list-disc ml-4 mb-1 text-white/90">
+                                {parseInline(listMatch[1])}
+                            </li>
                         );
-                    } else if (h2Match) {
-                        renderedElements.push(
-                            <h2 key={lineIdx} className="text-base font-extrabold text-white mt-5 mb-2 border-b border-white/5 pb-1">
-                                {parseInline(h2Match[1])}
-                            </h2>
-                        );
-                    } else if (h1Match) {
-                        renderedElements.push(
-                            <h1 key={lineIdx} className="text-lg font-black text-white mt-6 mb-2">
-                                {parseInline(h1Match[1])}
-                            </h1>
-                        );
-                    } else if (line.trim().length > 0) {
-                        renderedElements.push(
-                            <p key={lineIdx} className="mb-2 text-white/90">
-                                {parseInline(line)}
-                            </p>
+                    } else if (orderedMatch) {
+                        inList = true;
+                        listItems.push(
+                            <li key={lineIdx} className="list-decimal ml-4 mb-1 text-white/90">
+                                {parseInline(orderedMatch[2])}
+                            </li>
                         );
                     } else {
-                        renderedElements.push(<div key={lineIdx} className="h-2" />);
+                        flushList();
+
+                        if (h3Match) {
+                            renderedElements.push(
+                                <h3 key={lineIdx} className="text-sm font-bold text-white mt-4 mb-1">
+                                    {parseInline(h3Match[1])}
+                                </h3>
+                            );
+                        } else if (h2Match) {
+                            renderedElements.push(
+                                <h2 key={lineIdx} className="text-base font-extrabold text-white mt-5 mb-2 border-b border-white/5 pb-1">
+                                    {parseInline(h2Match[1])}
+                                </h2>
+                            );
+                        } else if (h1Match) {
+                            renderedElements.push(
+                                <h1 key={lineIdx} className="text-lg font-black text-white mt-6 mb-2">
+                                    {parseInline(h1Match[1])}
+                                </h1>
+                            );
+                        } else if (line.trim().length > 0) {
+                            renderedElements.push(
+                                <p key={lineIdx} className="mb-2 text-white/90">
+                                    {parseInline(line)}
+                                </p>
+                            );
+                        } else {
+                            renderedElements.push(<div key={lineIdx} className="h-2" />);
+                        }
                     }
                 }
             });
 
-            if (inList && listItems.length > 0) {
-                renderedElements.push(
-                    <ul key={`list-end`} className="my-2 space-y-1">
-                        {listItems}
-                    </ul>
-                );
-            }
+            flushList();
+            flushTable();
 
             return <React.Fragment key={index}>{renderedElements}</React.Fragment>;
         }
