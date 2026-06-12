@@ -7,6 +7,12 @@ import { RequestDesigner } from "@/components/editor/RequestDesigner";
 import { ExecutionPanel } from "@/components/execution/ExecutionPanel";
 import { ResultsTable } from "@/components/results/ResultsTable";
 import { ApiClientWorkspace } from "@/components/api-client/ApiClientWorkspace";
+import dynamic from "next/dynamic";
+
+const AgentChatPanel = dynamic(
+    () => import("@/components/agent/AgentChatPanel").then((mod) => mod.AgentChatPanel),
+    { ssr: false }
+);
 import { Layers, Sparkles, Download, Upload, Trash2, AlertTriangle, BookOpen } from "lucide-react";
 import { exportState, importState, resetStore, hydrateStore, store, setCurrentView } from "@/lib/store";
 import { useLocalTransition } from "@/lib/transitions";
@@ -219,6 +225,7 @@ export default function SurgePage() {
                     </div>
                 )}
             </main>
+            <AgentChatPanel />
         </div>
     );
 }

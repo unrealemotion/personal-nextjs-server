@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Wrench, Zap, ChevronRight, Github, Code2, BookOpen, Layers } from "lucide-react";
+import { Wrench, Zap, ChevronRight, Code2, BookOpen, Layers } from "lucide-react";
 
 export default function Home() {
   return (

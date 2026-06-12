@@ -39,7 +39,7 @@ export function Header() {
                 <div className="flex items-center space-x-6">
                     <Link href="/" className="flex items-center space-x-3 group cursor-pointer">
                         <div className="relative w-8 h-8 overflow-hidden rounded-lg transition-colors shadow-lg shadow-indigo-500/10 group-hover:shadow-indigo-500/20">
-                            <Image src="/logo.png" alt="UnrealEmo Logo" fill className="object-contain p-1" />
+                            <Image src="/logo.png" alt="UnrealEmo Logo" fill sizes="32px" className="object-contain p-1" />
                         </div>
                         <span className="text-sm font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60 hidden xs:inline">
                             UnrealEmo

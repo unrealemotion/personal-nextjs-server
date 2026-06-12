@@ -186,6 +186,7 @@ export default function DocsPage() {
                                 </div>
                                 <p className="text-sm text-amber-200/50 max-w-lg leading-relaxed mt-2 text-center">
                                     Get the Surge API Request Helper extension for: CORS and Cookies User-Agent Header Injection.
+                                    If already installed, check that the extension is toggled to <strong>"Enabled"</strong> and not blocked (check if browser settings/group policies customize allowed/blocking extensions).
                                 </p>
                             </div>
 

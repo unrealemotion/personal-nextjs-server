@@ -126,7 +126,7 @@ export function FileUploader() {
                                         </div>
                                     </DialogHeader>
 
-                                    <div className="flex-1 overflow-auto p-0 border-b relative">
+                                    <div className="flex-1 overflow-auto custom-scrollbar p-0 border-b relative">
                                         <Table className="border-collapse border-spacing-0">
                                             <TableHeader className="bg-muted/80 backdrop-blur-md sticky top-0 z-20 shadow-sm">
                                                 <TableRow className="hover:bg-transparent">
@@ -198,7 +198,7 @@ export function FileUploader() {
                                 <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Available Variables</p>
                                 <p className="text-[9px] text-muted-foreground italic">Click to copy</p>
                             </div>
-                            <div className="flex-1 min-h-0 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-primary/10 hover:scrollbar-thumb-primary/20">
+                            <div className="flex-1 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
                                 <div className="flex flex-wrap gap-1.5 pb-2">
                                     {headers.map((header) => (
                                         <Badge

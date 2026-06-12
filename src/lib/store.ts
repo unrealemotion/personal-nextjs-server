@@ -9,8 +9,12 @@ import {
     type Environment,
     type RequestTab,
     type ApiRequest,
-    type ApiFolder
+    type ApiFolder,
+    type AgentProfile,
+    type Message
 } from "./schema";
+import { WELCOME_MESSAGE } from "../components/agent/agent-prompts";
+
 
 export type VariableType = "string" | "number" | "boolean";
 
@@ -80,6 +84,7 @@ export type AppState = {
     stopOnFailure: boolean;
     throttleDelayMs: number;
     rowIterations: number;
+    concurrency: number;
     columnMappings: ColumnMapping[];
     tableFilterConfig: TableFilterConfig;
     fileName: string;
@@ -91,6 +96,13 @@ export type AppState = {
     activeEnvironmentId: string | null;
     apiTabs: RequestTab[];
     activeTabId: string | null;
+
+    // Agent state
+    agentProfiles: AgentProfile[];
+    activeAgentProfileId: string | null;
+    agentChatMessages: Message[];
+    agentPanelPosition: { x: number; y: number } | null;
+    exportExcelTrigger?: { onlyFiltered: boolean } | null;
 };
 
 const LOCAL_STORAGE_KEY = "surge_api_workspace";
@@ -129,6 +141,7 @@ const defaultState: AppState = {
     stopOnFailure: false,
     throttleDelayMs: 0,
     rowIterations: 1,
+    concurrency: 2,
     columnMappings: [
         { id: "col_status", name: "Status Code", source: "status", path: "" },
         { id: "col_error", name: "Error", source: "error", path: "" },
@@ -147,6 +160,26 @@ const defaultState: AppState = {
     activeEnvironmentId: null,
     apiTabs: [],
     activeTabId: null,
+    agentProfiles: [
+        {
+            id: "default-gemini",
+            name: "Gemini 2.5 Flash",
+            provider: "gemini",
+            apiKey: "",
+            endpoint: "https://generativelanguage.googleapis.com/v1beta/models/",
+            model: "gemini-2.5-flash"
+        }
+    ],
+    activeAgentProfileId: "default-gemini",
+    agentChatMessages: [
+        {
+            id: "welcome",
+            role: "assistant",
+            content: WELCOME_MESSAGE
+        }
+    ],
+    agentPanelPosition: null,
+    exportExcelTrigger: null,
 };
 
 
@@ -234,9 +267,18 @@ function clearDB(): Promise<void> {
     });
 }
 
-export const store = new Store<AppState>(defaultState);
+const globalForStore = globalThis as unknown as {
+    store: Store<AppState> | undefined;
+    isHydrated: boolean | undefined;
+};
 
-let isHydrated = false;
+export const store = globalForStore.store || new Store<AppState>(defaultState);
+
+if (process.env.NODE_ENV !== "production") {
+    globalForStore.store = store;
+}
+
+let isHydrated = globalForStore.isHydrated || false;
 let prevConfigState: any = null;
 let prevDataState: any = null;
 let prevResultsState: any = null;
@@ -244,9 +286,45 @@ let prevResultsState: any = null;
 export const hydrateStore = async () => {
     if (typeof window === "undefined") return;
     try {
-        let config = await loadFromDB("workspaceConfig");
-        let data = await loadFromDB("workspaceData");
-        let results = await loadFromDB("workspaceResults");
+        let config = null;
+        let data = null;
+        let results = null;
+
+        const backupConfigStr = localStorage.getItem("surge_backup_config");
+        if (backupConfigStr) {
+            try {
+                config = JSON.parse(backupConfigStr);
+                localStorage.removeItem("surge_backup_config");
+                saveToDB(config, "workspaceConfig").catch(e => console.error("Failed to persist backup config:", e));
+            } catch (err) {}
+        }
+        if (!config) {
+            config = await loadFromDB("workspaceConfig");
+        }
+
+        const backupDataStr = localStorage.getItem("surge_backup_data");
+        if (backupDataStr) {
+            try {
+                data = JSON.parse(backupDataStr);
+                localStorage.removeItem("surge_backup_data");
+                saveToDB(data, "workspaceData").catch(e => console.error("Failed to persist backup data:", e));
+            } catch (err) {}
+        }
+        if (!data) {
+            data = await loadFromDB("workspaceData");
+        }
+
+        const backupResultsStr = localStorage.getItem("surge_backup_results");
+        if (backupResultsStr) {
+            try {
+                results = JSON.parse(backupResultsStr);
+                localStorage.removeItem("surge_backup_results");
+                saveToDB(results, "workspaceResults").catch(e => console.error("Failed to persist backup results:", e));
+            } catch (err) {}
+        }
+        if (!results) {
+            results = await loadFromDB("workspaceResults");
+        }
 
         let parsed: any = null;
 
@@ -282,6 +360,30 @@ export const hydrateStore = async () => {
             }
         }
 
+        // Migrate legacy single agent configuration if any
+        let migratedProfiles: AgentProfile[] = [];
+        let migratedActiveId: string | null = null;
+        const savedAgent = localStorage.getItem("surge_agent_config");
+        if (savedAgent) {
+            try {
+                const oldAgent = JSON.parse(savedAgent);
+                if (oldAgent.apiKey || oldAgent.model) {
+                    migratedActiveId = "migrated-default";
+                    migratedProfiles = [
+                        {
+                            id: "migrated-default",
+                            name: "Migrated Settings",
+                            provider: oldAgent.provider || "gemini",
+                            apiKey: oldAgent.apiKey || "",
+                            endpoint: oldAgent.endpoint || "",
+                            model: oldAgent.model || ""
+                        }
+                    ];
+                }
+                localStorage.removeItem("surge_agent_config");
+            } catch (err) {}
+        }
+
         if (parsed) {
             const apiTabs = Array.isArray(parsed.apiTabs) ? parsed.apiTabs : [];
             let resultsList = Array.isArray(parsed.results) ? parsed.results : [];
@@ -308,13 +410,32 @@ export const hydrateStore = async () => {
                 id: col.id || `col_${generateId()}`
             }));
 
+            let agentProfiles = parsed.agentProfiles || defaultState.agentProfiles;
+            let activeAgentProfileId = parsed.activeAgentProfileId || defaultState.activeAgentProfileId;
+            let agentChatMessages = parsed.agentChatMessages || defaultState.agentChatMessages;
+            if (Array.isArray(agentChatMessages)) {
+                agentChatMessages = agentChatMessages.map((m: any) =>
+                    m.id === "welcome" ? { ...m, content: WELCOME_MESSAGE } : m
+                );
+            }
+            let agentPanelPosition = parsed.agentPanelPosition !== undefined ? parsed.agentPanelPosition : defaultState.agentPanelPosition;
+
+            if ((!parsed.agentProfiles || parsed.agentProfiles.length === 0) && migratedProfiles.length > 0) {
+                agentProfiles = migratedProfiles;
+                activeAgentProfileId = migratedActiveId;
+            }
+
             store.setState(() => ({
                 ...defaultState,
                 ...parsed,
                 columnMappings,
                 tableFilterConfig,
                 results: resultsList,
-                apiTabs
+                apiTabs,
+                agentProfiles,
+                activeAgentProfileId,
+                agentChatMessages,
+                agentPanelPosition
             }));
 
             // Initialize prevStates
@@ -326,6 +447,7 @@ export const hydrateStore = async () => {
                 stopOnFailure: parsed.stopOnFailure || defaultState.stopOnFailure,
                 throttleDelayMs: parsed.throttleDelayMs || defaultState.throttleDelayMs,
                 rowIterations: parsed.rowIterations || defaultState.rowIterations,
+                concurrency: parsed.concurrency || defaultState.concurrency,
                 columnMappings,
                 tableFilterConfig,
                 currentView: parsed.currentView || defaultState.currentView,
@@ -333,7 +455,11 @@ export const hydrateStore = async () => {
                 environments: parsed.environments || defaultState.environments,
                 activeEnvironmentId: parsed.activeEnvironmentId || defaultState.activeEnvironmentId,
                 apiTabs,
-                activeTabId: parsed.activeTabId || defaultState.activeTabId
+                activeTabId: parsed.activeTabId || defaultState.activeTabId,
+                agentProfiles,
+                activeAgentProfileId,
+                agentChatMessages,
+                agentPanelPosition
             };
 
             prevDataState = {
@@ -347,11 +473,19 @@ export const hydrateStore = async () => {
             prevResultsState = {
                 results: resultsList
             };
+        } else if (migratedProfiles.length > 0) {
+            // Apply migrated settings to default state
+            store.setState(s => ({
+                ...s,
+                agentProfiles: migratedProfiles,
+                activeAgentProfileId: migratedActiveId
+            }));
         }
     } catch (e) {
         console.error("Failed to hydrate state from IndexedDB:", e);
     } finally {
         isHydrated = true;
+        globalForStore.isHydrated = true;
     }
 };
 
@@ -370,6 +504,7 @@ const saveConfigDebounced = () => {
                 stopOnFailure: state.stopOnFailure,
                 throttleDelayMs: state.throttleDelayMs,
                 rowIterations: state.rowIterations,
+                concurrency: state.concurrency,
                 columnMappings: state.columnMappings,
                 tableFilterConfig: state.tableFilterConfig,
                 currentView: state.currentView,
@@ -380,7 +515,11 @@ const saveConfigDebounced = () => {
                     ...tab,
                     response: null
                 })),
-                activeTabId: state.activeTabId
+                activeTabId: state.activeTabId,
+                agentProfiles: state.agentProfiles,
+                activeAgentProfileId: state.activeAgentProfileId,
+                agentChatMessages: state.agentChatMessages,
+                agentPanelPosition: state.agentPanelPosition
             };
             await saveToDB(config, "workspaceConfig");
         } catch (e) {
@@ -423,6 +562,49 @@ const saveResultsDebounced = () => {
 };
 
 if (typeof window !== "undefined") {
+    // Synchronously back up unsaved/pending state edits to localStorage on reload/navigation
+    window.addEventListener("beforeunload", () => {
+        if (isHydrated) {
+            try {
+                const state = store.state;
+                const config = {
+                    templates: state.templates,
+                    activeTemplateId: state.activeTemplateId,
+                    maxRetries: state.maxRetries,
+                    retryStatusCodes: state.retryStatusCodes,
+                    stopOnFailure: state.stopOnFailure,
+                    throttleDelayMs: state.throttleDelayMs,
+                    rowIterations: state.rowIterations,
+                    concurrency: state.concurrency,
+                    columnMappings: state.columnMappings,
+                    tableFilterConfig: state.tableFilterConfig,
+                    currentView: state.currentView,
+                    collections: state.collections,
+                    environments: state.environments,
+                    activeEnvironmentId: state.activeEnvironmentId,
+                    apiTabs: (state.apiTabs || []).map(tab => ({ ...tab, response: null })),
+                    activeTabId: state.activeTabId,
+                    agentProfiles: state.agentProfiles,
+                    activeAgentProfileId: state.activeAgentProfileId,
+                    agentChatMessages: state.agentChatMessages,
+                    agentPanelPosition: state.agentPanelPosition
+                };
+                const data = {
+                    fileData: state.fileData,
+                    originalData: state.originalData,
+                    headers: state.headers,
+                    headerTypes: state.headerTypes,
+                    fileName: state.fileName
+                };
+                localStorage.setItem("surge_backup_config", JSON.stringify(config));
+                localStorage.setItem("surge_backup_data", JSON.stringify(data));
+                localStorage.setItem("surge_backup_results", JSON.stringify(state.results));
+            } catch (err) {
+                console.warn("Failed to write beforeunload backup to localStorage:", err);
+            }
+        }
+    });
+
     store.subscribe(() => {
         if (!isHydrated) return;
         
@@ -438,6 +620,7 @@ if (typeof window !== "undefined") {
             state.stopOnFailure !== prevConfigState.stopOnFailure ||
             state.throttleDelayMs !== prevConfigState.throttleDelayMs ||
             state.rowIterations !== prevConfigState.rowIterations ||
+            state.concurrency !== prevConfigState.concurrency ||
             state.columnMappings !== prevConfigState.columnMappings ||
             state.tableFilterConfig !== prevConfigState.tableFilterConfig ||
             state.currentView !== prevConfigState.currentView ||
@@ -445,7 +628,11 @@ if (typeof window !== "undefined") {
             state.environments !== prevConfigState.environments ||
             state.activeEnvironmentId !== prevConfigState.activeEnvironmentId ||
             state.apiTabs !== prevConfigState.apiTabs ||
-            state.activeTabId !== prevConfigState.activeTabId;
+            state.activeTabId !== prevConfigState.activeTabId ||
+            state.agentProfiles !== prevConfigState.agentProfiles ||
+            state.activeAgentProfileId !== prevConfigState.activeAgentProfileId ||
+            state.agentChatMessages !== prevConfigState.agentChatMessages ||
+            state.agentPanelPosition !== prevConfigState.agentPanelPosition;
 
         // 2. Check if Data changed
         const hasDataChanged =
@@ -470,6 +657,7 @@ if (typeof window !== "undefined") {
                 stopOnFailure: state.stopOnFailure,
                 throttleDelayMs: state.throttleDelayMs,
                 rowIterations: state.rowIterations,
+                concurrency: state.concurrency,
                 columnMappings: state.columnMappings,
                 tableFilterConfig: state.tableFilterConfig,
                 currentView: state.currentView,
@@ -477,7 +665,11 @@ if (typeof window !== "undefined") {
                 environments: state.environments,
                 activeEnvironmentId: state.activeEnvironmentId,
                 apiTabs: state.apiTabs,
-                activeTabId: state.activeTabId
+                activeTabId: state.activeTabId,
+                agentProfiles: state.agentProfiles,
+                activeAgentProfileId: state.activeAgentProfileId,
+                agentChatMessages: state.agentChatMessages,
+                agentPanelPosition: state.agentPanelPosition
             };
             saveConfigDebounced();
         }
@@ -590,12 +782,23 @@ export const importState = (json: string) => {
         }));
 
         const currentView = store.state.currentView;
+        
+        // Let import override all data (including agent configurations) with the imported file's data or defaults
+        const agentProfiles = parsed.agentProfiles || defaultState.agentProfiles;
+        const activeAgentProfileId = parsed.activeAgentProfileId || defaultState.activeAgentProfileId;
+        const agentChatMessages = parsed.agentChatMessages || defaultState.agentChatMessages;
+        const agentPanelPosition = parsed.agentPanelPosition !== undefined ? parsed.agentPanelPosition : defaultState.agentPanelPosition;
+
         store.setState(() => ({
             ...defaultState, // Start with default to ensure all keys are present
             ...parsed,
             columnMappings,
             tableFilterConfig,
-            currentView
+            currentView,
+            agentProfiles,
+            activeAgentProfileId,
+            agentChatMessages,
+            agentPanelPosition
         }));
     } catch (e) {
         alert("Failed to import: " + (e instanceof Error ? e.message : "Unknown error"));
@@ -896,6 +1099,10 @@ export const setRowIterations = (val: number) => {
     store.setState((state) => ({ ...state, rowIterations: val }));
 };
 
+export const setConcurrencyLimit = (val: number) => {
+    store.setState((state) => ({ ...state, concurrency: val }));
+};
+
 // --- API Client Actions ---
 
 export const setCurrentView = (view: "bulk" | "api_client") => {
@@ -1090,6 +1297,48 @@ export const saveCollectionRequest = (requestId: string, updates: Partial<ApiReq
         return { ...state, collections: newCollections };
     });
 };
+
+export const saveAgentProfiles = (profiles: AgentProfile[], activeId: string) => {
+    store.setState((state) => ({
+        ...state,
+        agentProfiles: profiles,
+        activeAgentProfileId: activeId
+    }));
+};
+
+export const setActiveAgentProfileId = (activeId: string) => {
+    store.setState((state) => ({
+        ...state,
+        activeAgentProfileId: activeId
+    }));
+};
+
+export const setAgentChatMessages = (messages: Message[] | ((prev: Message[]) => Message[])) => {
+    store.setState((state) => ({
+        ...state,
+        agentChatMessages: typeof messages === "function" ? messages(state.agentChatMessages) : messages
+    }));
+};
+
+export const setAgentPanelPosition = (pos: { x: number; y: number } | null) => {
+    store.setState((state) => ({
+        ...state,
+        agentPanelPosition: pos
+    }));
+};
+
+export const saveCheckpoint = async (messageId: string, stateSnapshot: any) => {
+    await saveToDB(stateSnapshot, `checkpoint_${messageId}`);
+};
+
+export const loadCheckpoint = async (messageId: string) => {
+    return await loadFromDB(`checkpoint_${messageId}`);
+};
+
+export const deleteCheckpoint = async (messageId: string) => {
+    await deleteFromDB(`checkpoint_${messageId}`);
+};
+
 
 
 

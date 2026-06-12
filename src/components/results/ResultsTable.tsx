@@ -350,7 +350,7 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
                 className="w-full font-mono text-sm"
             />
             {isOpen && suggestions.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto z-50 bg-neutral-950/95 backdrop-blur-md text-popover-foreground border border-white/10 rounded-md shadow-lg py-1 font-mono text-xs">
+                <div className="absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto custom-scrollbar z-50 bg-neutral-950/95 backdrop-blur-md text-popover-foreground border border-white/10 rounded-md shadow-lg py-1 font-mono text-xs">
                     {suggestions.map((s, idx) => (
                         <button
                             key={s.value}
@@ -890,8 +890,11 @@ const ResultsTableView = React.memo(function ResultsTableView({
             </div>
 
             {/* Data Table */}
-            <div className="relative rounded-md border overflow-x-auto w-full min-h-[450px]">
-                <Table className="transition-opacity duration-300">
+            <div className="relative rounded-md border w-full">
+                <Table 
+                    className="transition-opacity duration-300"
+                    wrapperClassName="max-h-[600px] min-h-[450px] overflow-auto"
+                >
                     <TableHeader>
                         {table.getHeaderGroups().map((headerGroup) => (
                             <TableRow key={headerGroup.id}>
@@ -1105,7 +1108,7 @@ function ColumnMappingsDialogInner({
                 </DialogDescription>
             </DialogHeader>
             
-            <div className="flex-1 overflow-y-auto pr-1 py-4 space-y-4 min-h-0 border-t border-b border-white/5 my-2">
+            <div className="flex-grow overflow-y-auto custom-scrollbar pr-1 py-4 space-y-4 min-h-0 border-t border-b border-white/5 my-2">
                 <div className="space-y-3">
                     {!isReady ? (
                         Array.from({ length: 4 }).map((_, i) => (
@@ -1171,6 +1174,7 @@ export function ResultsTable() {
     const columnMappings = useStore(store, (state) => state.columnMappings);
     const tableFilterConfig = useStore(store, (state) => state.tableFilterConfig);
     const fileName = useStore(store, (state) => state.fileName);
+    const exportExcelTrigger = useStore(store, (state) => (state as any).exportExcelTrigger);
 
     const [selectedDetail, setSelectedDetail] = useState<{ rowId: number; iteration: number } | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -1809,6 +1813,13 @@ export function ResultsTable() {
         xlsx.writeFile(workbook, exportFileName);
     };
 
+    useEffect(() => {
+        if (exportExcelTrigger) {
+            executeExport(exportExcelTrigger.onlyFiltered);
+            store.setState((s) => ({ ...s, exportExcelTrigger: null }));
+        }
+    }, [exportExcelTrigger]);
+
     const handleExport = () => {
         if (rawTableData.length === 0) return;
 
@@ -2213,7 +2224,7 @@ export function ResultsTable() {
                                                 </div>
                                                 <TabsContent value="params" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
                                                     {isEditing ? (
-                                                        <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-2 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                        <div className="p-3 overflow-auto custom-scrollbar flex-1 font-mono text-[11px] space-y-2 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
                                                             {editParams.map((p, idx) => (
                                                                 <div key={idx} className="flex gap-2 items-center">
                                                                     <Input
@@ -2260,7 +2271,7 @@ export function ResultsTable() {
                                                         </div>
                                                     ) : (
                                                         currentStep.requestParams && Object.keys(currentStep.requestParams).length > 0 ? (
-                                                            <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                            <div className="p-3 overflow-auto custom-scrollbar flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
                                                                 {Object.entries(currentStep.requestParams).map(([k, v]) => (
                                                                     <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
                                                                         <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
@@ -2277,7 +2288,7 @@ export function ResultsTable() {
                                                 </TabsContent>
                                                 <TabsContent value="headers" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
                                                     {isEditing ? (
-                                                        <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-2 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                        <div className="p-3 overflow-auto custom-scrollbar flex-1 font-mono text-[11px] space-y-2 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
                                                             {editHeaders.map((h, idx) => (
                                                                 <div key={idx} className="flex gap-2 items-center">
                                                                     <Input
@@ -2324,7 +2335,7 @@ export function ResultsTable() {
                                                         </div>
                                                     ) : (
                                                         currentStep.requestHeaders && Object.keys(currentStep.requestHeaders).length > 0 ? (
-                                                            <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                            <div className="p-3 overflow-auto custom-scrollbar flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
                                                                 {Object.entries(currentStep.requestHeaders).map(([k, v]) => (
                                                                     <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
                                                                         <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>
@@ -2446,7 +2457,7 @@ export function ResultsTable() {
                                                 </TabsContent>
                                                 <TabsContent value="headers" className="flex-1 min-h-0 relative m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col">
                                                     {currentStep.responseHeaders && Object.keys(currentStep.responseHeaders).length > 0 ? (
-                                                        <div className="p-3 overflow-auto flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
+                                                        <div className="p-3 overflow-auto custom-scrollbar flex-1 font-mono text-[11px] space-y-1.5 text-neutral-300 bg-neutral-950/40 animate-in fade-in-50 duration-200">
                                                             {Object.entries(currentStep.responseHeaders).map(([k, v]) => (
                                                                 <div key={k} className="flex border-b border-white/[0.03] pb-1 gap-2">
                                                                     <span className="text-indigo-400 font-bold shrink-0 w-[150px] truncate select-all" title={k}>{k}:</span>

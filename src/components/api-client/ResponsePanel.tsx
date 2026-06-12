@@ -185,8 +185,8 @@ export function ResponsePanel({
                 </TabsContent>
 
                 {/* Headers Content */}
-                <TabsContent value="headers" className="data-[state=active]:flex flex-col flex-1 mt-3 min-h-0 overflow-y-auto">
-                    <div className="border border-white/5 rounded-xl overflow-x-auto w-full bg-neutral-950/20 flex-1 min-h-0">
+                <TabsContent value="headers" className="data-[state=active]:flex flex-col flex-1 mt-3 min-h-0 overflow-y-auto custom-scrollbar">
+                    <div className="border border-white/5 rounded-xl overflow-x-auto custom-scrollbar w-full bg-neutral-950/20 flex-1 min-h-0">
                         <Table>
                             <TableHeader className="bg-neutral-900/40">
                                 <TableRow className="border-b border-white/5 hover:bg-transparent">
@@ -214,8 +214,8 @@ export function ResponsePanel({
                 </TabsContent>
 
                 {/* Tests Content */}
-                <TabsContent value="tests" className="data-[state=active]:flex flex-col flex-1 mt-3 min-h-0 overflow-y-auto pr-1">
-                    <div className="space-y-2 flex-grow overflow-y-auto pr-1">
+                <TabsContent value="tests" className="data-[state=active]:flex flex-col flex-1 mt-3 min-h-0 overflow-y-auto custom-scrollbar pr-1">
+                    <div className="space-y-2 flex-grow overflow-y-auto custom-scrollbar pr-1">
                         {response.testResults && response.testResults.length > 0 ? (
                             response.testResults.map((t, idx) => (
                                 <div

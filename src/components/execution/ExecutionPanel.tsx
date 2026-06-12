@@ -2,7 +2,7 @@
 
 import React, { useState, useRef } from "react";
 import { useStore } from "@tanstack/react-store";
-import { store, setMaxRetries, setRetryStatusCodes, setStopOnFailure, setThrottleDelayMs, setRowIterations } from "@/lib/store";
+import { store, setMaxRetries, setRetryStatusCodes, setStopOnFailure, setThrottleDelayMs, setRowIterations, setConcurrencyLimit } from "@/lib/store";
 import { runBulkExecution, pauseBulkExecution, resumeBulkExecution } from "@/lib/executor";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ export function ExecutionPanel() {
     const stopOnFailure = useStore(store, (state) => state.stopOnFailure);
     const throttleDelayMs = useStore(store, (state) => state.throttleDelayMs);
     const rowIterations = useStore(store, (state) => state.rowIterations);
-    const [concurrency, setConcurrency] = useState(2);
+    const concurrency = useStore(store, (state) => state.concurrency ?? 2);
     const [isRunning, setIsRunning] = useState(false);
     const [progress, setProgress] = useState(0);
     const [isPaused, setIsPaused] = useState(false);
@@ -121,7 +121,7 @@ export function ExecutionPanel() {
                                 min={1}
                                 max={50}
                                 value={concurrency}
-                                onChange={(e) => setConcurrency(parseInt(e.target.value) || 1)}
+                                onChange={(e) => setConcurrencyLimit(parseInt(e.target.value) || 1)}
                                 className="h-10 bg-background/50"
                             />
                         </div>

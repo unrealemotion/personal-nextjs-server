@@ -933,7 +933,7 @@ export function RequestPanel() {
                 ...initialResponse,
                 testResults
             });
-            toast.success("Request finished!");
+
         } catch (err: any) {
             abortControllers.delete(targetTabId);
 
@@ -1263,7 +1263,7 @@ export function RequestPanel() {
                 </TabsList>
 
                 {/* Params Sub-Tab */}
-                <TabsContent value="params" className="flex-grow overflow-y-auto mt-2 space-y-2 max-h-[350px]">
+                <TabsContent value="params" className="flex-grow overflow-y-auto custom-scrollbar mt-2 space-y-2 max-h-[350px]">
                     <div className="space-y-2">
                         {(request.params || []).map((p, idx) => (
                             <div key={idx} className="flex gap-2 items-center">
@@ -1310,7 +1310,7 @@ export function RequestPanel() {
                 </TabsContent>
 
                 {/* Headers Sub-Tab */}
-                <TabsContent value="headers" className="flex-grow overflow-y-auto mt-2 space-y-2 max-h-[350px]">
+                <TabsContent value="headers" className="flex-grow overflow-y-auto custom-scrollbar mt-2 space-y-2 max-h-[350px]">
                     <div className="space-y-2">
                         {(request.headers || []).map((h, idx) => (
                             <div key={idx} className="flex gap-2 items-center">
@@ -1520,7 +1520,7 @@ export function RequestPanel() {
                     )}
 
                     {(request.body?.mode || "none") === "urlencoded" && (
-                        <div className="space-y-2 flex-1 min-h-0 overflow-y-auto">
+                        <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                             {(request.body?.urlencoded || []).map((p, idx) => (
                                 <div key={idx} className="flex gap-2 items-center">
                                     <input
@@ -1584,7 +1584,7 @@ export function RequestPanel() {
                     )}
 
                     {(request.body?.mode || "none") === "formdata" && (
-                        <div className="space-y-2 flex-1 min-h-0 overflow-y-auto">
+                        <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                             {(request.body?.formdata || []).map((p, idx) => (
                                 <div key={idx} className="flex gap-2 items-center">
                                     <input

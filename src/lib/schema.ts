@@ -183,5 +183,24 @@ export const requestTabSchema = z.object({
 });
 export type RequestTab = z.infer<typeof requestTabSchema>;
 
+export interface AgentProfile {
+  id: string;
+  name: string;
+  provider: "gemini" | "openai" | "custom";
+  apiKey: string;
+  endpoint: string;
+  model: string;
+}
+
+export interface Message {
+  id: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  name?: string;
+  tool_call_id?: string;
+  tool_calls?: any[];
+  geminiParts?: any[];
+}
+
 
 

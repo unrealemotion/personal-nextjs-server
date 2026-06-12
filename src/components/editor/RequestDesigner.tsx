@@ -437,7 +437,7 @@ export function RequestDesigner() {
 
             <CardContent className="flex-1 overflow-hidden p-0 flex flex-col sm:flex-row z-10">
                 {/* Desktop: Step Sidebar (hidden on mobile) */}
-                <div className="hidden sm:flex w-[200px] shrink-0 border-r border-border/40 p-3 flex-col space-y-2 overflow-y-auto bg-muted/20">
+                <div className="hidden sm:flex w-[200px] shrink-0 border-r border-border/40 p-3 flex-col space-y-2 overflow-y-auto custom-scrollbar bg-muted/20">
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Request Steps</p>
                     <DndContext
                         id="dnd-context-desktop"
@@ -484,7 +484,7 @@ export function RequestDesigner() {
                             <Plus className="w-3 h-3" />
                         </Button>
                     </div>
-                    <div className="max-h-[150px] overflow-y-auto px-3 pb-2">
+                    <div className="max-h-[150px] overflow-y-auto custom-scrollbar px-3 pb-2">
                         <DndContext
                             id="dnd-context-mobile"
                             sensors={sensors}
@@ -750,7 +750,7 @@ export function RequestDesigner() {
                                 const bodyObj = typeof template.body === "string" ? { mode: "urlencoded", urlencoded: [] } : (template.body || { mode: "urlencoded" });
                                 const urlencoded = bodyObj.urlencoded || [];
                                 return (
-                                    <div className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
+                                    <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
                                         {urlencoded.map((p: any, idx: number) => (
                                             <div key={idx} className="flex gap-2 items-center">
                                                 <input
@@ -818,7 +818,7 @@ export function RequestDesigner() {
                                 const bodyObj = typeof template.body === "string" ? { mode: "formdata", formdata: [] } : (template.body || { mode: "formdata" });
                                 const formdata = bodyObj.formdata || [];
                                 return (
-                                    <div className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
+                                    <div className="space-y-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
                                         {formdata.map((p: any, idx: number) => (
                                             <div key={idx} className="flex gap-2 items-center">
                                                 <input
@@ -889,7 +889,7 @@ export function RequestDesigner() {
                             )}
                         </TabsContent>
 
-                        <TabsContent value="params" className="flex-1 mt-0 min-h-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-y-auto bg-muted/10 relative">
+                        <TabsContent value="params" className="flex-1 mt-0 min-h-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-y-auto custom-scrollbar bg-muted/10 relative">
                             <div className="p-4 space-y-3 pb-16 min-h-full flex flex-col">
                                 {(template.params || []).map((param, idx) => (
                                     <div key={idx} className="flex space-x-2 items-center group">
@@ -921,7 +921,7 @@ export function RequestDesigner() {
                             </div>
                         </TabsContent>
 
-                        <TabsContent value="headers" className="flex-1 mt-0 min-h-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-y-auto bg-muted/10 relative">
+                        <TabsContent value="headers" className="flex-1 mt-0 min-h-0 border border-muted-foreground/20 rounded-b-md rounded-t-none overflow-y-auto custom-scrollbar bg-muted/10 relative">
                             <div className="p-4 space-y-3 pb-16 min-h-full flex flex-col">
                                 {template.headers.map((header, idx) => (
                                     <div key={idx} className="flex space-x-2 items-center group">
