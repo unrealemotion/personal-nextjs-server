@@ -1,6 +1,5 @@
-import React from "react";
-import { Wrench, Loader2, Undo, User, Check, X } from "lucide-react";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import React, { useState } from "react";
+import { Wrench, Loader2, Undo, User, Check, X, Copy } from "lucide-react";
 import { type Message } from "@/lib/schema";
 import { renderMarkdown } from "./render-markdown";
 import { EtherealAiSymbol } from "./EtherealAiSymbol";
@@ -12,6 +11,14 @@ interface AgentMessageItemProps {
 }
 
 export function AgentMessageItem({ message, allMessages = [], onRevert }: AgentMessageItemProps) {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(message.content);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
     if (message.role === "tool") {
         let success = true;
         try {
@@ -44,7 +51,7 @@ export function AgentMessageItem({ message, allMessages = [], onRevert }: AgentM
                 </div>
             )}
             <div
-                className={`px-3 py-2 rounded-xl text-xs leading-relaxed max-w-[85%] break-words relative ${
+                className={`px-3 py-2 rounded-xl text-xs leading-relaxed max-w-[85%] break-words relative group ${
                     isBot
                         ? "bg-neutral-900 text-white/95 border border-white/5"
                         : "bg-indigo-600 text-white shadow-lg shadow-indigo-500/10"
@@ -95,26 +102,24 @@ export function AgentMessageItem({ message, allMessages = [], onRevert }: AgentM
                         </div>
                     );
                 })}
-                {!isBot && (
-                    <div className="mt-1 flex justify-end">
-                        <TooltipProvider delayDuration={200}>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <button
-                                        type="button"
-                                        onClick={() => onRevert(message.id)}
-                                        className="text-white/60 hover:text-white hover:bg-white/15 rounded p-1 transition-all cursor-pointer flex items-center justify-center border border-white/5"
-                                    >
-                                        <Undo className="w-3 h-3" />
-                                    </button>
-                                </TooltipTrigger>
-                                <TooltipContent className="bg-neutral-900 border border-white/10 text-white text-[10px] px-2 py-1 rounded shadow-xl">
-                                    Revert message to edit
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    </div>
-                )}
+                <div className="mt-1 flex justify-end space-x-1 opacity-50 group-hover:opacity-100 transition-opacity duration-200">
+                    <button
+                        type="button"
+                        onClick={handleCopy}
+                        className="text-white/60 hover:text-white hover:bg-white/15 rounded p-1 transition-all cursor-pointer flex items-center justify-center border border-white/5"
+                    >
+                        {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                    {!isBot && (
+                        <button
+                            type="button"
+                            onClick={() => onRevert(message.id)}
+                            className="text-white/60 hover:text-white hover:bg-white/15 rounded p-1 transition-all cursor-pointer flex items-center justify-center border border-white/5"
+                        >
+                            <Undo className="w-3 h-3" />
+                        </button>
+                    )}
+                </div>
             </div>
             {!isBot && (
                 <div className="w-7 h-7 rounded-lg bg-neutral-900 border border-white/10 flex items-center justify-center shrink-0 text-white/70">
