@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Surge API Request Helper",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Helper extension for Surge API Client to inject custom Cookie headers and bypass CORS.",
   "icons": {
     "16": "logo.png",
@@ -26,7 +26,9 @@
         "http://localhost:3000/*",
         "https://*.unrealemo.space/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start"
     }
   ]

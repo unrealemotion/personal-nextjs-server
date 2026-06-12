@@ -154,7 +154,7 @@ export default function DocsPage() {
                                 <AlertCircle className="w-8 h-8 text-amber-500" />
                             </div>
                             <h3 className="text-2xl font-black text-amber-400 tracking-tight">
-                                CORS Restriction — Not Supported
+                                CORS Restriction
                             </h3>
                         </div>
 
@@ -180,32 +180,24 @@ export default function DocsPage() {
 
                         <div className="w-full space-y-6">
                             <div className="flex flex-col items-center gap-2">
-                                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-[10px] font-black uppercase tracking-widest text-amber-400">
+                                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest text-emerald-400">
                                     <Lightbulb className="w-3.5 h-3.5" />
-                                    The Workaround
+                                    Native Solution
                                 </div>
-                                <p className="text-sm text-amber-200/50 max-w-lg leading-relaxed mt-2">
-                                    For local development or technical support, bypass these restrictions by launching
-                                    a temporary, insecure instance of Microsoft Edge.
+                                <p className="text-sm text-amber-200/50 max-w-lg leading-relaxed mt-2 text-center">
+                                    Get the Surge API Request Helper extension for: CORS and Cookies User-Agent Header Injection.
                                 </p>
                             </div>
 
-                            <div className="max-w-3xl mx-auto w-full group">
-                                <div className="p-1 rounded-xl bg-amber-500/5 border border-amber-500/10 transition-colors group-hover:border-amber-500/20">
-                                    <Code title="Launch Edge (Windows CMD)">
-                                        {`"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" --user-data-dir=C:\\msedge-dev-data\\ --disable-web-security --disable-site-isolation-trials`}
-                                    </Code>
-                                </div>
-                                <div className="mt-3 flex items-center justify-center gap-4 text-[11px] font-medium text-amber-500/40">
-                                    <span className="flex items-center gap-1.5 uppercase tracking-wider">
-                                        <AlertTriangle className="w-3 h-3 text-red-500/60" />
-                                        Caution: Insecure Session
-                                    </span>
-                                    <div className="w-1 h-1 rounded-full bg-amber-500/20" />
-                                    <span className="uppercase tracking-wider hover:text-amber-500/70 cursor-help transition-colors decoration-dotted underline underline-offset-4">
-                                        Trusted Endpoints Only
-                                    </span>
-                                </div>
+                            <div className="flex justify-center">
+                                <a
+                                    href="https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf?hl=en-US&utm_source=ext_sidebar"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition-all shadow-lg shadow-indigo-500/20"
+                                >
+                                    Get Chrome Extension
+                                </a>
                             </div>
                         </div>
                     </div>
@@ -225,6 +217,29 @@ export default function DocsPage() {
                         It&rsquo;s built for repetitive tasks: bulk-creating customers, verifying records, migrating
                         data, or smoke-testing an endpoint across thousands of inputs.
                     </p>
+                </Section>
+
+                {/* ============================================================ */}
+                {/*  API CLIENT WORKSPACE                                        */}
+                {/* ============================================================ */}
+                <Section icon={<Layers className="w-5 h-5" />} title="API Client Workspace">
+                    <p>
+                        Surge provides a fully-featured API client workspace alongside the Bulk Runner. Switch to the <strong className="text-white">API Client</strong> tab to design, test, and save individual requests.
+                    </p>
+                    <ul className="list-disc list-inside space-y-2 pl-2">
+                        <li>
+                            <strong className="text-white/90">Collections &amp; Folders</strong> — Organize requests into collections and nested folders for easy retrieval.
+                        </li>
+                        <li>
+                            <strong className="text-white/90">Environments &amp; Variables</strong> — Define environment variables and switch between environments (e.g., Development, Production).
+                        </li>
+                        <li>
+                            <strong className="text-white/90">Pre-request &amp; Test Scripts</strong> — Write JavaScript to execute before a request is sent (e.g., setting dynamic headers) or after a response is received (e.g., asserting status codes).
+                        </li>
+                        <li>
+                            <strong className="text-white/90">GraphQL Support</strong> — Built-in editor for GraphQL queries and variables.
+                        </li>
+                    </ul>
                 </Section>
 
                 {/* ============================================================ */}

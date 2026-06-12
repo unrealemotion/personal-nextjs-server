@@ -1126,19 +1126,6 @@ export function RequestPanel() {
                         className="text-sm font-bold bg-transparent border-transparent hover:border-white/5 focus:border-indigo-500/50 p-0 h-auto shadow-none focus-visible:ring-0 flex-grow"
                         placeholder="Untitled Request"
                     />
-                    <div className="flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full border bg-neutral-900 border-white/5 select-none shrink-0">
-                        {isExtensionActive ? (
-                            <>
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                <span className="text-emerald-400 font-bold uppercase tracking-wider">Extension Connected (CORS Bypassed)</span>
-                            </>
-                        ) : (
-                            <>
-                                <span className="w-1.5 h-1.5 rounded-full bg-white/20" />
-                                <span className="text-white/40 font-semibold uppercase tracking-wider" title="Install the helper extension to bypass CORS and inject cookies. Check the /extension directory for instructions.">Extension Disconnected</span>
-                            </>
-                        )}
-                    </div>
                 </div>
 
                 {/* HTTP Method + URL Input */}

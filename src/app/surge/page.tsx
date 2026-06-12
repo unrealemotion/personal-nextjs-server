@@ -29,8 +29,17 @@ export default function SurgePage() {
     const currentView = useStore(store, (state) => state.currentView || "api_client");
     const [isPending, startLocalTransition] = useLocalTransition();
 
+    const [isExtensionActive, setIsExtensionActive] = React.useState(false);
+
     useEffect(() => {
         hydrateStore();
+        const checkExtension = () => {
+            const active = document.documentElement.getAttribute("data-surge-extension-active") === "true";
+            setIsExtensionActive(active);
+        };
+        checkExtension();
+        const timer = setTimeout(checkExtension, 150);
+        return () => clearTimeout(timer);
     }, []);
 
     const handleImportClick = () => {
@@ -99,8 +108,26 @@ export default function SurgePage() {
                             Bulk Runner
                         </button>
                     </div>
-                    
-                    <div className="flex items-center border border-white/10 rounded-lg p-0.5 bg-neutral-950/60">
+
+                    <div className="flex items-center gap-3">
+                        {isExtensionActive ? (
+                            <div className="flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 select-none shrink-0">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span className="text-emerald-400 font-bold uppercase tracking-wider">Extension Connected</span>
+                            </div>
+                        ) : (
+                            <a
+                                href="https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf?hl=en-US&utm_source=ext_sidebar"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 hover:border-indigo-500/50 transition-all cursor-pointer group shrink-0"
+                            >
+                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 group-hover:bg-indigo-300" />
+                                <span className="text-indigo-400 group-hover:text-indigo-300 font-bold uppercase tracking-wider">Get Extension</span>
+                            </a>
+                        )}
+                        
+                        <div className="flex items-center border border-white/10 rounded-lg p-0.5 bg-neutral-950/60">
                         <Button
                             variant="ghost"
                             size="sm"
@@ -158,6 +185,7 @@ export default function SurgePage() {
                                 </DialogFooter>
                             </DialogContent>
                         </Dialog>
+                        </div>
                     </div>
                 </div>
             </header>
