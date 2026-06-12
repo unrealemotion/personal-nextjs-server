@@ -1,4 +1,5 @@
-import { AGENT_TOOLS, getAgentSystemPrompt } from "./agent-prompts";
+import { getAgentSystemPrompt } from "./agent-prompts";
+import { getAgentTools } from "./tools";
 import { type Message } from "@/lib/schema";
 import { store } from "@/lib/store";
 
@@ -52,6 +53,7 @@ export const callLLM = async (
     
     const currentView = store.state.currentView || "bulk";
     const systemPrompt = getAgentSystemPrompt(currentView);
+    const agentTools = getAgentTools(currentView);
     
     if (!apiKey && provider !== "custom") {
         throw new Error("API Key is required. Please check your settings.");
@@ -100,7 +102,7 @@ export const callLLM = async (
 
         const geminiTools = [
             {
-                functionDeclarations: AGENT_TOOLS.map(t => ({
+                functionDeclarations: agentTools.map((t: any) => ({
                     name: t.function.name,
                     description: t.function.description,
                     parameters: mapOpenAiSchemaToGemini(t.function.parameters)
@@ -249,7 +251,7 @@ export const callLLM = async (
             body: JSON.stringify({
                 model,
                 messages: openaiMessages,
-                tools: AGENT_TOOLS
+                tools: agentTools
             }),
             signal: abortSignal
         });

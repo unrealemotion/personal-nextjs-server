@@ -14,7 +14,8 @@ import {
     saveCollectionRequest,
     updateCollection,
     markActiveTabClean,
-    generateId
+    generateId,
+    addCollection
 } from "@/lib/store";
 import { runPreRequestScript, runTestScript, resolveVariables } from "@/lib/sandbox";
 import { parseCurl } from "@/lib/curl";
@@ -23,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { VariableInput } from "@/components/ui/VariableInput";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, X, Save, Play, Trash2, Send, Terminal, Code, Settings, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { type ApiRequest, type KeyValuePair, type ApiCollection, type ApiFolder } from "@/lib/schema";
@@ -313,12 +315,29 @@ export function RequestPanel() {
             if (loc) {
                 setSelectedCollectionId(loc.collectionId);
                 setSelectedFolderId(loc.folderId);
+            } else {
+                // Request not found in collections tree anymore, reset stale IDs
+                if (collections.length > 0) {
+                    setSelectedCollectionId(collections[0].id);
+                    setSelectedFolderId(collections[0].id);
+                } else {
+                    setSelectedCollectionId("");
+                    setSelectedFolderId("");
+                }
             }
         } else {
-            setSelectedCollectionId("");
-            setSelectedFolderId("");
+            if (collections.length > 0) {
+                // If the selected collection is empty or points to a deleted collection, reset to the first one
+                if (!selectedCollectionId || !collections.some(c => c.id === selectedCollectionId)) {
+                    setSelectedCollectionId(collections[0].id);
+                    setSelectedFolderId(collections[0].id);
+                }
+            } else {
+                setSelectedCollectionId("");
+                setSelectedFolderId("");
+            }
         }
-    }, [requestId, collections]);
+    }, [requestId, collections, selectedCollectionId]);
 
     useEffect(() => {
         updateDecorations();
@@ -591,13 +610,24 @@ export function RequestPanel() {
         const activeTab = store.state.apiTabs.find(t => t.id === store.state.activeTabId);
         const latestRequest = activeTab?.request || request;
 
-        if (requestId) {
+        const exists = requestId && collections.some(col => {
+            const search = (items: any[]): boolean => {
+                return items.some(item => {
+                    if (item.id === requestId) return true;
+                    if (item.items) return search(item.items);
+                    return false;
+                });
+            };
+            return search(col.items);
+        });
+
+        if (requestId && exists) {
             // Save updates back to original collection
             saveCollectionRequest(requestId, latestRequest);
             markActiveTabClean();
             toast.success("Request saved!");
         } else {
-            toast.error("Choose a collection first to save this request.");
+            setIsSaveAsPopoverOpen(true);
         }
     };
 
@@ -642,8 +672,8 @@ export function RequestPanel() {
         requestName: string,
         latestRequest: ApiRequest
     ) => {
-        const col = collections.find(c => c.id === collectionId);
-        if (!col) return;
+        let finalColId = collectionId;
+        const currentCols = store.state.collections;
 
         const newReqId = generateId();
         const newRequest = {
@@ -652,19 +682,63 @@ export function RequestPanel() {
             name: requestName
         };
 
-        let updatedItems: (ApiFolder | ApiRequest)[];
-        if (targetFolderId === collectionId) {
-            updatedItems = [...col.items, newRequest];
-        } else {
-            const res = addItemToCollectionTree(col.items, targetFolderId, newRequest);
-            if (res.success) {
-                updatedItems = res.newItems;
+        // If target collection is stale/invalid (doesn't exist), reset finalColId to force fallback/creation
+        if (finalColId && !currentCols.some(c => c.id === finalColId)) {
+            finalColId = "";
+        }
+
+        if (!finalColId) {
+            if (currentCols.length > 0) {
+                finalColId = currentCols[0].id;
             } else {
-                updatedItems = col.items;
+                const newColId = generateId();
+                const newlyCreatedCol = {
+                    id: newColId,
+                    name: "Default Collection",
+                    items: [newRequest],
+                    variables: []
+                };
+                addCollection(newlyCreatedCol);
+                
+                // Link this tab to the saved request
+                store.setState((state) => {
+                    const newTabs = state.apiTabs.map(t => {
+                        if (t.id === activeTabId) {
+                            return { ...t, requestId: newReqId, name: requestName, isDirty: false };
+                        }
+                        return t;
+                    });
+                    return { ...state, apiTabs: newTabs };
+                });
+
+                toast.success(`Saved request "${requestName}" in new collection "Default Collection"!`);
+                return;
             }
         }
 
-        updateCollection(collectionId, {
+        const col = store.state.collections.find(c => c.id === finalColId) || store.state.collections[store.state.collections.length - 1];
+        if (!col) {
+            toast.error("Failed to save request: collection not found.");
+            return;
+        }
+
+        let updatedItems: (ApiFolder | ApiRequest)[];
+        const finalFolderId = targetFolderId || finalColId;
+        
+        if (finalFolderId === finalColId) {
+            updatedItems = [...col.items, newRequest];
+        } else {
+            const res = addItemToCollectionTree(col.items, finalFolderId, newRequest);
+            if (res.success) {
+                updatedItems = res.newItems;
+            } else {
+                // Folder not found in tree (stale folder ID). Save to collection root as fallback
+                updatedItems = [...col.items, newRequest];
+                toast.info("Target folder not found. Saved request to collection root.");
+            }
+        }
+
+        updateCollection(finalColId, {
             items: updatedItems
         });
 
@@ -1060,7 +1134,7 @@ export function RequestPanel() {
 
                 {/* Save button */}
                 <Button
-                    disabled={!selectedCollectionId || !saveAsName.trim()}
+                    disabled={!saveAsName.trim()}
                     onClick={() => {
                         saveRequestToFolder(selectedCollectionId, selectedFolderId, saveAsName.trim(), request);
                         setIsSaveAsPopoverOpen(false);
@@ -1080,30 +1154,38 @@ export function RequestPanel() {
                 {apiTabs.map(t => {
                     const isActive = t.id === activeTabId;
                     return (
-                        <div
-                            key={t.id}
-                            onClick={() => setActiveTabId(t.id)}
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border transition-all ${
-                                isActive
-                                    ? "bg-indigo-600/10 border-indigo-500/30 text-white"
-                                    : "bg-neutral-950/40 border-transparent text-white/50 hover:bg-neutral-900/50"
-                            }`}
-                        >
-                            <span className={`text-[9px] font-extrabold uppercase ${getMethodColor(t.request.method)}`}>
-                                {t.request.method}
-                            </span>
-                            <span className="truncate max-w-[100px]">{t.name}</span>
-                            {t.isDirty && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />}
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    closeApiTab(t.id);
-                                }}
-                                className="text-white/40 hover:text-white rounded hover:bg-white/10 p-0.5"
-                            >
-                                <X className="w-3 h-3" />
-                            </button>
-                        </div>
+                        <TooltipProvider key={t.id} delayDuration={300}>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <div
+                                        onClick={() => setActiveTabId(t.id)}
+                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border transition-all ${
+                                            isActive
+                                                ? "bg-indigo-600/10 border-indigo-500/30 text-white"
+                                                : "bg-neutral-950/40 border-transparent text-white/50 hover:bg-neutral-900/50"
+                                        }`}
+                                    >
+                                        <span className={`text-[9px] font-extrabold uppercase ${getMethodColor(t.request.method)}`}>
+                                            {t.request.method}
+                                        </span>
+                                        <span className="truncate max-w-[100px]">{t.name}</span>
+                                        {t.isDirty && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />}
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                closeApiTab(t.id);
+                                            }}
+                                            className="text-white/40 hover:text-white rounded hover:bg-white/10 p-0.5"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom" className="text-xs max-w-[300px] break-words">
+                                    <p>{t.name}</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
                     );
                 })}
                 <Button

@@ -9,14 +9,29 @@ import {
     setTableFilterConfig,
     saveCheckpoint,
     loadCheckpoint,
-    deleteCheckpoint
+    deleteCheckpoint,
+    generateId,
+    createDefaultApiRequest,
+    addEnvironment,
+    updateEnvironment,
+    saveCollectionRequest,
+    openRequestInTab,
+    exportState,
+    updateCollection,
+    addCollection,
+    updateTabResponse,
+    updateTabLoading
 } from "@/lib/store";
+import { addItemToCollectionTree, stripJsonComments } from "@/lib/utils";
 import { simulateRowExecutionChain } from "@/lib/agent-executor";
+import { runBulkExecution } from "@/lib/executor";
 import { toast } from "sonner";
 import { callLLM } from "./agent-adapters";
-import { type AgentProfile, type Message } from "@/lib/schema";
+import { type AgentProfile, type Message, type KeyValuePair } from "@/lib/schema";
 import { WELCOME_MESSAGE } from "./agent-prompts";
-
+import { getAgentTools } from "./tools";
+import { resolveVariables, runPreRequestScript, runTestScript } from "@/lib/sandbox";
+import { sendToExtension } from "@/lib/extension";
 
 export function useAgent() {
     const [isOpen, setIsOpen] = useState(false);
@@ -101,6 +116,13 @@ export function useAgent() {
     const runToolHandler = async (name: string, args: any): Promise<any> => {
         setActiveToolName(name);
         try {
+            const currentView = store.state.currentView || "bulk";
+            const allowedTools = getAgentTools(currentView);
+            
+            if (!allowedTools.some(t => t.function.name === name)) {
+                return { error: `Tool '${name}' is not permitted in the current '${currentView === "api_client" ? "API Client" : "Bulk Runner"}' tab. Please instruct the user to switch tabs if they need you to perform this action.` };
+            }
+
             switch (name) {
                 case "get_row_status": {
                     const rowId = Number(args.rowId);
@@ -281,6 +303,457 @@ export function useAgent() {
                             : "The extension is NOT connected or inactive. To install it, go to the [Chrome Web Store](https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf). If already installed, open browser extensions settings (chrome://extensions/), locate the Surge API Request Helper extension, verify that it says \"Enabled\" and not blocked (check if browser settings/policies customize allowed/blocking extensions), and reload the page tab to activate it."
                     };
                 }
+                case "switch_tab": {
+                    const tab = args.tab;
+                    if (tab !== "bulk" && tab !== "api_client") {
+                        return { error: "Invalid tab specified. Must be 'bulk' or 'api_client'." };
+                    }
+                    store.setState(s => ({ ...s, currentView: tab }));
+                    return { success: true, message: `Switched tab to ${tab === 'api_client' ? 'API Client' : 'Bulk Runner'} successfully.` };
+                }
+                
+                // API Client Tools
+                case "get_collections": {
+                    return store.state.collections;
+                }
+                case "get_open_tabs": {
+                    return store.state.apiTabs.map(t => ({
+                        id: t.id,
+                        name: t.name,
+                        method: t.request.method,
+                        url: t.request.url,
+                        isDirty: t.isDirty
+                    }));
+                }
+                case "create_request": {
+                    const req = createDefaultApiRequest(args.name);
+                    req.method = args.method;
+                    req.url = args.url;
+                    
+                    openRequestInTab(req, req.id);
+                    return { success: true, request: req, message: `Request '${req.name}' created and opened in a new tab.` };
+                }
+                case "update_request": {
+                    const updates: any = {};
+                    if (args.name !== undefined) updates.name = args.name;
+                    if (args.method !== undefined) updates.method = args.method;
+                    if (args.url !== undefined) updates.url = args.url;
+                    if (args.headers !== undefined) updates.headers = args.headers;
+                    if (args.params !== undefined) updates.params = args.params;
+                    if (args.bodyMode !== undefined || args.bodyRaw !== undefined) {
+                        updates.body = { mode: args.bodyMode || "none", raw: args.bodyRaw || "" };
+                    }
+                    saveCollectionRequest(args.requestId, updates);
+                    store.setState(s => {
+                        const newTabs = s.apiTabs.map(t => {
+                            if (t.requestId === args.requestId || t.id === args.requestId) {
+                                return {
+                                    ...t,
+                                    name: updates.name !== undefined ? updates.name : t.name,
+                                    request: { ...t.request, ...updates }
+                                };
+                            }
+                            return t;
+                        });
+                        return { ...s, apiTabs: newTabs };
+                    });
+                    return { success: true, message: `Request '${args.requestId}' updated in collection.` };
+                }
+                case "save_tab_request": {
+                    const tab = store.state.apiTabs.find(t => t.id === args.tabId);
+                    if (!tab) return { error: `Tab '${args.tabId}' not found.` };
+
+                    const exists = tab.requestId && store.state.collections.some(col => {
+                        const search = (items: any[]): boolean => {
+                            return items.some(item => {
+                                if (item.id === tab.requestId) return true;
+                                if (item.items) return search(item.items);
+                                return false;
+                            });
+                        };
+                        return search(col.items);
+                    });
+                    const isNew = !tab.requestId || !exists;
+
+                    if (!isNew) {
+                        saveCollectionRequest(tab.requestId!, tab.request);
+                        store.setState(s => {
+                            const newTabs = s.apiTabs.map(t => {
+                                if (t.id === args.tabId) {
+                                    return { ...t, isDirty: false };
+                                }
+                                return t;
+                            });
+                            return { ...s, apiTabs: newTabs };
+                        });
+                        return { success: true, message: `Request '${tab.requestId}' saved.` };
+                    } else {
+                        let targetColId = args.collectionId;
+                        if (targetColId && !store.state.collections.some(c => c.id === targetColId)) {
+                            targetColId = undefined;
+                        }
+
+                        const newReqId = tab.requestId || generateId();
+                        const requestName = args.name || tab.name;
+                        const newRequest = {
+                            ...tab.request,
+                            id: newReqId,
+                            name: requestName
+                        };
+
+                        if (args.newCollectionName) {
+                            const newColId = generateId();
+                            const newlyCreatedCol = {
+                                id: newColId,
+                                name: args.newCollectionName,
+                                items: [newRequest],
+                                variables: []
+                            };
+                            addCollection(newlyCreatedCol);
+                            
+                            store.setState(s => {
+                                const newTabs = s.apiTabs.map(t => {
+                                    if (t.id === args.tabId) {
+                                        return { ...t, requestId: newReqId, name: requestName, isDirty: false };
+                                    }
+                                    return t;
+                                });
+                                return { ...s, apiTabs: newTabs };
+                            });
+
+                            return { success: true, message: `Request saved as '${requestName}' in new collection '${args.newCollectionName}'.` };
+                        } else if (!targetColId) {
+                            if (store.state.collections.length > 0) {
+                                targetColId = store.state.collections[0].id;
+                            } else {
+                                const newColId = generateId();
+                                const newlyCreatedCol = {
+                                    id: newColId,
+                                    name: "Default Collection",
+                                    items: [newRequest],
+                                    variables: []
+                                };
+                                addCollection(newlyCreatedCol);
+                                
+                                store.setState(s => {
+                                    const newTabs = s.apiTabs.map(t => {
+                                        if (t.id === args.tabId) {
+                                            return { ...t, requestId: newReqId, name: requestName, isDirty: false };
+                                        }
+                                        return t;
+                                    });
+                                    return { ...s, apiTabs: newTabs };
+                                });
+
+                                return { success: true, message: `Request saved as '${requestName}' in new collection 'Default Collection'.` };
+                            }
+                        }
+
+                        const col = store.state.collections.find(c => c.id === targetColId) || store.state.collections[store.state.collections.length - 1];
+                        if (!col) return { error: `Collection '${targetColId}' not found.` };
+
+                        let updatedItems = [];
+                        const targetFolderId = args.folderId || targetColId;
+
+                        if (targetFolderId === targetColId) {
+                            updatedItems = [...col.items, newRequest];
+                        } else {
+                            const res = addItemToCollectionTree(col.items, targetFolderId, newRequest);
+                            if (res.success) {
+                                updatedItems = res.newItems;
+                            } else {
+                                // Folder not found. Save to collection root as fallback
+                                updatedItems = [...col.items, newRequest];
+                            }
+                        }
+
+                        updateCollection(targetColId, { items: updatedItems });
+
+                        store.setState(s => {
+                            const newTabs = s.apiTabs.map(t => {
+                                if (t.id === args.tabId) {
+                                    return { ...t, requestId: newReqId, name: requestName, isDirty: false };
+                                }
+                                return t;
+                            });
+                            return { ...s, apiTabs: newTabs };
+                        });
+
+                        return { success: true, message: `Request saved as '${requestName}' in collection '${col.name}'.` };
+                    }
+                }
+                case "send_request": {
+                    const tabId = args.tabId || store.state.activeTabId;
+                    if (!tabId) return { error: "No open tab specified or active." };
+                    
+                    const tab = store.state.apiTabs.find(t => t.id === tabId);
+                    if (!tab) return { error: `Tab '${tabId}' not found.` };
+                    
+                    const request = tab.request;
+                    const requestId = tab.requestId;
+                    
+                    updateTabLoading(tabId, true);
+                    const controller = new AbortController();
+                    
+                    try {
+                        let collectionVars: KeyValuePair[] = [];
+                        if (requestId) {
+                            const parentCol = store.state.collections.find(c => {
+                                const findInItems = (items: any[]): boolean => {
+                                    return items.some(item => {
+                                        if (item.id === requestId) return true;
+                                        if (item.items) return findInItems(item.items);
+                                        return false;
+                                    });
+                                };
+                                return findInItems(c.items);
+                            });
+                            if (parentCol && parentCol.variables) {
+                                collectionVars = parentCol.variables;
+                            }
+                        }
+                        
+                        let finalEnvironments = store.state.environments;
+                        let addedHeaders: { key: string; value: string }[] = [];
+                        
+                        if (request.preRequestScript) {
+                            const scriptRes = runPreRequestScript(
+                                request.preRequestScript,
+                                store.state.environments,
+                                store.state.activeEnvironmentId,
+                                collectionVars
+                            );
+                            finalEnvironments = scriptRes.updatedEnvironments;
+                            addedHeaders = scriptRes.addedHeaders;
+                            store.setState(s => ({ ...s, environments: finalEnvironments }));
+                        }
+                        
+                        const interpolatedUrl = resolveVariables(
+                            request.url,
+                            finalEnvironments,
+                            store.state.activeEnvironmentId,
+                            collectionVars
+                        );
+                        
+                        const headers = new Headers();
+                        const rawHeadersMap: Record<string, string> = {};
+                        
+                        (request.headers || []).forEach(h => {
+                            if (h.enabled !== false && h.key) {
+                                const resolvedKey = resolveVariables(h.key, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
+                                const resolvedVal = resolveVariables(h.value, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
+                                headers.append(resolvedKey, resolvedVal);
+                                rawHeadersMap[resolvedKey] = resolvedVal;
+                            }
+                        });
+                        
+                        addedHeaders.forEach(h => {
+                            headers.append(h.key, h.value);
+                            rawHeadersMap[h.key] = h.value;
+                        });
+                        
+                        let fetchBody: any = null;
+                        const mode = request.body?.mode || "none";
+                        
+                        if (request.method !== "GET" && request.method !== "HEAD") {
+                            if (mode === "raw" && request.body?.raw) {
+                                const rawBodyResolved = resolveVariables(request.body.raw, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
+                                const lang = request.body.rawLanguage || "json";
+                                if (lang === "json") {
+                                    fetchBody = stripJsonComments(rawBodyResolved);
+                                } else {
+                                    fetchBody = rawBodyResolved;
+                                }
+                                let contentType = "application/json";
+                                if (lang === "text") contentType = "text/plain";
+                                else if (lang === "javascript") contentType = "application/javascript";
+                                else if (lang === "html") contentType = "text/html";
+                                else if (lang === "xml") contentType = "application/xml";
+                                
+                                if (!headers.has("Content-Type")) {
+                                    headers.append("Content-Type", contentType);
+                                    rawHeadersMap["Content-Type"] = contentType;
+                                }
+                            } else if (mode === "graphql" && request.body?.graphql) {
+                                const query = resolveVariables(request.body.graphql.query || "", finalEnvironments, store.state.activeEnvironmentId, collectionVars);
+                                const varsStr = resolveVariables(request.body.graphql.variables || "{}", finalEnvironments, store.state.activeEnvironmentId, collectionVars);
+                                let variables = {};
+                                try {
+                                    variables = JSON.parse(stripJsonComments(varsStr));
+                                } catch (e) {}
+                                fetchBody = JSON.stringify({ query, variables });
+                                if (!headers.has("Content-Type")) {
+                                    headers.append("Content-Type", "application/json");
+                                    rawHeadersMap["Content-Type"] = "application/json";
+                                }
+                            } else if (mode === "urlencoded" && request.body?.urlencoded) {
+                                const formParams = new URLSearchParams();
+                                request.body.urlencoded.forEach(p => {
+                                    if (p.enabled !== false && p.key) {
+                                        const rKey = resolveVariables(p.key, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
+                                        const rVal = resolveVariables(p.value, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
+                                        formParams.append(rKey, rVal);
+                                    }
+                                });
+                                fetchBody = formParams.toString();
+                                if (!headers.has("Content-Type")) {
+                                    headers.append("Content-Type", "application/x-www-form-urlencoded");
+                                    rawHeadersMap["Content-Type"] = "application/x-www-form-urlencoded";
+                                }
+                            } else if (mode === "formdata" && request.body?.formdata) {
+                                const fd = new FormData();
+                                request.body.formdata.forEach(p => {
+                                    if (p.enabled !== false && p.key) {
+                                        const rKey = resolveVariables(p.key, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
+                                        const rVal = resolveVariables(p.value, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
+                                        fd.append(rKey, rVal);
+                                    }
+                                });
+                                fetchBody = fd;
+                            } else if (mode === "binary" && request.body?.binary) {
+                                fetchBody = resolveVariables(request.body.binary, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
+                                if (!headers.has("Content-Type")) {
+                                    headers.append("Content-Type", "application/octet-stream");
+                                    rawHeadersMap["Content-Type"] = "application/octet-stream";
+                                }
+                            }
+                        }
+                        
+                        if (!interpolatedUrl) {
+                            throw new Error("URL is empty.");
+                        }
+                        
+                        const isExtensionActive = typeof document !== "undefined" &&
+                            document.documentElement.getAttribute("data-surge-extension-active") === "true";
+                        
+                        let extensionRuleId: number | null = null;
+                        if (isExtensionActive) {
+                            try {
+                                let urlFilter = "*";
+                                try {
+                                    let urlStr = interpolatedUrl.trim();
+                                    if (!/^https?:\/\//i.test(urlStr)) {
+                                        urlStr = "http://" + urlStr;
+                                    }
+                                    const parsed = new URL(urlStr);
+                                    urlFilter = parsed.hostname;
+                                } catch (e) {}
+                                
+                                const extHeaders = Object.entries(rawHeadersMap).map(([key, value]) => ({
+                                    name: key,
+                                    value: value
+                                }));
+                                
+                                const res = await sendToExtension({
+                                    action: "setupRequestRules",
+                                    urlFilter,
+                                    headers: extHeaders,
+                                    initiatorOrigin: window.location.origin
+                                });
+                                if (res && res.success) {
+                                    extensionRuleId = res.ruleId;
+                                }
+                            } catch (e) {
+                                console.warn("Failed to setup extension rules in agent:", e);
+                            }
+                        }
+                        
+                        const startTime = performance.now();
+                        let fetchRes;
+                        try {
+                            fetchRes = await fetch(interpolatedUrl, {
+                                method: request.method,
+                                headers,
+                                body: fetchBody,
+                                mode: "cors",
+                                signal: controller.signal
+                            });
+                        } finally {
+                            if (extensionRuleId !== null) {
+                                try {
+                                    await sendToExtension({
+                                        action: "clearRequestRules",
+                                        ruleId: extensionRuleId
+                                    });
+                                } catch (e) {
+                                    console.warn("Failed to clear extension rules in agent:", e);
+                                }
+                            }
+                        }
+                        
+                        const endTime = performance.now();
+                        const text = await fetchRes.text();
+                        const resHeadersMap: Record<string, string> = {};
+                        fetchRes.headers.forEach((val, key) => {
+                            resHeadersMap[key] = val;
+                        });
+                        
+                        const initialResponse = {
+                            status: fetchRes.status,
+                            statusText: fetchRes.statusText,
+                            timeMs: Math.round(endTime - startTime),
+                            sizeBytes: text.length,
+                            body: text,
+                            headers: resHeadersMap,
+                        };
+                        
+                        let testResults: any[] = [];
+                        if (request.testScript) {
+                            const testRes = runTestScript(
+                                request.testScript,
+                                initialResponse,
+                                finalEnvironments,
+                                store.state.activeEnvironmentId,
+                                collectionVars
+                            );
+                            testResults = testRes.testResults;
+                            store.setState(s => ({ ...s, environments: testRes.updatedEnvironments }));
+                        }
+                        
+                        const finalResponse = {
+                            ...initialResponse,
+                            testResults
+                        };
+                        
+                        updateTabResponse(tabId, finalResponse);
+                        return { success: true, response: finalResponse };
+                        
+                    } catch (err: any) {
+                        const errorResponse = {
+                            status: 0,
+                            statusText: "Error",
+                            timeMs: 0,
+                            sizeBytes: 0,
+                            body: `Error: ${err.message || String(err)}`,
+                            headers: {},
+                            testResults: [{ name: "Request completed", passed: false, error: err.message }]
+                        };
+                        updateTabResponse(tabId, errorResponse);
+                        return { error: err.message || String(err), response: errorResponse };
+                    }
+                }
+                case "get_environments": {
+                    return {
+                        environments: store.state.environments,
+                        activeEnvironmentId: store.state.activeEnvironmentId
+                    };
+                }
+                case "create_environment": {
+                    const newEnv = {
+                        id: generateId(),
+                        name: args.name,
+                        variables: []
+                    };
+                    addEnvironment(newEnv);
+                    return { success: true, environment: newEnv, message: `Environment '${args.name}' created.` };
+                }
+                case "update_environment": {
+                    const updates: any = {};
+                    if (args.name !== undefined) updates.name = args.name;
+                    if (args.variables !== undefined) updates.variables = args.variables;
+                    updateEnvironment(args.environmentId, updates);
+                    return { success: true, message: `Environment updated.` };
+                }
                 case "update_execution_config": {
                     const { maxRetries, retryStatusCodes, stopOnFailure, throttleDelayMs, rowIterations, concurrency, templateUpdates } = args;
                     store.setState(s => {
@@ -293,7 +766,7 @@ export function useAgent() {
                         if (concurrency !== undefined) newState.concurrency = concurrency;
                         
                         if (templateUpdates && Array.isArray(templateUpdates)) {
-                            newState.templates = newState.templates.map(t => {
+                            const updatedTemplates = newState.templates.map(t => {
                                 const update = templateUpdates.find((tu: any) => tu.id === t.id);
                                 if (update) {
                                     const merged = { ...t };
@@ -308,11 +781,56 @@ export function useAgent() {
                                 }
                                 return t;
                             });
+
+                            // For any template updates whose IDs do NOT match any existing templates, append them as new templates!
+                            const newTemplatesToAdd: any[] = [];
+                            templateUpdates.forEach((update: any) => {
+                                const exists = newState.templates.some(t => t.id === update.id);
+                                if (!exists) {
+                                    const newTmpl = {
+                                        id: update.id || generateId(),
+                                        name: update.name || `Request ${newState.templates.length + newTemplatesToAdd.length + 1}`,
+                                        method: update.method || "GET",
+                                        url: update.url || "",
+                                        params: update.params || [],
+                                        headers: update.headers || [],
+                                        body: {
+                                            mode: update.bodyMode || "none",
+                                            raw: update.bodyRaw || "{\n  \n}",
+                                            formdata: [],
+                                            urlencoded: []
+                                        }
+                                    };
+                                    newTemplatesToAdd.push(newTmpl);
+                                }
+                            });
+
+                            newState.templates = [...updatedTemplates, ...newTemplatesToAdd];
+
+                            // Set activeTemplateId to the first template if activeTemplateId is invalid/empty or points to a deleted template
+                            if (!newState.activeTemplateId || !newState.templates.some(t => t.id === newState.activeTemplateId)) {
+                                if (newState.templates.length > 0) {
+                                    newState.activeTemplateId = newState.templates[0].id;
+                                }
+                            }
                         }
                         
                         return newState;
                     });
                     return { success: true, message: "Execution config updated successfully." };
+                }
+                case "export_results_to_excel": {
+                    store.setState(s => ({ ...s, exportExcelTrigger: { onlyFiltered: !!args.onlyFiltered } }));
+                    return { success: true, message: "Excel export triggered successfully." };
+                }
+                case "export_workspace": {
+                    exportState();
+                    return { success: true, message: "Workspace export triggered successfully. The JSON file is downloading." };
+                }
+                case "run_bulk_engine": {
+                    const concurrency = Math.max(1, store.state.concurrency || 2);
+                    runBulkExecution(concurrency).catch(e => console.error("Agent triggered bulk run failed:", e));
+                    return { success: true, message: "Bulk execution engine started successfully in the background." };
                 }
                 case "update_row_data": {
                     const rowId = Number(args.rowId);
