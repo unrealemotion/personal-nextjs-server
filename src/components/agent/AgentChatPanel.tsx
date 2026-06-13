@@ -531,20 +531,19 @@ export function AgentChatPanel() {
                     </div>
                 </div>
 
-                {/* Settings Panel View */}
                 {view === "settings" ? (
                     <AgentSettingsView
                         profiles={tempProfiles}
+                        originalProfiles={agentProfiles}
                         activeProfileId={editingProfileId}
                         onChangeProfiles={setTempProfiles}
                         onChangeActiveProfileId={setEditingProfileId}
-                        onSave={(newProfiles) => {
-                            saveConfig(newProfiles, tempActiveProfileId || "");
+                        onSave={(newProfiles, savedProfileId) => {
+                            saveConfig(newProfiles, savedProfileId);
                         }}
                         onCancel={() => setView("chat")}
                         tempActiveProfileId={tempActiveProfileId}
                         onChangeTempActiveProfileId={setTempActiveProfileId}
-                        isDirty={isDirty}
                     />
                 ) : (
                     /* Chat Window View */

@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Sliders, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import React, { useState, useRef } from "react";
+import { Sliders, Eye, EyeOff, Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,39 +7,123 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { generateId } from "@/lib/store";
 import { DEFAULT_CONFIGS } from "./agent-prompts";
 import { type AgentProfile } from "@/lib/schema";
+import { getToolDisplayName } from "./tools";
+
+const GLOBAL_TOOL_NAMES = ["check_extension_connection", "switch_tab", "read_console_logs"];
+const BULK_RUNNER_TOOL_NAMES = [
+    "get_row_status",
+    "search_data",
+    "read_row_data",
+    "inspect_input_data",
+    "get_execution_config",
+    "simulate_row_execution",
+    "update_execution_config",
+    "update_row_data",
+    "get_available_variables",
+    "get_column_mappings",
+    "update_column_mappings",
+    "get_table_filters",
+    "update_table_filters",
+    "export_results_to_excel",
+    "get_all_results",
+    "export_workspace",
+    "run_bulk_engine"
+];
+const API_CLIENT_TOOL_NAMES = [
+    "get_collections",
+    "save_requests",
+    "get_environments",
+    "create_environment",
+    "update_environment",
+    "get_open_tabs",
+    "send_request",
+    "select_active_item",
+    "modify_collections"
+];
+
+const ALL_PRESET = [...GLOBAL_TOOL_NAMES, ...BULK_RUNNER_TOOL_NAMES, ...API_CLIENT_TOOL_NAMES];
+
+const READ_ONLY_PRESET = [
+    "check_extension_connection",
+    "switch_tab",
+    "read_console_logs",
+    "get_row_status",
+    "read_row_data",
+    "inspect_input_data",
+    "get_execution_config",
+    "get_available_variables",
+    "get_column_mappings",
+    "get_table_filters",
+    "get_all_results",
+    "get_collections",
+    "get_environments",
+    "get_open_tabs"
+];
+
+const READ_MODIFY_PRESET = ALL_PRESET.filter(name => name !== "modify_collections");
+
+const determinePresetType = (allowedTools?: string[]): "all" | "read_only" | "read_modify" | "custom" => {
+    if (!allowedTools) return "all";
+    const tools = allowedTools;
+    const hasAll = ALL_PRESET.length === tools.length && ALL_PRESET.every(t => tools.includes(t));
+    if (hasAll) return "all";
+
+    const hasReadOnly = READ_ONLY_PRESET.length === tools.length && READ_ONLY_PRESET.every(t => tools.includes(t));
+    if (hasReadOnly) return "read_only";
+
+    const hasReadModify = READ_MODIFY_PRESET.length === tools.length && READ_MODIFY_PRESET.every(t => tools.includes(t));
+    if (hasReadModify) return "read_modify";
+
+    return "custom";
+};
 
 interface AgentSettingsViewProps {
     profiles: AgentProfile[];
+    originalProfiles: AgentProfile[];
     activeProfileId: string | null;
     onChangeProfiles: (profiles: AgentProfile[]) => void;
     onChangeActiveProfileId: (id: string) => void;
-    onSave: (profiles: AgentProfile[]) => void;
+    onSave: (profiles: AgentProfile[], savedProfileId: string) => void;
     onCancel: () => void;
-    isDirty: boolean;
     tempActiveProfileId?: string | null;
     onChangeTempActiveProfileId?: (id: string) => void;
 }
 
 export function AgentSettingsView({
     profiles,
+    originalProfiles,
     activeProfileId,
     onChangeProfiles,
     onChangeActiveProfileId,
     onSave,
     onCancel,
-    isDirty,
     tempActiveProfileId,
     onChangeTempActiveProfileId
 }: AgentSettingsViewProps) {
     const [showKey, setShowKey] = useState(false);
+    const [showAdvanced, setShowAdvanced] = useState(false);
+    const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
 
     const selectedProfile = profiles.find(p => p.id === activeProfileId) || profiles[0];
 
+    const [selectedPreset, setSelectedPreset] = useState<"all" | "read_only" | "read_modify" | "custom">("all");
+    const prevProfileIdRef = useRef<string | null>(null);
+    if (selectedProfile && selectedProfile.id !== prevProfileIdRef.current) {
+        prevProfileIdRef.current = selectedProfile.id;
+        setSelectedPreset(determinePresetType(selectedProfile.allowedTools));
+    }
+
     const handleAddProfile = () => {
         const newId = `profile_${generateId()}`;
+        let baseName = `Profile ${profiles.length + 1}`;
+        let counter = profiles.length + 1;
+        while (profiles.some(p => p.name.trim().toLowerCase() === baseName.trim().toLowerCase())) {
+            counter++;
+            baseName = `Profile ${counter}`;
+        }
         const newProfile: AgentProfile = {
             id: newId,
-            name: `Profile ${profiles.length + 1}`,
+            name: baseName,
             provider: "gemini",
             apiKey: "",
             endpoint: DEFAULT_CONFIGS.gemini.endpoint,
@@ -89,6 +173,145 @@ export function AgentSettingsView({
             return p;
         });
         onChangeProfiles(updated);
+    };
+
+    // Find original profile to compare
+    const originalProfile = selectedProfile
+        ? originalProfiles.find(p => p.id === selectedProfile.id)
+        : undefined;
+
+    const isProfileEqual = (a?: AgentProfile, b?: AgentProfile): boolean => {
+        if (!a || !b) return false;
+        const toolsA = a.allowedTools || ALL_PRESET;
+        const toolsB = b.allowedTools || ALL_PRESET;
+        const toolsEqual = toolsA.length === toolsB.length && toolsA.every(t => toolsB.includes(t));
+        return (
+            a.id === b.id &&
+            (a.name || "").trim() === (b.name || "").trim() &&
+            a.provider === b.provider &&
+            (a.apiKey || "") === (b.apiKey || "") &&
+            (a.endpoint || "") === (b.endpoint || "") &&
+            (a.model || "") === (b.model || "") &&
+            !!a.enableJsonFallback === !!b.enableJsonFallback &&
+            !!a.bypassCorsWithExtension === !!b.bypassCorsWithExtension &&
+            (a.maxExecutionLimit ?? 6) === (b.maxExecutionLimit ?? 6) &&
+            toolsEqual
+        );
+    };
+
+    const isCurrentProfileDirty = selectedProfile
+        ? (!originalProfile || !isProfileEqual(selectedProfile, originalProfile))
+        : false;
+
+    // Unique name validation
+    const isNameDuplicate = selectedProfile && selectedProfile.name
+        ? profiles.some(p => p && p.id !== selectedProfile.id && p.name && p.name.trim().toLowerCase() === selectedProfile.name.trim().toLowerCase())
+        : false;
+    const isNameEmpty = selectedProfile
+        ? !selectedProfile.name || !selectedProfile.name.trim()
+        : false;
+    const isNameInvalid = isNameDuplicate || isNameEmpty;
+
+    const isSaveDisabled = !selectedProfile || !isCurrentProfileDirty || isNameInvalid;
+
+    const currentAllowed = selectedProfile?.allowedTools || ALL_PRESET;
+
+    const handleApplyPreset = (presetType: "all" | "read_only" | "read_modify" | "custom") => {
+        setSelectedPreset(presetType);
+        if (presetType === "all") {
+            handleUpdateField("allowedTools", ALL_PRESET);
+        } else if (presetType === "read_only") {
+            handleUpdateField("allowedTools", READ_ONLY_PRESET);
+        } else if (presetType === "read_modify") {
+            handleUpdateField("allowedTools", READ_MODIFY_PRESET);
+        } else if (presetType === "custom") {
+            handleUpdateField("allowedTools", currentAllowed);
+        }
+    };
+
+    const handleToggleTool = (toolName: string) => {
+        let updated: string[];
+        if (currentAllowed.includes(toolName)) {
+            updated = currentAllowed.filter(t => t !== toolName);
+        } else {
+            updated = [...currentAllowed, toolName];
+        }
+        setSelectedPreset("custom");
+        handleUpdateField("allowedTools", updated);
+    };
+
+    const handleToggleCategory = (categoryTools: string[], allSelected: boolean) => {
+        let updated: string[];
+        if (allSelected) {
+            updated = currentAllowed.filter(t => !categoryTools.includes(t));
+        } else {
+            const newTools = categoryTools.filter(t => !currentAllowed.includes(t));
+            updated = [...currentAllowed, ...newTools];
+        }
+        setSelectedPreset("custom");
+        handleUpdateField("allowedTools", updated);
+    };
+
+    const renderCategorySection = (title: string, categoryTools: string[]) => {
+        const selectedInCat = categoryTools.filter(t => currentAllowed.includes(t));
+        const allSelected = selectedInCat.length === categoryTools.length;
+        const isCollapsed = !!collapsedCats[title];
+        
+        return (
+            <div className="border border-white/5 rounded-lg overflow-hidden bg-neutral-950/40">
+                <div className="flex items-center justify-between px-3 py-2 bg-neutral-900/40 text-xs border-b border-white/5">
+                    <div className="flex items-center space-x-2">
+                        <input
+                            type="checkbox"
+                            checked={allSelected}
+                            onChange={() => handleToggleCategory(categoryTools, allSelected)}
+                            className="w-3.5 h-3.5 rounded border-white/10 bg-neutral-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                        <span className="font-semibold text-white/90">{title}</span>
+                        <span className="text-[10px] text-white/40 font-mono ml-1">
+                            ({selectedInCat.length}/{categoryTools.length})
+                        </span>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setCollapsedCats(prev => ({ ...prev, [title]: !prev[title] }))}
+                        className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold uppercase tracking-wider cursor-pointer"
+                    >
+                        {isCollapsed ? "Expand" : "Collapse"}
+                    </button>
+                </div>
+
+                {!isCollapsed && (
+                    <div className="p-3 grid grid-cols-1 gap-2 bg-neutral-900/10">
+                        {categoryTools.map(tool => {
+                            const isChecked = currentAllowed.includes(tool);
+                            return (
+                                <div key={tool} className="flex items-start space-x-2 text-[11px] py-0.5">
+                                    <input
+                                        type="checkbox"
+                                        id={`tool-${tool}`}
+                                        checked={isChecked}
+                                        onChange={() => handleToggleTool(tool)}
+                                        className="w-3.5 h-3.5 mt-0.5 rounded border-white/10 bg-neutral-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                    />
+                                    <div className="leading-tight">
+                                        <label
+                                            htmlFor={`tool-${tool}`}
+                                            className="font-medium text-white/80 hover:text-white cursor-pointer select-none"
+                                        >
+                                            {getToolDisplayName(tool)}
+                                        </label>
+                                        <p className="text-[9px] text-white/30 font-mono mt-0.5">
+                                            {tool}
+                                        </p>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+        );
     };
 
     return (
@@ -157,9 +380,17 @@ export function AgentSettingsView({
                         <Input
                             value={selectedProfile.name}
                             onChange={(e) => handleUpdateField("name", e.target.value)}
-                            className="bg-neutral-900 border-white/10 text-white h-9 text-xs"
+                            className={`bg-neutral-900 text-white h-9 text-xs ${
+                                isNameInvalid ? "border-red-500 focus-visible:ring-red-500" : "border-white/10"
+                            }`}
                             placeholder="Enter profile name"
                         />
+                        {isNameDuplicate && (
+                            <p className="text-[10px] text-red-400 mt-1">Profile name must be unique.</p>
+                        )}
+                        {isNameEmpty && (
+                            <p className="text-[10px] text-red-400 mt-1">Profile name cannot be empty.</p>
+                        )}
                     </div>
 
                     {/* Provider Select */}
@@ -297,6 +528,100 @@ export function AgentSettingsView({
                             </div>
                         </div>
                     )}
+                    {/* Advanced Configuration Accordion */}
+                    <div className="border border-white/10 rounded-lg overflow-hidden bg-neutral-900/30">
+                        <button
+                            type="button"
+                            onClick={() => setShowAdvanced(!showAdvanced)}
+                            className="w-full px-4 py-3 flex items-center justify-between text-xs font-bold bg-neutral-900 hover:bg-neutral-800/80 transition-colors border-b border-white/5 cursor-pointer text-white/80"
+                        >
+                            <span>Advanced Configuration</span>
+                            <span className="text-[10px] text-indigo-400 uppercase tracking-widest flex items-center space-x-1 font-bold">
+                                {showAdvanced ? (
+                                    <>
+                                        <span>Hide</span>
+                                        <ChevronUp className="w-3 h-3" />
+                                    </>
+                                ) : (
+                                    <>
+                                        <span>Show</span>
+                                        <ChevronDown className="w-3 h-3" />
+                                    </>
+                                )}
+                            </span>
+                        </button>
+
+                        {showAdvanced && (
+                            <div className="p-4 space-y-4">
+                                {/* Presets Section */}
+                                <div className="space-y-2">
+                                    <Label className="text-xs text-white/60">Preset Permissions</Label>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleApplyPreset("all")}
+                                            className={
+                                                selectedPreset === "all"
+                                                    ? "h-7 px-3 text-[9px] uppercase font-black tracking-wider bg-indigo-600 border-2 border-indigo-400 text-white rounded-md cursor-pointer transition-all shadow-md shadow-indigo-600/50 scale-[1.03]"
+                                                    : "h-7 px-3 text-[9px] uppercase font-bold tracking-wider border border-white/15 bg-neutral-900/40 text-white/50 hover:text-white/80 hover:bg-neutral-800/60 rounded-md cursor-pointer transition-all"
+                                            }
+                                        >
+                                            All (Default)
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleApplyPreset("read_only")}
+                                            className={
+                                                selectedPreset === "read_only"
+                                                    ? "h-7 px-3 text-[9px] uppercase font-black tracking-wider bg-emerald-600 border-2 border-emerald-400 text-white rounded-md cursor-pointer transition-all shadow-md shadow-emerald-600/50 scale-[1.03]"
+                                                    : "h-7 px-3 text-[9px] uppercase font-bold tracking-wider border border-white/15 bg-neutral-900/40 text-white/50 hover:text-white/80 hover:bg-neutral-800/60 rounded-md cursor-pointer transition-all"
+                                            }
+                                        >
+                                            ReadOnly
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleApplyPreset("read_modify")}
+                                            className={
+                                                selectedPreset === "read_modify"
+                                                    ? "h-7 px-3 text-[9px] uppercase font-black tracking-wider bg-amber-600 border-2 border-amber-400 text-white rounded-md cursor-pointer transition-all shadow-md shadow-amber-600/50 scale-[1.03]"
+                                                    : "h-7 px-3 text-[9px] uppercase font-bold tracking-wider border border-white/15 bg-neutral-900/40 text-white/50 hover:text-white/80 hover:bg-neutral-800/60 rounded-md cursor-pointer transition-all"
+                                            }
+                                        >
+                                            Read & Modify (No Delete)
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleApplyPreset("custom")}
+                                            className={
+                                                selectedPreset === "custom"
+                                                    ? "h-7 px-3 text-[9px] uppercase font-black tracking-wider bg-indigo-500/20 border-2 border-indigo-400 text-indigo-200 rounded-md cursor-pointer transition-all shadow-md shadow-indigo-500/35 scale-[1.03]"
+                                                    : "h-7 px-3 text-[9px] uppercase font-bold tracking-wider border border-white/15 bg-neutral-900/40 text-white/50 hover:text-white/80 hover:bg-neutral-800/60 rounded-md cursor-pointer transition-all"
+                                            }
+                                        >
+                                            Customization
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Permission Tree */}
+                                {selectedPreset === "custom" && (
+                                    <div className="space-y-3 pt-2">
+                                        <Label className="text-xs text-white/60 font-semibold text-white/80">Tool Access Control</Label>
+                                        
+                                        {/* Global Tools Section */}
+                                        {renderCategorySection("Global Operations", GLOBAL_TOOL_NAMES)}
+
+                                        {/* API Client Section */}
+                                        {renderCategorySection("API Client", API_CLIENT_TOOL_NAMES)}
+
+                                        {/* Bulk Runner Section */}
+                                        {renderCategorySection("Bulk Runner", BULK_RUNNER_TOOL_NAMES)}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </>
             )}
 
@@ -309,8 +634,8 @@ export function AgentSettingsView({
                     Cancel
                 </Button>
                 <Button
-                    disabled={!isDirty}
-                    onClick={() => onSave(profiles)}
+                    disabled={isSaveDisabled}
+                    onClick={() => selectedProfile && onSave(profiles, selectedProfile.id)}
                     className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white h-9 rounded-lg shadow-lg shadow-indigo-600/20 disabled:opacity-40 disabled:hover:bg-indigo-600 disabled:shadow-none cursor-pointer disabled:cursor-not-allowed"
                 >
                     Save Config

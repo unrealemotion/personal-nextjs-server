@@ -194,6 +194,7 @@ export interface AgentProfile {
   enableJsonFallback?: boolean;
   bypassCorsWithExtension?: boolean;
   maxExecutionLimit?: number;
+  allowedTools?: string[];
 }
 
 export interface Message {

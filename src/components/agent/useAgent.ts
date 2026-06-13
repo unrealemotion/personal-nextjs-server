@@ -35,7 +35,7 @@ import { toast } from "sonner";
 import { callLLM } from "./agent-adapters";
 import { type AgentProfile, type Message, type KeyValuePair } from "@/lib/schema";
 import { WELCOME_MESSAGE } from "./agent-prompts";
-import { getAgentTools } from "./tools";
+import { getAgentTools, getAllAgentTools } from "./tools";
 import { resolveVariables, runPreRequestScript, runTestScript } from "@/lib/sandbox";
 import { sendToExtension } from "@/lib/extension";
 
@@ -124,8 +124,15 @@ export function useAgent() {
         setActiveToolName(name);
         try {
             const currentView = store.state.currentView || "bulk";
-            const allowedTools = getAgentTools(currentView);
             
+            // Check if the tool is permitted in the active agent profile
+            const allAllowedTools = getAllAgentTools();
+            if (!allAllowedTools.some(t => t.function.name === name)) {
+                return { error: `Tool '${name}' is disabled in the active agent profile's permission configuration.` };
+            }
+
+            // Check if the tool is permitted in the current tab
+            const allowedTools = getAgentTools(currentView);
             if (!allowedTools.some(t => t.function.name === name)) {
                 return { error: `Tool '${name}' is not permitted in the current '${currentView === "api_client" ? "API Client" : "Bulk Runner"}' tab. Please instruct the user to switch tabs if they need you to perform this action.` };
             }
@@ -1782,6 +1789,9 @@ function areProfilesEqual(a: AgentProfile[], b: AgentProfile[]) {
     for (let i = 0; i < a.length; i++) {
         const pa = a[i];
         const pb = b[i];
+        const allowedA = pa.allowedTools || [];
+        const allowedB = pb.allowedTools || [];
+        const allowedEqual = allowedA.length === allowedB.length && allowedA.every(t => allowedB.includes(t));
         if (
             pa.id !== pb.id ||
             pa.name !== pb.name ||
@@ -1791,7 +1801,8 @@ function areProfilesEqual(a: AgentProfile[], b: AgentProfile[]) {
             pa.model !== pb.model ||
             pa.enableJsonFallback !== pb.enableJsonFallback ||
             pa.bypassCorsWithExtension !== pb.bypassCorsWithExtension ||
-            pa.maxExecutionLimit !== pb.maxExecutionLimit
+            pa.maxExecutionLimit !== pb.maxExecutionLimit ||
+            !allowedEqual
         ) {
             return false;
         }

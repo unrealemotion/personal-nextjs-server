@@ -1,6 +1,33 @@
 import { GLOBAL_TOOLS, GLOBAL_TOOLS_PROMPT } from "./global";
 import { BULK_RUNNER_TOOLS, BULK_RUNNER_TOOLS_PROMPT } from "./bulk-runner";
 import { API_CLIENT_TOOLS, API_CLIENT_TOOLS_PROMPT } from "./api-client";
+import { store } from "@/lib/store";
+
+function filterToolPrompts(prompt: string): string {
+    const state = store.state;
+    const activeProfile = state.agentProfiles?.find(p => p.id === state.activeAgentProfileId) || state.agentProfiles?.[0];
+    if (!activeProfile?.allowedTools) return prompt;
+    
+    const allowedNames = activeProfile.allowedTools;
+    const lines = prompt.split("\n");
+    const filteredLines: string[] = [];
+    let keeping = true;
+    
+    for (const line of lines) {
+        const trimmed = line.trim();
+        const isHeader = /^[a-z_]+$/.test(trimmed) && trimmed.length > 0;
+        
+        if (isHeader) {
+            keeping = allowedNames.includes(trimmed);
+        }
+        
+        if (keeping) {
+            filteredLines.push(line);
+        }
+    }
+    
+    return filteredLines.join("\n");
+}
 
 export function getAgentTools(currentView: "bulk" | "api_client") {
     const tools: any[] = [...GLOBAL_TOOLS];
@@ -9,6 +36,12 @@ export function getAgentTools(currentView: "bulk" | "api_client") {
         tools.push(...BULK_RUNNER_TOOLS);
     } else if (currentView === "api_client") {
         tools.push(...API_CLIENT_TOOLS);
+    }
+    
+    const state = store.state;
+    const activeProfile = state.agentProfiles?.find(p => p.id === state.activeAgentProfileId) || state.agentProfiles?.[0];
+    if (activeProfile?.allowedTools) {
+        return tools.filter(t => activeProfile.allowedTools!.includes(t.function.name));
     }
     
     return tools;
@@ -23,7 +56,7 @@ export function getAgentToolsPrompt(currentView: "bulk" | "api_client"): string 
         prompt += "\n" + API_CLIENT_TOOLS_PROMPT;
     }
     
-    return prompt;
+    return filterToolPrompts(prompt);
 }
 
 export function getToolDisplayName(name: string): string {
@@ -62,9 +95,15 @@ export function getToolDisplayName(name: string): string {
 }
 
 export function getAllAgentTools() {
-    return [...GLOBAL_TOOLS, ...BULK_RUNNER_TOOLS, ...API_CLIENT_TOOLS];
+    const tools = [...GLOBAL_TOOLS, ...BULK_RUNNER_TOOLS, ...API_CLIENT_TOOLS];
+    const state = store.state;
+    const activeProfile = state.agentProfiles?.find(p => p.id === state.activeAgentProfileId) || state.agentProfiles?.[0];
+    if (activeProfile?.allowedTools) {
+        return tools.filter(t => activeProfile.allowedTools!.includes(t.function.name));
+    }
+    return tools;
 }
 
 export function getAllAgentToolsPrompt(): string {
-    return GLOBAL_TOOLS_PROMPT + "\n" + BULK_RUNNER_TOOLS_PROMPT + "\n" + API_CLIENT_TOOLS_PROMPT;
+    return filterToolPrompts(GLOBAL_TOOLS_PROMPT + "\n" + BULK_RUNNER_TOOLS_PROMPT + "\n" + API_CLIENT_TOOLS_PROMPT);
 }
