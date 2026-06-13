@@ -2,12 +2,14 @@ import { getAgentSystemPrompt } from "./agent-prompts";
 import { getAgentTools } from "./tools";
 import { type Message } from "@/lib/schema";
 import { store } from "@/lib/store";
+import { sendToExtension } from "@/lib/extension";
 
 export interface AgentConfig {
     provider: "gemini" | "openai" | "custom";
     apiKey: string;
     endpoint: string;
     model: string;
+    enableJsonFallback?: boolean;
 }
 
 export function mapOpenAiSchemaToGemini(schema: any): any {
@@ -110,18 +112,57 @@ export const callLLM = async (
             }
         ];
 
-        const response = await fetch(apiTargetUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: geminiContents,
-                systemInstruction: {
-                    parts: [{ text: systemPrompt }]
-                },
-                tools: geminiTools
-            }),
-            signal: abortSignal
-        });
+        const isExtensionActive = typeof document !== "undefined" &&
+            document.documentElement.getAttribute("data-surge-extension-active") === "true";
+        let extensionRuleId: number | null = null;
+        if (isExtensionActive) {
+            try {
+                let urlFilter = "*";
+                try {
+                    const parsed = new URL(apiTargetUrl);
+                    urlFilter = parsed.hostname;
+                } catch (e) {}
+
+                const res = await sendToExtension({
+                    action: "setupRequestRules",
+                    urlFilter,
+                    headers: [{ name: "Content-Type", value: "application/json" }],
+                    initiatorOrigin: window.location.origin
+                });
+                if (res && res.success) {
+                    extensionRuleId = res.ruleId;
+                }
+            } catch (e) {
+                console.warn("Agent adapter failed to setup extension rules for Gemini:", e);
+            }
+        }
+
+        let response;
+        try {
+            response = await fetch(apiTargetUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: geminiContents,
+                    systemInstruction: {
+                        parts: [{ text: systemPrompt }]
+                    },
+                    tools: geminiTools
+                }),
+                signal: abortSignal
+            });
+        } finally {
+            if (extensionRuleId !== null) {
+                try {
+                    await sendToExtension({
+                        action: "clearRequestRules",
+                        ruleId: extensionRuleId
+                    });
+                } catch (e) {
+                    console.warn("Agent adapter failed to clear extension rules for Gemini:", e);
+                }
+            }
+        }
 
         if (!response.ok) {
             const errText = await response.text();
@@ -205,7 +246,7 @@ export const callLLM = async (
         const rawCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall) || [];
         const geminiParts = candidate?.content?.parts || [];
         
-        const toolCalls = rawCalls.map((rc: any) => ({
+        let toolCalls = rawCalls.map((rc: any) => ({
             id: `call_${Math.random().toString(36).substring(2, 9)}`,
             type: "function",
             function: {
@@ -213,6 +254,42 @@ export const callLLM = async (
                 arguments: JSON.stringify(rc.functionCall.args)
             }
         }));
+
+        if (config.enableJsonFallback && toolCalls.length === 0 && text) {
+            const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/g;
+            let match;
+            while ((match = jsonBlockRegex.exec(text)) !== null) {
+                try {
+                    const parsed = JSON.parse(match[1].trim());
+                    if (parsed && typeof parsed === "object" && parsed.name) {
+                        toolCalls.push({
+                            id: `call_fb_${Math.random().toString(36).substring(2, 9)}`,
+                            type: "function",
+                            function: {
+                                name: parsed.name,
+                                arguments: JSON.stringify(parsed.arguments || parsed.args || {})
+                            }
+                        });
+                    }
+                } catch (e) {}
+            }
+
+            if (toolCalls.length === 0 && text.trim().startsWith("{") && text.trim().endsWith("}")) {
+                try {
+                    const parsed = JSON.parse(text.trim());
+                    if (parsed && typeof parsed === "object" && parsed.name) {
+                        toolCalls.push({
+                            id: `call_fb_${Math.random().toString(36).substring(2, 9)}`,
+                            type: "function",
+                            function: {
+                                name: parsed.name,
+                                arguments: JSON.stringify(parsed.arguments || parsed.args || {})
+                            }
+                        });
+                    }
+                } catch (e) {}
+            }
+        }
 
         return { text, toolCalls, geminiParts };
     } else {
@@ -245,16 +322,60 @@ export const callLLM = async (
             })
         ];
 
-        const response = await fetch(apiTargetUrl, {
-            method: "POST",
-            headers: openaiHeaders,
-            body: JSON.stringify({
-                model,
-                messages: openaiMessages,
-                tools: agentTools
-            }),
-            signal: abortSignal
-        });
+        const isExtensionActive = typeof document !== "undefined" &&
+            document.documentElement.getAttribute("data-surge-extension-active") === "true";
+        let extensionRuleId: number | null = null;
+        if (isExtensionActive) {
+            try {
+                let urlFilter = "*";
+                try {
+                    const parsed = new URL(apiTargetUrl);
+                    urlFilter = parsed.hostname;
+                } catch (e) {}
+
+                const extHeaders = Object.entries(openaiHeaders).map(([key, value]) => ({
+                    name: key,
+                    value: String(value)
+                }));
+
+                const res = await sendToExtension({
+                    action: "setupRequestRules",
+                    urlFilter,
+                    headers: extHeaders,
+                    initiatorOrigin: window.location.origin
+                });
+                if (res && res.success) {
+                    extensionRuleId = res.ruleId;
+                }
+            } catch (e) {
+                console.warn("Agent adapter failed to setup extension rules for Custom/OpenAI:", e);
+            }
+        }
+
+        let response;
+        try {
+            response = await fetch(apiTargetUrl, {
+                method: "POST",
+                headers: openaiHeaders,
+                body: JSON.stringify({
+                    model,
+                    messages: openaiMessages,
+                    tools: agentTools
+                }),
+                signal: abortSignal
+            });
+        } finally {
+            if (extensionRuleId !== null) {
+                try {
+                    await sendToExtension({
+                        action: "clearRequestRules",
+                        ruleId: extensionRuleId
+                    });
+                } catch (e) {
+                    console.warn("Agent adapter failed to clear extension rules for Custom/OpenAI:", e);
+                }
+            }
+        }
 
         if (!response.ok) {
             const errText = await response.text();
@@ -294,7 +415,43 @@ export const callLLM = async (
         const data = await response.json();
         const choice = data.choices?.[0];
         const text = choice?.message?.content || "";
-        const toolCalls = choice?.message?.tool_calls || [];
+        let toolCalls = choice?.message?.tool_calls || [];
+
+        if (config.enableJsonFallback && toolCalls.length === 0 && text) {
+            const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/g;
+            let match;
+            while ((match = jsonBlockRegex.exec(text)) !== null) {
+                try {
+                    const parsed = JSON.parse(match[1].trim());
+                    if (parsed && typeof parsed === "object" && parsed.name) {
+                        toolCalls.push({
+                            id: `call_fb_${Math.random().toString(36).substring(2, 9)}`,
+                            type: "function",
+                            function: {
+                                name: parsed.name,
+                                arguments: JSON.stringify(parsed.arguments || parsed.args || {})
+                            }
+                        });
+                    }
+                } catch (e) {}
+            }
+
+            if (toolCalls.length === 0 && text.trim().startsWith("{") && text.trim().endsWith("}")) {
+                try {
+                    const parsed = JSON.parse(text.trim());
+                    if (parsed && typeof parsed === "object" && parsed.name) {
+                        toolCalls.push({
+                            id: `call_fb_${Math.random().toString(36).substring(2, 9)}`,
+                            type: "function",
+                            function: {
+                                name: parsed.name,
+                                arguments: JSON.stringify(parsed.arguments || parsed.args || {})
+                            }
+                        });
+                    }
+                } catch (e) {}
+            }
+        }
 
         return { text, toolCalls };
     }

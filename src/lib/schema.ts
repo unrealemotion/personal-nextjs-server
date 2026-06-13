@@ -190,6 +190,7 @@ export interface AgentProfile {
   apiKey: string;
   endpoint: string;
   model: string;
+  enableJsonFallback?: boolean;
 }
 
 export interface Message {

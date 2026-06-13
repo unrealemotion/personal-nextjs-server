@@ -1303,7 +1303,8 @@ function areProfilesEqual(a: AgentProfile[], b: AgentProfile[]) {
             pa.provider !== pb.provider ||
             pa.apiKey !== pb.apiKey ||
             pa.endpoint !== pb.endpoint ||
-            pa.model !== pb.model
+            pa.model !== pb.model ||
+            pa.enableJsonFallback !== pb.enableJsonFallback
         ) {
             return false;
         }

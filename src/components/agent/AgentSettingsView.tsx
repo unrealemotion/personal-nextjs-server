@@ -63,7 +63,7 @@ export function AgentSettingsView({
         }
     };
 
-    const handleUpdateField = (field: keyof AgentProfile, value: string) => {
+    const handleUpdateField = (field: keyof AgentProfile, value: any) => {
         if (!selectedProfile) return;
         const updated = profiles.map(p => {
             if (p.id === selectedProfile.id) {
@@ -201,6 +201,28 @@ export function AgentSettingsView({
                             className="bg-neutral-900 border-white/10 text-white h-9 font-mono text-xs"
                             placeholder="Model identifier"
                         />
+                    </div>
+
+                    {/* JSON Fallback Checkbox */}
+                    <div className="flex items-start space-x-2 pt-1">
+                        <input
+                            type="checkbox"
+                            id="enableJsonFallback"
+                            checked={!!selectedProfile.enableJsonFallback}
+                            onChange={(e) => handleUpdateField("enableJsonFallback", e.target.checked)}
+                            className="w-4 h-4 mt-0.5 rounded border-white/10 bg-neutral-900 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-neutral-950 cursor-pointer"
+                        />
+                        <div className="grid gap-1.5 leading-none">
+                            <label
+                                htmlFor="enableJsonFallback"
+                                className="text-xs font-semibold text-white/80 cursor-pointer select-none"
+                            >
+                                Enable Markdown JSON Fallback
+                            </label>
+                            <p className="text-[10px] text-white/40 leading-normal">
+                                Automatically parses tool calls outputted as markdown JSON blocks or raw JSON responses (highly recommended for smaller local models).
+                            </p>
+                        </div>
                     </div>
 
                     {/* API Key */}
