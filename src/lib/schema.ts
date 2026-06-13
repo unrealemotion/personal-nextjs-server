@@ -180,6 +180,7 @@ export const requestTabSchema = z.object({
   requestId: z.string().optional(),
   response: apiResponseSchema.nullable().optional(),
   loading: z.boolean(),
+  activeSubTab: z.enum(["params", "headers", "body", "prerequest", "tests"]).optional(),
 });
 export type RequestTab = z.infer<typeof requestTabSchema>;
 
@@ -192,6 +193,7 @@ export interface AgentProfile {
   model: string;
   enableJsonFallback?: boolean;
   bypassCorsWithExtension?: boolean;
+  maxExecutionLimit?: number;
 }
 
 export interface Message {

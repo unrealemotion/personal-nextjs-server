@@ -146,6 +146,66 @@ export default function RootLayout({
                     console.warn("Interceded and suppressed browser extension rejection:", message);
                   }
                 }, true);
+
+                // 3. Intercept console logs for agent troubleshooting
+                (function() {
+                  window.__SURGE_CONSOLE_LOGS__ = [];
+                  var maxLogs = 500;
+                  
+                  var originalLog = console.log;
+                  var originalWarn = console.warn;
+                  var originalError = console.error;
+                  var originalInfo = console.info;
+
+                  function formatArg(arg) {
+                    if (arg === null) return "null";
+                    if (arg === undefined) return "undefined";
+                    if (arg instanceof Error) {
+                      return arg.message + (arg.stack ? "\\n" + arg.stack : "");
+                    }
+                    if (typeof arg === "object") {
+                      try {
+                        return JSON.stringify(arg);
+                      } catch (e) {
+                        return String(arg);
+                      }
+                    }
+                    return String(arg);
+                  }
+
+                  function addLog(type, args) {
+                    try {
+                      var message = Array.prototype.map.call(args, formatArg).join(" ");
+                      window.__SURGE_CONSOLE_LOGS__.push({
+                        timestamp: new Date().toISOString(),
+                        type: type,
+                        message: message
+                      });
+                      if (window.__SURGE_CONSOLE_LOGS__.length > maxLogs) {
+                        window.__SURGE_CONSOLE_LOGS__.shift();
+                      }
+                    } catch (e) {
+                      // silence
+                    }
+                  }
+
+                  console.log = function() {
+                    addLog("log", arguments);
+                    originalLog.apply(console, arguments);
+                  };
+                  console.warn = function() {
+                    addLog("warn", arguments);
+                    originalWarn.apply(console, arguments);
+                  };
+                  console.error = function() {
+                    addLog("error", arguments);
+                    originalError.apply(console, arguments);
+                  };
+                  console.info = function() {
+                    addLog("info", arguments);
+                    originalInfo.apply(console, arguments);
+                  };
+                })();
               })();
             `
           }}

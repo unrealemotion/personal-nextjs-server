@@ -1,5 +1,5 @@
 import { SURGE_DOCUMENTATION } from "@/lib/surge-docs";
-import { getAgentToolsPrompt } from "./tools";
+import { getAgentToolsPrompt, getAllAgentToolsPrompt } from "./tools";
 
 export const DEFAULT_CONFIGS: Record<"gemini" | "openai" | "custom", { endpoint: string; model: string }> = {
     gemini: {
@@ -52,7 +52,7 @@ IMPORTANT:
 - If the user asks you to perform an action that requires tools from a different tab (e.g., bulk operations while on the API Client tab), you must use the 'switch_tab' tool to switch to the correct tab first. After switching, the required tools will become available to you, and you can continue fulfilling the user's request.
 `;
 
-    const toolPrompts = getAgentToolsPrompt(currentView);
+    const toolPrompts = getAllAgentToolsPrompt();
     const finalSystemPrompt = AGENT_SYSTEM_PROMPT.replace("{{TOOL_PROMPTS}}", toolPrompts);
 
     return `${finalSystemPrompt}\n${tabContext}`;

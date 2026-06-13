@@ -8,6 +8,7 @@ import {
     addApiTab,
     closeApiTab,
     setActiveTabId,
+    setActiveSubTab,
     updateActiveTabRequest,
     updateTabResponse,
     updateTabLoading,
@@ -168,6 +169,7 @@ export function RequestPanel() {
     const loading = activeTab?.loading;
     const isDirty = activeTab?.isDirty;
     const requestId = activeTab?.requestId;
+    const activeSubTab = activeTab?.activeSubTab || "params";
 
     const [isHoveringCancel, setIsHoveringCancel] = useState(false);
     const [selectedCollectionId, setSelectedCollectionId] = useState("");
@@ -1150,7 +1152,7 @@ export function RequestPanel() {
     return (
         <div className="w-full flex flex-col h-full bg-neutral-900/25 border border-white/5 rounded-2xl p-4 space-y-4 overflow-hidden">
             {/* Request tabs bar */}
-            <div className="flex items-center gap-1.5 border-b border-white/5 pb-2 overflow-x-auto shrink-0">
+            <div className="flex items-center gap-1.5 border-b border-white/5 pb-2 overflow-x-auto custom-scrollbar shrink-0">
                 {apiTabs.map(t => {
                     const isActive = t.id === activeTabId;
                     return (
@@ -1309,8 +1311,15 @@ export function RequestPanel() {
                 </div>
             </div>
 
-            {/* Request tabs: Params, Headers, Body, Scripts */}
-            <Tabs defaultValue="params" className="flex-1 flex flex-col min-h-0">
+            <Tabs
+                value={activeSubTab}
+                onValueChange={(val) => {
+                    if (activeTabId) {
+                        setActiveSubTab(activeTabId, val as any);
+                    }
+                }}
+                className="flex-1 flex flex-col min-h-0"
+            >
                 <TabsList className="bg-neutral-950/60 border-b border-white/5 p-0 h-9 justify-start flex flex-nowrap overflow-x-hidden overflow-y-hidden rounded-none shrink-0 w-full">
                     <TabsTrigger
                         value="params"

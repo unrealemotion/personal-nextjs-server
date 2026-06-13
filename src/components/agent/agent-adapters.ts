@@ -1,5 +1,5 @@
 import { getAgentSystemPrompt } from "./agent-prompts";
-import { getAgentTools } from "./tools";
+import { getAgentTools, getAllAgentTools } from "./tools";
 import { type Message } from "@/lib/schema";
 import { store } from "@/lib/store";
 import { sendToExtension } from "@/lib/extension";
@@ -56,7 +56,7 @@ export const callLLM = async (
     
     const currentView = store.state.currentView || "bulk";
     const systemPrompt = getAgentSystemPrompt(currentView);
-    const agentTools = getAgentTools(currentView);
+    const agentTools = getAllAgentTools();
     
     if (!apiKey && provider !== "custom") {
         throw new Error("API Key is required. Please check your settings.");

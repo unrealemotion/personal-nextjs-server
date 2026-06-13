@@ -3,6 +3,7 @@ import { Wrench, Loader2, Undo, User, Check, X, Copy } from "lucide-react";
 import { type Message } from "@/lib/schema";
 import { renderMarkdown } from "./render-markdown";
 import { EtherealAiSymbol } from "./EtherealAiSymbol";
+import { getToolDisplayName } from "./tools";
 
 interface AgentMessageItemProps {
     message: Message;
@@ -30,13 +31,66 @@ export function AgentMessageItem({ message, allMessages = [], onRevert }: AgentM
             <div className="flex items-center space-x-2 text-[10px] text-white/40 pl-6 border-l border-white/5 py-0.5">
                 <Wrench className="w-3 h-3 text-indigo-400" />
                 <span>
-                    Tool executed: <b className="text-white/60">{message.name}</b>
+                    Tool executed: <b className="text-white/60">{message.name ? getToolDisplayName(message.name) : ""}</b>
                 </span>
                 {success ? (
                     <span className="text-emerald-400">✓ Success</span>
                 ) : (
                     <span className="text-red-400">✗ Failed</span>
                 )}
+            </div>
+        );
+    }
+
+    if (message.tool_calls && message.tool_calls.length > 0) {
+        return (
+            <div className="flex flex-wrap gap-1.5 pl-[36px] py-1 select-text">
+                {message.tool_calls.map((tc, idx) => {
+                    const toolResultMsg = allMessages.find(
+                        (m) => m.role === "tool" && m.tool_call_id === tc.id
+                    );
+                    const isCompleted = !!toolResultMsg;
+                    let success = true;
+                    if (isCompleted && toolResultMsg) {
+                        try {
+                            const parsed = JSON.parse(toolResultMsg.content);
+                            if (parsed.error) success = false;
+                        } catch {
+                            success = false;
+                        }
+                    }
+
+                    return (
+                        <div
+                            key={idx}
+                            className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium border select-none transition-all duration-300 ${
+                                isCompleted
+                                    ? success
+                                        ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-400"
+                                        : "bg-red-500/5 border-red-500/10 text-red-400"
+                                    : "bg-indigo-500/5 border-indigo-500/10 text-indigo-400 animate-pulse"
+                            }`}
+                        >
+                            {isCompleted ? (
+                                success ? (
+                                    <Check className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                                ) : (
+                                    <X className="w-2.5 h-2.5 text-red-400 shrink-0" />
+                                )
+                            ) : (
+                                <Loader2 className="w-2.5 h-2.5 animate-spin text-indigo-400 shrink-0" />
+                            )}
+                            <span>
+                                {isCompleted 
+                                    ? success 
+                                        ? `Used ${getToolDisplayName(tc.function.name)}` 
+                                        : `Failed ${getToolDisplayName(tc.function.name)}`
+                                    : `Using ${getToolDisplayName(tc.function.name)}...`
+                                }
+                            </span>
+                        </div>
+                    );
+                })}
             </div>
         );
     }
@@ -58,65 +112,22 @@ export function AgentMessageItem({ message, allMessages = [], onRevert }: AgentM
                 }`}
             >
                 {renderMarkdown(message.content)}
-                {message.tool_calls && message.tool_calls.map((tc, idx) => {
-                    const toolResultMsg = allMessages.find(
-                        (m) => m.role === "tool" && m.tool_call_id === tc.id
-                    );
-                    const isCompleted = !!toolResultMsg;
-                    let success = true;
-                    if (isCompleted && toolResultMsg) {
-                        try {
-                            const parsed = JSON.parse(toolResultMsg.content);
-                            if (parsed.error) success = false;
-                        } catch {
-                            success = false;
-                        }
-                    }
 
-                    return (
-                        <div
-                            key={idx}
-                            className={`mt-2 text-[10px] p-1.5 rounded border flex items-center space-x-1.5 transition-all duration-300 ${
-                                isCompleted
-                                    ? success
-                                        ? "text-emerald-400 bg-emerald-950/30 border-emerald-500/20"
-                                        : "text-red-400 bg-red-950/30 border-red-500/20"
-                                    : "text-indigo-400 bg-neutral-950 border-white/5"
-                            }`}
-                        >
-                            {isCompleted ? (
-                                success ? (
-                                    <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                                ) : (
-                                    <X className="w-3 h-3 text-red-400 shrink-0" />
-                                )
-                            ) : (
-                                <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                            )}
-                            <span>
-                                {isCompleted ? (success ? "Executed: " : "Failed: ") : "Calling: "}
-                                <code className={`font-mono ${isCompleted ? (success ? "text-emerald-300" : "text-red-300") : "text-white/80"}`}>
-                                    {tc.function.name}
-                                </code>
-                            </span>
-                        </div>
-                    );
-                })}
-                <div className="mt-1 flex justify-end space-x-1 opacity-50 group-hover:opacity-100 transition-opacity duration-200">
+                <div className="mt-0.5 flex justify-end space-x-1 opacity-50 group-hover:opacity-100 transition-opacity duration-200">
                     <button
                         type="button"
                         onClick={handleCopy}
-                        className="text-white/60 hover:text-white hover:bg-white/15 rounded p-1 transition-all cursor-pointer flex items-center justify-center border border-white/5"
+                        className="text-white/60 hover:text-white hover:bg-white/15 rounded p-0.5 transition-all cursor-pointer flex items-center justify-center border border-white/5"
                     >
-                        {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        {copied ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
                     </button>
                     {!isBot && (
                         <button
                             type="button"
                             onClick={() => onRevert(message.id)}
-                            className="text-white/60 hover:text-white hover:bg-white/15 rounded p-1 transition-all cursor-pointer flex items-center justify-center border border-white/5"
+                            className="text-white/60 hover:text-white hover:bg-white/15 rounded p-0.5 transition-all cursor-pointer flex items-center justify-center border border-white/5"
                         >
-                            <Undo className="w-3 h-3" />
+                            <Undo className="w-2.5 h-2.5" />
                         </button>
                     )}
                 </div>

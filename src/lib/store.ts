@@ -68,6 +68,7 @@ export function createDefaultTab(name = "Untitled Request", request?: ApiRequest
         requestId: request ? req.id : undefined,
         response: null,
         loading: false,
+        activeSubTab: "params",
     };
 }
 
@@ -1221,6 +1222,18 @@ export const closeApiTab = (id: string) => {
 
 export const setActiveTabId = (id: string | null) => {
     store.setState((state) => ({ ...state, activeTabId: id }));
+};
+
+export const setActiveSubTab = (tabId: string, subTab: "params" | "headers" | "body" | "prerequest" | "tests") => {
+    store.setState((state) => {
+        const newTabs = state.apiTabs.map((t) => {
+            if (t.id === tabId) {
+                return { ...t, activeSubTab: subTab };
+            }
+            return t;
+        });
+        return { ...state, apiTabs: newTabs };
+    });
 };
 
 export const updateActiveTabRequest = (updates: Partial<ApiRequest>) => {

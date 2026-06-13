@@ -27,6 +27,7 @@ import { useAgent } from "./useAgent";
 import { AgentSettingsView } from "./AgentSettingsView";
 import { AgentMessageItem } from "./AgentMessageItem";
 import { EtherealAiSymbol } from "./EtherealAiSymbol";
+import { getToolDisplayName } from "./tools";
 import {
     Select,
     SelectContent,
@@ -594,7 +595,7 @@ export function AgentChatPanel() {
                                     </div>
                                     <div className="bg-neutral-900 text-white/80 px-3 py-2 rounded-xl border border-indigo-500/15 flex items-center space-x-2 text-xs">
                                         <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
-                                        <span>Running local tool: <strong className="text-indigo-400 font-semibold">{activeToolName}</strong>...</span>
+                                        <span>Running local tool: <strong className="text-indigo-400 font-semibold">{getToolDisplayName(activeToolName)}</strong>...</span>
                                     </div>
                                     <Button
                                         type="button"
@@ -834,10 +835,10 @@ export function AgentChatPanel() {
                                     htmlFor="revert-modifications"
                                     className="text-xs font-semibold text-indigo-200 cursor-pointer select-none leading-none"
                                 >
-                                    Revert workspace changes
+                                    Revert whole workspace
                                 </label>
                                 <p className="text-[10px] text-indigo-300/60 leading-normal select-none">
-                                    Restore templates, row data, configs, and filters to the exact state before this prompt was processed.
+                                    Restore entire workspace (both Bulk Runner & API Client tabs) to the exact moment this message was sent. This will overwrite all subsequent changes, including manual modifications.
                                 </p>
                             </div>
                         </div>

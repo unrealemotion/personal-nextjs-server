@@ -256,6 +256,25 @@ export function AgentSettingsView({
                         </div>
                     </div>
 
+                    {/* Execution Limit */}
+                    <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                            <Label className="text-xs text-white/60">Max Tool Execution Turns</Label>
+                            <span className="text-[10px] text-white/40 font-mono">0 = Infinite turns</span>
+                        </div>
+                        <Input
+                            type="number"
+                            min="0"
+                            value={selectedProfile.maxExecutionLimit !== undefined ? selectedProfile.maxExecutionLimit : 6}
+                            onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                handleUpdateField("maxExecutionLimit", isNaN(val) ? 6 : val);
+                            }}
+                            className="bg-neutral-900 border-white/10 text-white h-9 font-mono text-xs"
+                            placeholder="6"
+                        />
+                    </div>
+
                     {/* API Key */}
                     {selectedProfile.provider !== "custom" && (
                         <div className="space-y-2">

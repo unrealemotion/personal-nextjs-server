@@ -27,6 +27,27 @@ export const GLOBAL_TOOLS = [
                 required: ["tab"]
             }
         }
+    },
+    {
+        type: "function",
+        function: {
+            name: "read_console_logs",
+            description: "Read the recent browser developer console logs to troubleshoot errors, warnings, and exceptions.",
+            parameters: {
+                type: "object",
+                properties: {
+                    limit: {
+                        type: "integer",
+                        description: "The number of recent log entries to retrieve (default: 100, maximum: 500)."
+                    },
+                    level: {
+                        type: "string",
+                        description: "Filter logs by severity/level.",
+                        enum: ["all", "error", "warn", "log", "info"]
+                    }
+                }
+            }
+        }
     }
 ];
 
@@ -48,4 +69,9 @@ switch_tab
    - Capabilities: Switches the active workspace tab to either Bulk Runner ("bulk") or API Client ("api_client").
    - When to use: When the user asks you to perform an action that requires tools from another tab (e.g., they ask you to inspect bulk execution but you are currently on the API Client tab).
    - Tips: After switching the tab, you can immediately continue fulfilling the user's request, as switching the tab will make the appropriate tools available.
+
+read_console_logs
+   - Capabilities: Reads the recent browser developer console logs.
+   - When to use: When requests fail, when things are not working, when debugging script/sandbox errors, or when troubleshooting an issue to check for errors/exceptions.
+   - Tips: Use this to check for runtime errors, script rejection warnings, or extension-related errors in the log console.
 `;

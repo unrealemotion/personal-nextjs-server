@@ -4,6 +4,9 @@ import {
     store, 
     saveAgentProfiles, 
     setActiveAgentProfileId, 
+    setActiveEnvironmentId,
+    setActiveTabId,
+    setActiveSubTab,
     setAgentChatMessages, 
     setColumnMappings, 
     setTableFilterConfig,
@@ -19,6 +22,8 @@ import {
     exportState,
     updateCollection,
     addCollection,
+    deleteCollection,
+    closeApiTab,
     updateTabResponse,
     updateTabLoading,
     setAgentPanelSize
@@ -305,6 +310,29 @@ export function useAgent() {
                             : "The extension is NOT connected or inactive. To install it, go to the [Chrome Web Store](https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf). If already installed, open browser extensions settings (chrome://extensions/), locate the Surge API Request Helper extension, verify that it says \"Enabled\" and not blocked (check if browser settings/policies customize allowed/blocking extensions), and reload the page tab to activate it."
                     };
                 }
+                case "read_console_logs": {
+                    const limit = args.limit !== undefined ? Number(args.limit) : 100;
+                    const level = args.level || "all";
+                    
+                    if (isNaN(limit) || limit <= 0) {
+                        return { error: "limit must be a positive integer." };
+                    }
+                    
+                    const logs = (typeof window !== "undefined" ? (window as any).__SURGE_CONSOLE_LOGS__ : []) || [];
+                    const filteredLogs = level === "all" 
+                        ? logs 
+                        : logs.filter((l: any) => l.type === level);
+                        
+                    // Slice the most recent logs
+                    const slicedLogs = filteredLogs.slice(-limit);
+                    return {
+                        totalCaptured: logs.length,
+                        returnedCount: slicedLogs.length,
+                        levelFilter: level,
+                        limitRequested: limit,
+                        logs: slicedLogs
+                    };
+                }
                 case "switch_tab": {
                     const tab = args.tab;
                     if (tab !== "bulk" && tab !== "api_client") {
@@ -313,10 +341,304 @@ export function useAgent() {
                     store.setState(s => ({ ...s, currentView: tab }));
                     return { success: true, message: `Switched tab to ${tab === 'api_client' ? 'API Client' : 'Bulk Runner'} successfully.` };
                 }
-                
-                // API Client Tools
+                case "select_active_item": {
+                    const results: string[] = [];
+                    let targetTabIdForSubTab = args.tabId || store.state.activeTabId;
+
+                    if (args.environmentId !== undefined) {
+                        const envId = (args.environmentId === "null" || args.environmentId === null || args.environmentId === "") ? null : args.environmentId;
+                        setActiveEnvironmentId(envId);
+                        results.push(`Environment active profile set to ${envId ? `'${envId}'` : 'none'}.`);
+                    }
+                    if (args.tabId !== undefined && args.tabId !== null) {
+                        const tab = store.state.apiTabs.find(t => t.id === args.tabId);
+                        if (!tab) {
+                            return { error: `Tab '${args.tabId}' not found.` };
+                        }
+                        setActiveTabId(args.tabId);
+                        results.push(`Active tab switched to '${args.tabId}' (${tab.name}).`);
+                    }
+                    if (args.requestId !== undefined && args.requestId !== null) {
+                        let foundRequest: any = null;
+                        for (const col of store.state.collections) {
+                            const search = (items: any[]): any => {
+                                for (const item of items) {
+                                    if (item.id === args.requestId) return item;
+                                    if (item.items) {
+                                        const found = search(item.items);
+                                        if (found) return found;
+                                    }
+                                }
+                                return null;
+                            };
+                            foundRequest = search(col.items);
+                            if (foundRequest) break;
+                        }
+                        if (!foundRequest) {
+                            return { error: `Request '${args.requestId}' not found in collections.` };
+                        }
+                        openRequestInTab(foundRequest, foundRequest.id);
+                        const openedTab = store.state.apiTabs.find(t => t.requestId === args.requestId);
+                        if (openedTab) {
+                            targetTabIdForSubTab = openedTab.id;
+                        }
+                        results.push(`Request '${foundRequest.name}' (${args.requestId}) opened in active tab.`);
+                    }
+                    if (args.activeSubTab !== undefined && args.activeSubTab !== null) {
+                        const targetId = targetTabIdForSubTab || store.state.activeTabId;
+                        if (targetId) {
+                            setActiveSubTab(targetId, args.activeSubTab);
+                            results.push(`Sub-tab switched to '${args.activeSubTab}'.`);
+                        } else {
+                            results.push(`Could not switch sub-tab because no active tab was resolved.`);
+                        }
+                    }
+                    if (results.length === 0) {
+                        return { error: "No selection parameters provided. Please provide environmentId, tabId, requestId, or activeSubTab." };
+                    }
+                    return { success: true, message: results.join(" ") };
+                }
                 case "get_collections": {
                     return store.state.collections;
+                }
+                case "modify_collections": {
+                    const operations = args.operations;
+                    if (!Array.isArray(operations) || operations.length === 0) {
+                        return { error: "operations must be a non-empty array." };
+                    }
+                    
+                    const deleteItemFromTree = (items: any[], itemId: string): { success: boolean; newItems: any[] } => {
+                        let found = false;
+                        const updated = items.filter(item => {
+                            if (item.id === itemId) {
+                                found = true;
+                                return false;
+                            }
+                            return true;
+                        }).map(item => {
+                            if (item.items) {
+                                const res = deleteItemFromTree(item.items, itemId);
+                                if (res.success) {
+                                    found = true;
+                                    return { ...item, items: res.newItems };
+                                }
+                            }
+                            return item;
+                        });
+                        return { success: found, newItems: updated };
+                    };
+
+                    const findAndRemoveItem = (collections: any[], itemId: string): { foundItem: any; newCollections: any[] } => {
+                        let foundItem: any = null;
+                        const newCollections = collections.map(col => {
+                            const searchAndRemove = (items: any[]): { success: boolean; newItems: any[] } => {
+                                let found = false;
+                                const filtered = items.filter(item => {
+                                    if (item.id === itemId) {
+                                        found = true;
+                                        foundItem = item;
+                                        return false;
+                                    }
+                                    return true;
+                                });
+                                if (found) {
+                                    return { success: true, newItems: filtered };
+                                }
+                                
+                                const mapped = items.map(item => {
+                                    if (item.items) {
+                                        const res = searchAndRemove(item.items);
+                                        if (res.success) {
+                                            found = true;
+                                            return { ...item, items: res.newItems };
+                                        }
+                                    }
+                                    return item;
+                                });
+                                return { success: found, newItems: mapped };
+                            };
+                            
+                            const res = searchAndRemove(col.items);
+                            if (res.success) {
+                                return { ...col, items: res.newItems };
+                            }
+                            return col;
+                        });
+                        return { foundItem, newCollections };
+                    };
+
+                    const results: any[] = [];
+                    for (let i = 0; i < operations.length; i++) {
+                        const op = operations[i];
+                        try {
+                            if (op.action === "create_collection") {
+                                if (!op.collectionName) {
+                                    results.push({ index: i, success: false, error: "collectionName is required to create a collection." });
+                                    continue;
+                                }
+                                const colId = op.collectionId || generateId();
+                                const newCol = {
+                                    id: colId,
+                                    name: op.collectionName,
+                                    items: [],
+                                    variables: []
+                                };
+                                addCollection(newCol);
+                                results.push({ index: i, success: true, message: `Collection '${op.collectionName}' created.`, collectionId: colId });
+                            } else if (op.action === "delete_collection") {
+                                if (!op.collectionId) {
+                                    results.push({ index: i, success: false, error: "collectionId is required to delete a collection." });
+                                    continue;
+                                }
+                                deleteCollection(op.collectionId);
+                                results.push({ index: i, success: true, message: `Collection '${op.collectionId}' deleted.` });
+                            } else if (op.action === "update_collection") {
+                                if (!op.collectionId || !op.collectionName) {
+                                    results.push({ index: i, success: false, error: "collectionId and collectionName are required to rename/update a collection." });
+                                    continue;
+                                }
+                                updateCollection(op.collectionId, { name: op.collectionName });
+                                results.push({ index: i, success: true, message: `Collection renamed to '${op.collectionName}'.` });
+                            } else if (op.action === "create_folder") {
+                                const folderName = op.folderName || "New Folder";
+                                const folderId = generateId();
+                                const newFolder = {
+                                    id: folderId,
+                                    name: folderName,
+                                    items: []
+                                };
+                                const targetParentId = op.folderId || op.collectionId;
+                                if (!targetParentId) {
+                                    results.push({ index: i, success: false, error: "collectionId or folderId is required to create a folder." });
+                                    continue;
+                                }
+                                
+                                const col = store.state.collections.find(c => c.id === targetParentId);
+                                if (col) {
+                                    updateCollection(targetParentId, { items: [...col.items, newFolder] });
+                                    results.push({ index: i, success: true, message: `Folder '${folderName}' created in collection '${col.name}'.`, folderId });
+                                } else {
+                                    let inserted = false;
+                                    store.setState(s => {
+                                        const newCols = s.collections.map(c => {
+                                            const res = addItemToCollectionTree(c.items, targetParentId, newFolder);
+                                            if (res.success) {
+                                                inserted = true;
+                                                return { ...c, items: res.newItems };
+                                            }
+                                            return c;
+                                        });
+                                        return { ...s, collections: newCols };
+                                    });
+                                    if (inserted) {
+                                        results.push({ index: i, success: true, message: `Folder '${folderName}' created inside parent folder '${targetParentId}'.`, folderId });
+                                    } else {
+                                        results.push({ index: i, success: false, error: `Parent folder or collection '${targetParentId}' not found.` });
+                                    }
+                                }
+                            } else if (op.action === "update_folder") {
+                                if (!op.folderId || !op.folderName) {
+                                    results.push({ index: i, success: false, error: "folderId and folderName are required to update/rename a folder." });
+                                    continue;
+                                }
+                                let renamed = false;
+                                store.setState(s => {
+                                    const renameInTree = (items: any[]): any[] => {
+                                        return items.map(item => {
+                                            if (item.id === op.folderId) {
+                                                renamed = true;
+                                                return { ...item, name: op.folderName };
+                                            }
+                                            if (item.items) {
+                                                return { ...item, items: renameInTree(item.items) };
+                                            }
+                                            return item;
+                                        });
+                                    };
+                                    return {
+                                        ...s,
+                                        collections: s.collections.map(c => ({
+                                            ...c,
+                                            items: renameInTree(c.items)
+                                        }))
+                                    };
+                                });
+                                if (renamed) {
+                                    results.push({ index: i, success: true, message: `Folder renamed to '${op.folderName}'.` });
+                                } else {
+                                    results.push({ index: i, success: false, error: `Folder '${op.folderId}' not found.` });
+                                }
+                            } else if (op.action === "delete_folder" || op.action === "delete_request") {
+                                const itemId = op.folderId || op.requestId;
+                                if (!itemId) {
+                                    results.push({ index: i, success: false, error: "folderId or requestId is required to delete." });
+                                    continue;
+                                }
+                                let deleted = false;
+                                store.setState(s => {
+                                    const newCols = s.collections.map(c => {
+                                        const res = deleteItemFromTree(c.items, itemId);
+                                        if (res.success) {
+                                            deleted = true;
+                                            return { ...c, items: res.newItems };
+                                        }
+                                        return c;
+                                    });
+                                    return { ...s, collections: newCols };
+                                });
+                                if (deleted) {
+                                    results.push({ index: i, success: true, message: `Item '${itemId}' successfully deleted.` });
+                                } else {
+                                    results.push({ index: i, success: false, error: `Item '${itemId}' not found in collections.` });
+                                }
+                            } else if (op.action === "move_item") {
+                                if (!op.itemId || !op.targetParentId) {
+                                    results.push({ index: i, success: false, error: "itemId and targetParentId are required to move an item." });
+                                    continue;
+                                }
+                                const { foundItem, newCollections } = findAndRemoveItem(store.state.collections, op.itemId);
+                                if (!foundItem) {
+                                    results.push({ index: i, success: false, error: `Item '${op.itemId}' not found to move.` });
+                                    continue;
+                                }
+                                
+                                // Check if target is a collection root
+                                const targetCol = newCollections.find(c => c.id === op.targetParentId);
+                                if (targetCol) {
+                                    const updated = newCollections.map(c => {
+                                        if (c.id === op.targetParentId) {
+                                            return { ...c, items: [...c.items, foundItem] };
+                                        }
+                                        return c;
+                                    });
+                                    store.setState(s => ({ ...s, collections: updated }));
+                                    results.push({ index: i, success: true, message: `Item moved to collection '${targetCol.name}' root.` });
+                                } else {
+                                    // Target must be a folder
+                                    let inserted = false;
+                                    const updated = newCollections.map(c => {
+                                        const res = addItemToCollectionTree(c.items, op.targetParentId!, foundItem);
+                                        if (res.success) {
+                                            inserted = true;
+                                            return { ...c, items: res.newItems };
+                                        }
+                                        return c;
+                                    });
+                                    if (inserted) {
+                                        store.setState(s => ({ ...s, collections: updated }));
+                                        results.push({ index: i, success: true, message: `Item moved inside folder '${op.targetParentId}'.` });
+                                    } else {
+                                        results.push({ index: i, success: false, error: `Target collection or folder '${op.targetParentId}' not found.` });
+                                    }
+                                }
+                            } else {
+                                results.push({ index: i, success: false, error: `Invalid action '${op.action}'.` });
+                            }
+                        } catch (err: any) {
+                            results.push({ index: i, success: false, error: err.message || "Unknown error occurred." });
+                        }
+                    }
+                    return results;
                 }
                 case "get_open_tabs": {
                     return store.state.apiTabs.map(t => ({
@@ -327,162 +649,250 @@ export function useAgent() {
                         isDirty: t.isDirty
                     }));
                 }
-                case "create_request": {
-                    const req = createDefaultApiRequest(args.name);
-                    req.method = args.method;
-                    req.url = args.url;
-                    
-                    openRequestInTab(req, req.id);
-                    return { success: true, request: req, message: `Request '${req.name}' created and opened in a new tab.` };
-                }
-                case "update_request": {
-                    const updates: any = {};
-                    if (args.name !== undefined) updates.name = args.name;
-                    if (args.method !== undefined) updates.method = args.method;
-                    if (args.url !== undefined) updates.url = args.url;
-                    if (args.headers !== undefined) updates.headers = args.headers;
-                    if (args.params !== undefined) updates.params = args.params;
-                    if (args.bodyMode !== undefined || args.bodyRaw !== undefined) {
-                        updates.body = { mode: args.bodyMode || "none", raw: args.bodyRaw || "" };
+                case "save_requests": {
+                    const requests = args.requests;
+                    if (!Array.isArray(requests) || requests.length === 0) {
+                        return { error: "requests must be a non-empty array." };
                     }
-                    saveCollectionRequest(args.requestId, updates);
-                    store.setState(s => {
-                        const newTabs = s.apiTabs.map(t => {
-                            if (t.requestId === args.requestId || t.id === args.requestId) {
-                                return {
-                                    ...t,
-                                    name: updates.name !== undefined ? updates.name : t.name,
-                                    request: { ...t.request, ...updates }
-                                };
-                            }
-                            return t;
-                        });
-                        return { ...s, apiTabs: newTabs };
-                    });
-                    return { success: true, message: `Request '${args.requestId}' updated in collection.` };
-                }
-                case "save_tab_request": {
-                    const tab = store.state.apiTabs.find(t => t.id === args.tabId);
-                    if (!tab) return { error: `Tab '${args.tabId}' not found.` };
-
-                    const exists = tab.requestId && store.state.collections.some(col => {
-                        const search = (items: any[]): boolean => {
-                            return items.some(item => {
-                                if (item.id === tab.requestId) return true;
-                                if (item.items) return search(item.items);
-                                return false;
-                            });
-                        };
-                        return search(col.items);
-                    });
-                    const isNew = !tab.requestId || !exists;
-
-                    if (!isNew) {
-                        saveCollectionRequest(tab.requestId!, tab.request);
-                        store.setState(s => {
-                            const newTabs = s.apiTabs.map(t => {
-                                if (t.id === args.tabId) {
-                                    return { ...t, isDirty: false };
-                                }
-                                return t;
-                            });
-                            return { ...s, apiTabs: newTabs };
-                        });
-                        return { success: true, message: `Request '${tab.requestId}' saved.` };
-                    } else {
-                        let targetColId = args.collectionId;
-                        if (targetColId && !store.state.collections.some(c => c.id === targetColId)) {
-                            targetColId = undefined;
-                        }
-
-                        const newReqId = tab.requestId || generateId();
-                        const requestName = args.name || tab.name;
-                        const newRequest = {
-                            ...tab.request,
-                            id: newReqId,
-                            name: requestName
-                        };
-
-                        if (args.newCollectionName) {
-                            const newColId = generateId();
-                            const newlyCreatedCol = {
-                                id: newColId,
-                                name: args.newCollectionName,
-                                items: [newRequest],
-                                variables: []
-                            };
-                            addCollection(newlyCreatedCol);
-                            
-                            store.setState(s => {
-                                const newTabs = s.apiTabs.map(t => {
-                                    if (t.id === args.tabId) {
-                                        return { ...t, requestId: newReqId, name: requestName, isDirty: false };
+                    const results: any[] = [];
+                    for (let i = 0; i < requests.length; i++) {
+                        const reqArgs = requests[i];
+                        try {
+                            if (reqArgs.action === "create") {
+                                const req = createDefaultApiRequest(reqArgs.name || "New Request");
+                                req.method = reqArgs.method || "GET";
+                                req.url = reqArgs.url || "";
+                                if (reqArgs.preRequestScript !== undefined) req.preRequestScript = reqArgs.preRequestScript;
+                                if (reqArgs.testScript !== undefined) req.testScript = reqArgs.testScript;
+                                openRequestInTab(req, req.id);
+                                if (reqArgs.activeSubTab !== undefined) {
+                                    const createdTab = store.state.apiTabs.find(t => t.requestId === req.id);
+                                    if (createdTab) {
+                                        setActiveSubTab(createdTab.id, reqArgs.activeSubTab);
                                     }
-                                    return t;
-                                });
-                                return { ...s, apiTabs: newTabs };
-                            });
-
-                            return { success: true, message: `Request saved as '${requestName}' in new collection '${args.newCollectionName}'.` };
-                        } else if (!targetColId) {
-                            if (store.state.collections.length > 0) {
-                                targetColId = store.state.collections[0].id;
-                            } else {
-                                const newColId = generateId();
-                                const newlyCreatedCol = {
-                                    id: newColId,
-                                    name: "Default Collection",
-                                    items: [newRequest],
-                                    variables: []
-                                };
-                                addCollection(newlyCreatedCol);
-                                
+                                }
+                                results.push({ index: i, success: true, message: `Request '${req.name}' created and opened in a new tab.` });
+                            } else if (reqArgs.action === "update") {
+                                if (!reqArgs.requestId) {
+                                    results.push({ index: i, success: false, error: "requestId is required for update action." });
+                                    continue;
+                                }
+                                const updates: any = {};
+                                if (reqArgs.name !== undefined) updates.name = reqArgs.name;
+                                if (reqArgs.method !== undefined) updates.method = reqArgs.method;
+                                if (reqArgs.url !== undefined) updates.url = reqArgs.url;
+                                if (reqArgs.headers !== undefined) updates.headers = reqArgs.headers;
+                                if (reqArgs.params !== undefined) updates.params = reqArgs.params;
+                                if (reqArgs.bodyMode !== undefined || reqArgs.bodyRaw !== undefined) {
+                                    updates.body = { mode: reqArgs.bodyMode || "none", raw: reqArgs.bodyRaw || "" };
+                                }
+                                if (reqArgs.preRequestScript !== undefined) updates.preRequestScript = reqArgs.preRequestScript;
+                                if (reqArgs.testScript !== undefined) updates.testScript = reqArgs.testScript;
+                                saveCollectionRequest(reqArgs.requestId, updates);
                                 store.setState(s => {
                                     const newTabs = s.apiTabs.map(t => {
-                                        if (t.id === args.tabId) {
-                                            return { ...t, requestId: newReqId, name: requestName, isDirty: false };
+                                        if (t.requestId === reqArgs.requestId || t.id === reqArgs.requestId) {
+                                            return {
+                                                ...t,
+                                                name: updates.name !== undefined ? updates.name : t.name,
+                                                request: { ...t.request, ...updates }
+                                            };
                                         }
                                         return t;
                                     });
                                     return { ...s, apiTabs: newTabs };
                                 });
-
-                                return { success: true, message: `Request saved as '${requestName}' in new collection 'Default Collection'.` };
-                            }
-                        }
-
-                        const col = store.state.collections.find(c => c.id === targetColId) || store.state.collections[store.state.collections.length - 1];
-                        if (!col) return { error: `Collection '${targetColId}' not found.` };
-
-                        let updatedItems = [];
-                        const targetFolderId = args.folderId || targetColId;
-
-                        if (targetFolderId === targetColId) {
-                            updatedItems = [...col.items, newRequest];
-                        } else {
-                            const res = addItemToCollectionTree(col.items, targetFolderId, newRequest);
-                            if (res.success) {
-                                updatedItems = res.newItems;
-                            } else {
-                                // Folder not found. Save to collection root as fallback
-                                updatedItems = [...col.items, newRequest];
-                            }
-                        }
-
-                        updateCollection(targetColId, { items: updatedItems });
-
-                        store.setState(s => {
-                            const newTabs = s.apiTabs.map(t => {
-                                if (t.id === args.tabId) {
-                                    return { ...t, requestId: newReqId, name: requestName, isDirty: false };
+                                
+                                let targetTab = store.state.apiTabs.find(t => t.requestId === reqArgs.requestId || t.id === reqArgs.requestId);
+                                if (!targetTab && (reqArgs.activateTab || reqArgs.activeSubTab !== undefined)) {
+                                    let foundRequest: any = null;
+                                    for (const col of store.state.collections) {
+                                        const search = (items: any[]): any => {
+                                            for (const item of items) {
+                                                if (item.id === reqArgs.requestId) return item;
+                                                if (item.items) {
+                                                    const found = search(item.items);
+                                                    if (found) return found;
+                                                }
+                                            }
+                                            return null;
+                                        };
+                                        foundRequest = search(col.items);
+                                        if (foundRequest) break;
+                                    }
+                                    if (foundRequest) {
+                                        openRequestInTab(foundRequest, foundRequest.id);
+                                        targetTab = store.state.apiTabs.find(t => t.requestId === reqArgs.requestId);
+                                    }
                                 }
-                                return t;
-                            });
-                            return { ...s, apiTabs: newTabs };
-                        });
+                                
+                                if (targetTab) {
+                                    if (reqArgs.activateTab || reqArgs.activeSubTab !== undefined) {
+                                        setActiveTabId(targetTab.id);
+                                    }
+                                    if (reqArgs.activeSubTab !== undefined) {
+                                        setActiveSubTab(targetTab.id, reqArgs.activeSubTab);
+                                    }
+                                }
+                                results.push({ index: i, success: true, message: `Request '${reqArgs.requestId}' updated in collection.` });
+                            } else if (reqArgs.action === "save_tab") {
+                                if (!reqArgs.tabId) {
+                                    results.push({ index: i, success: false, error: "tabId is required for save_tab action." });
+                                    continue;
+                                }
+                                const tab = store.state.apiTabs.find(t => t.id === reqArgs.tabId);
+                                if (!tab) {
+                                    results.push({ index: i, success: false, error: `Tab '${reqArgs.tabId}' not found.` });
+                                    continue;
+                                }
 
-                        return { success: true, message: `Request saved as '${requestName}' in collection '${col.name}'.` };
+                                const exists = tab.requestId && store.state.collections.some(col => {
+                                    const search = (items: any[]): boolean => {
+                                        return items.some(item => {
+                                            if (item.id === tab.requestId) return true;
+                                            if (item.items) return search(item.items);
+                                            return false;
+                                        });
+                                    };
+                                    return search(col.items);
+                                });
+                                const isNew = !tab.requestId || !exists;
+
+                                if (!isNew) {
+                                    saveCollectionRequest(tab.requestId!, tab.request);
+                                    store.setState(s => {
+                                        const newTabs = s.apiTabs.map(t => {
+                                            if (t.id === reqArgs.tabId) {
+                                                return { ...t, isDirty: false };
+                                            }
+                                            return t;
+                                        });
+                                        return { ...s, apiTabs: newTabs };
+                                    });
+                                    results.push({ index: i, success: true, message: `Request '${tab.requestId}' saved.` });
+                                } else {
+                                    let targetColId = reqArgs.collectionId;
+                                    if (targetColId && !store.state.collections.some(c => c.id === targetColId)) {
+                                        targetColId = undefined;
+                                    }
+
+                                    const newReqId = tab.requestId || generateId();
+                                    const requestName = reqArgs.name || tab.name;
+                                    const newRequest = {
+                                        ...tab.request,
+                                        id: newReqId,
+                                        name: requestName
+                                    };
+
+                                    if (reqArgs.newCollectionName) {
+                                        const newColId = generateId();
+                                        const newlyCreatedCol = {
+                                            id: newColId,
+                                            name: reqArgs.newCollectionName,
+                                            items: [newRequest],
+                                            variables: []
+                                        };
+                                        addCollection(newlyCreatedCol);
+                                        
+                                        store.setState(s => {
+                                            const newTabs = s.apiTabs.map(t => {
+                                                if (t.id === reqArgs.tabId) {
+                                                    return { ...t, requestId: newReqId, name: requestName, isDirty: false };
+                                                }
+                                                return t;
+                                            });
+                                            return { ...s, apiTabs: newTabs };
+                                        });
+
+                                        results.push({ index: i, success: true, message: `Request saved as '${requestName}' in new collection '${reqArgs.newCollectionName}'.` });
+                                    } else {
+                                        if (!targetColId) {
+                                            if (store.state.collections.length > 0) {
+                                                targetColId = store.state.collections[0].id;
+                                            } else {
+                                                const newColId = generateId();
+                                                const newlyCreatedCol = {
+                                                    id: newColId,
+                                                    name: "Default Collection",
+                                                    items: [newRequest],
+                                                    variables: []
+                                                };
+                                                addCollection(newlyCreatedCol);
+                                                
+                                                store.setState(s => {
+                                                    const newTabs = s.apiTabs.map(t => {
+                                                        if (t.id === reqArgs.tabId) {
+                                                            return { ...t, requestId: newReqId, name: requestName, isDirty: false };
+                                                        }
+                                                        return t;
+                                                    });
+                                                    return { ...s, apiTabs: newTabs };
+                                                });
+
+                                                results.push({ index: i, success: true, message: `Request saved as '${requestName}' in new collection 'Default Collection'.` });
+                                                continue;
+                                            }
+                                        }
+
+                                        const col = store.state.collections.find(c => c.id === targetColId) || store.state.collections[store.state.collections.length - 1];
+                                        if (!col) {
+                                            results.push({ index: i, success: false, error: `Collection '${targetColId}' not found.` });
+                                            continue;
+                                        }
+
+                                        let updatedItems = [];
+                                        const targetFolderId = reqArgs.folderId || targetColId;
+
+                                        if (targetFolderId === targetColId) {
+                                            updatedItems = [...col.items, newRequest];
+                                        } else {
+                                            const res = addItemToCollectionTree(col.items, targetFolderId, newRequest);
+                                            if (res.success) {
+                                                updatedItems = res.newItems;
+                                            } else {
+                                                updatedItems = [...col.items, newRequest];
+                                            }
+                                        }
+
+                                        updateCollection(targetColId, { items: updatedItems });
+
+                                        store.setState(s => {
+                                            const newTabs = s.apiTabs.map(t => {
+                                                if (t.id === reqArgs.tabId) {
+                                                    return { ...t, requestId: newReqId, name: requestName, isDirty: false };
+                                                }
+                                                return t;
+                                            });
+                                            return { ...s, apiTabs: newTabs };
+                                        });
+
+                                        results.push({ index: i, success: true, message: `Request saved as '${requestName}' in collection '${col.name}'.` });
+                                    }
+                                }
+                                if (reqArgs.activateTab || reqArgs.activeSubTab !== undefined) {
+                                    setActiveTabId(reqArgs.tabId);
+                                }
+                                if (reqArgs.activeSubTab !== undefined) {
+                                    setActiveSubTab(reqArgs.tabId, reqArgs.activeSubTab);
+                                }
+                            } else if (reqArgs.action === "close_tab") {
+                                if (!reqArgs.tabId) {
+                                    results.push({ index: i, success: false, error: "tabId is required for close_tab action." });
+                                    continue;
+                                }
+                                const tab = store.state.apiTabs.find(t => t.id === reqArgs.tabId);
+                                if (!tab) {
+                                    results.push({ index: i, success: false, error: `Tab '${reqArgs.tabId}' not found.` });
+                                    continue;
+                                }
+                                closeApiTab(reqArgs.tabId);
+                                results.push({ index: i, success: true, message: `Tab '${reqArgs.tabId}' closed.` });
+                            }
+                        } catch (err: any) {
+                            results.push({ index: i, success: false, error: err.message || "Unknown error occurred." });
+                        }
                     }
+                    return results;
                 }
                 case "send_request": {
                     const tabId = args.tabId || store.state.activeTabId;
@@ -971,7 +1381,8 @@ export function useAgent() {
         }
 
         const state = store.state;
-        const snapshot = {
+        const snapshot = JSON.parse(JSON.stringify({
+            // Bulk Runner state
             templates: state.templates,
             maxRetries: state.maxRetries,
             retryStatusCodes: state.retryStatusCodes,
@@ -983,8 +1394,18 @@ export function useAgent() {
             tableFilterConfig: state.tableFilterConfig,
             fileData: state.fileData,
             originalData: state.originalData,
-            results: state.results
-        };
+            results: state.results,
+            fileName: state.fileName,
+            activeTemplateId: state.activeTemplateId,
+
+            // API Client state
+            currentView: state.currentView,
+            collections: state.collections,
+            environments: state.environments,
+            activeEnvironmentId: state.activeEnvironmentId,
+            apiTabs: state.apiTabs,
+            activeTabId: state.activeTabId,
+        }));
 
         const newUserMessage: Message = {
             id: `msg_${Date.now()}`,
@@ -998,7 +1419,8 @@ export function useAgent() {
         setIsLoading(true);
 
         const activeHistory = [...updatedHistory];
-        let maxIterations = 6;
+        let maxIterations = activeProfile.maxExecutionLimit !== undefined ? activeProfile.maxExecutionLimit : 6;
+        const isInfinite = maxIterations === 0;
 
         // Instantiate AbortController for cancellation
         const controller = new AbortController();
@@ -1006,7 +1428,7 @@ export function useAgent() {
         const signal = controller.signal;
 
         try {
-            while (maxIterations > 0) {
+            while (isInfinite || maxIterations > 0) {
                 if (signal.aborted) {
                     throw new DOMException("The user aborted a request.", "AbortError");
                 }
@@ -1054,7 +1476,9 @@ export function useAgent() {
                         setMessages([...activeHistory]);
                     }
 
-                    maxIterations--;
+                    if (!isInfinite) {
+                        maxIterations--;
+                    }
                 } else {
                     // LLM produced a final text answer
                     const assistantMessage: Message = {
@@ -1069,7 +1493,7 @@ export function useAgent() {
                 }
             }
 
-            if (maxIterations === 0) {
+            if (!isInfinite && maxIterations === 0) {
                 toast.warning("Agent loop hit maximum function execution limit.");
             }
         } catch (e: any) {
@@ -1121,7 +1545,15 @@ export function useAgent() {
                 finalState.tableFilterConfig !== snapshot.tableFilterConfig ||
                 finalState.fileData !== snapshot.fileData ||
                 finalState.originalData !== snapshot.originalData ||
-                finalState.results !== snapshot.results;
+                finalState.results !== snapshot.results ||
+                finalState.fileName !== snapshot.fileName ||
+                finalState.activeTemplateId !== snapshot.activeTemplateId ||
+                finalState.collections !== snapshot.collections ||
+                finalState.environments !== snapshot.environments ||
+                finalState.activeEnvironmentId !== snapshot.activeEnvironmentId ||
+                finalState.apiTabs !== snapshot.apiTabs ||
+                finalState.activeTabId !== snapshot.activeTabId ||
+                finalState.currentView !== snapshot.currentView;
 
             if (hasModified) {
                 saveCheckpoint(newUserMessage.id, snapshot).catch(err => {
@@ -1201,7 +1633,8 @@ export function useAgent() {
             const checkpoint = await loadCheckpoint(messageId);
             if (checkpoint) {
                 setRevertCheckpointData(checkpoint);
-                setHasCheckpoint(true);
+                const hasDiscrepancy = hasStateDiscrepancy(store.state, checkpoint);
+                setHasCheckpoint(hasDiscrepancy);
             } else {
                 setRevertCheckpointData(null);
                 setHasCheckpoint(false);
@@ -1223,6 +1656,7 @@ export function useAgent() {
             if (shouldRevertModification && revertCheckpointData) {
                 store.setState(s => ({
                     ...s,
+                    // Bulk Runner state
                     templates: revertCheckpointData.templates,
                     maxRetries: revertCheckpointData.maxRetries,
                     retryStatusCodes: revertCheckpointData.retryStatusCodes,
@@ -1234,7 +1668,17 @@ export function useAgent() {
                     tableFilterConfig: revertCheckpointData.tableFilterConfig,
                     fileData: revertCheckpointData.fileData,
                     originalData: revertCheckpointData.originalData,
-                    results: revertCheckpointData.results
+                    results: revertCheckpointData.results,
+                    fileName: revertCheckpointData.fileName !== undefined ? revertCheckpointData.fileName : s.fileName,
+                    activeTemplateId: revertCheckpointData.activeTemplateId !== undefined ? revertCheckpointData.activeTemplateId : s.activeTemplateId,
+
+                    // API Client state
+                    currentView: revertCheckpointData.currentView !== undefined ? revertCheckpointData.currentView : s.currentView,
+                    collections: revertCheckpointData.collections !== undefined ? revertCheckpointData.collections : s.collections,
+                    environments: revertCheckpointData.environments !== undefined ? revertCheckpointData.environments : s.environments,
+                    activeEnvironmentId: revertCheckpointData.activeEnvironmentId !== undefined ? revertCheckpointData.activeEnvironmentId : s.activeEnvironmentId,
+                    apiTabs: revertCheckpointData.apiTabs !== undefined ? revertCheckpointData.apiTabs : s.apiTabs,
+                    activeTabId: revertCheckpointData.activeTabId !== undefined ? revertCheckpointData.activeTabId : s.activeTabId,
                 }));
                 toast.success("Workspace state reverted to checkpoint");
             }
@@ -1296,6 +1740,43 @@ export function useAgent() {
     };
 }
 
+function hasStateDiscrepancy(currentState: any, checkpoint: any): boolean {
+    if (!checkpoint) return false;
+    
+    const isDifferent = (a: any, b: any) => {
+        if (a === b) return false;
+        if (!a !== !b) return true;
+        try {
+            return JSON.stringify(a) !== JSON.stringify(b);
+        } catch (e) {
+            return true;
+        }
+    };
+
+    return (
+        isDifferent(currentState.templates, checkpoint.templates) ||
+        currentState.maxRetries !== checkpoint.maxRetries ||
+        currentState.retryStatusCodes !== checkpoint.retryStatusCodes ||
+        currentState.stopOnFailure !== checkpoint.stopOnFailure ||
+        currentState.throttleDelayMs !== checkpoint.throttleDelayMs ||
+        currentState.rowIterations !== checkpoint.rowIterations ||
+        currentState.concurrency !== checkpoint.concurrency ||
+        isDifferent(currentState.columnMappings, checkpoint.columnMappings) ||
+        isDifferent(currentState.tableFilterConfig, checkpoint.tableFilterConfig) ||
+        isDifferent(currentState.fileData, checkpoint.fileData) ||
+        isDifferent(currentState.originalData, checkpoint.originalData) ||
+        isDifferent(currentState.results, checkpoint.results) ||
+        currentState.fileName !== checkpoint.fileName ||
+        currentState.activeTemplateId !== checkpoint.activeTemplateId ||
+        isDifferent(currentState.collections, checkpoint.collections) ||
+        isDifferent(currentState.environments, checkpoint.environments) ||
+        currentState.activeEnvironmentId !== checkpoint.activeEnvironmentId ||
+        isDifferent(currentState.apiTabs, checkpoint.apiTabs) ||
+        currentState.activeTabId !== checkpoint.activeTabId ||
+        currentState.currentView !== checkpoint.currentView
+    );
+}
+
 function areProfilesEqual(a: AgentProfile[], b: AgentProfile[]) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
@@ -1308,7 +1789,9 @@ function areProfilesEqual(a: AgentProfile[], b: AgentProfile[]) {
             pa.apiKey !== pb.apiKey ||
             pa.endpoint !== pb.endpoint ||
             pa.model !== pb.model ||
-            pa.enableJsonFallback !== pb.enableJsonFallback
+            pa.enableJsonFallback !== pb.enableJsonFallback ||
+            pa.bypassCorsWithExtension !== pb.bypassCorsWithExtension ||
+            pa.maxExecutionLimit !== pb.maxExecutionLimit
         ) {
             return false;
         }
