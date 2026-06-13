@@ -10,6 +10,7 @@ export interface AgentConfig {
     endpoint: string;
     model: string;
     enableJsonFallback?: boolean;
+    bypassCorsWithExtension?: boolean;
 }
 
 export function mapOpenAiSchemaToGemini(schema: any): any {
@@ -114,31 +115,50 @@ export const callLLM = async (
 
         const isExtensionActive = typeof document !== "undefined" &&
             document.documentElement.getAttribute("data-surge-extension-active") === "true";
-        let extensionRuleId: number | null = null;
+        
+        let shouldProxy = false;
         if (isExtensionActive) {
-            try {
-                let urlFilter = "*";
+            if (config.bypassCorsWithExtension !== undefined) {
+                shouldProxy = config.bypassCorsWithExtension;
+            } else {
+                let hostname = "";
                 try {
                     const parsed = new URL(apiTargetUrl);
-                    urlFilter = parsed.hostname;
+                    hostname = parsed.hostname;
                 } catch (e) {}
-
-                const res = await sendToExtension({
-                    action: "setupRequestRules",
-                    urlFilter,
-                    headers: [{ name: "Content-Type", value: "application/json" }],
-                    initiatorOrigin: window.location.origin
-                });
-                if (res && res.success) {
-                    extensionRuleId = res.ruleId;
-                }
-            } catch (e) {
-                console.warn("Agent adapter failed to setup extension rules for Gemini:", e);
+                shouldProxy = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) || hostname === "localhost" || hostname.endsWith(".local");
             }
         }
 
         let response;
-        try {
+        if (shouldProxy) {
+            const bodyStr = JSON.stringify({
+                contents: geminiContents,
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+                tools: geminiTools
+            });
+            const res = await sendToExtension({
+                action: "fetchProxy",
+                url: apiTargetUrl,
+                options: {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: bodyStr
+                }
+            }, 90000);
+            if (res && res.success) {
+                response = {
+                    ok: res.status >= 200 && res.status < 300,
+                    status: res.status,
+                    text: async () => res.body,
+                    json: async () => JSON.parse(res.body)
+                };
+            } else {
+                throw new Error(res?.error || "Failed to communicate with Gemini API via extension proxy.");
+            }
+        } else {
             response = await fetch(apiTargetUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -151,17 +171,6 @@ export const callLLM = async (
                 }),
                 signal: abortSignal
             });
-        } finally {
-            if (extensionRuleId !== null) {
-                try {
-                    await sendToExtension({
-                        action: "clearRequestRules",
-                        ruleId: extensionRuleId
-                    });
-                } catch (e) {
-                    console.warn("Agent adapter failed to clear extension rules for Gemini:", e);
-                }
-            }
         }
 
         if (!response.ok) {
@@ -324,36 +333,48 @@ export const callLLM = async (
 
         const isExtensionActive = typeof document !== "undefined" &&
             document.documentElement.getAttribute("data-surge-extension-active") === "true";
-        let extensionRuleId: number | null = null;
+        
+        let shouldProxy = false;
         if (isExtensionActive) {
-            try {
-                let urlFilter = "*";
+            if (config.bypassCorsWithExtension !== undefined) {
+                shouldProxy = config.bypassCorsWithExtension;
+            } else {
+                let hostname = "";
                 try {
                     const parsed = new URL(apiTargetUrl);
-                    urlFilter = parsed.hostname;
+                    hostname = parsed.hostname;
                 } catch (e) {}
-
-                const extHeaders = Object.entries(openaiHeaders).map(([key, value]) => ({
-                    name: key,
-                    value: String(value)
-                }));
-
-                const res = await sendToExtension({
-                    action: "setupRequestRules",
-                    urlFilter,
-                    headers: extHeaders,
-                    initiatorOrigin: window.location.origin
-                });
-                if (res && res.success) {
-                    extensionRuleId = res.ruleId;
-                }
-            } catch (e) {
-                console.warn("Agent adapter failed to setup extension rules for Custom/OpenAI:", e);
+                shouldProxy = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) || hostname === "localhost" || hostname.endsWith(".local");
             }
         }
 
         let response;
-        try {
+        if (shouldProxy) {
+            const bodyStr = JSON.stringify({
+                model,
+                messages: openaiMessages,
+                tools: agentTools
+            });
+            const res = await sendToExtension({
+                action: "fetchProxy",
+                url: apiTargetUrl,
+                options: {
+                    method: "POST",
+                    headers: openaiHeaders,
+                    body: bodyStr
+                }
+            }, 90000);
+            if (res && res.success) {
+                response = {
+                    ok: res.status >= 200 && res.status < 300,
+                    status: res.status,
+                    text: async () => res.body,
+                    json: async () => JSON.parse(res.body)
+                };
+            } else {
+                throw new Error(res?.error || `Failed to communicate with ${provider === "openai" ? "OpenAI" : "Custom"} API via extension proxy.`);
+            }
+        } else {
             response = await fetch(apiTargetUrl, {
                 method: "POST",
                 headers: openaiHeaders,
@@ -364,17 +385,6 @@ export const callLLM = async (
                 }),
                 signal: abortSignal
             });
-        } finally {
-            if (extensionRuleId !== null) {
-                try {
-                    await sendToExtension({
-                        action: "clearRequestRules",
-                        ruleId: extensionRuleId
-                    });
-                } catch (e) {
-                    console.warn("Agent adapter failed to clear extension rules for Custom/OpenAI:", e);
-                }
-            }
         }
 
         if (!response.ok) {

@@ -67,6 +67,113 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // async reply
   }
 
+  // Handle fetchProxy from content script (two-way message relay)
+  if (message.source === "surge-content" && message.payload && message.payload.action === "fetchProxy") {
+    const requestId = message.requestId;
+    const tabId = sender.tab ? sender.tab.id : null;
+    let { url, options } = message.payload;
+
+    // Resolve localhost to 127.0.0.1 to avoid DNS resolution hanging in MV3 Service Workers
+    if (url) {
+      try {
+        const urlObj = new URL(url);
+        if (urlObj.hostname.toLowerCase() === "localhost") {
+          urlObj.hostname = "127.0.0.1";
+          url = urlObj.toString();
+        }
+      } catch (e) {}
+    }
+
+    console.log("[fetchProxy] URL:", url, "options:", options);
+
+    const runFetch = async () => {
+      let responsePayload;
+      try {
+        if (!url) {
+          throw new Error("URL is empty or undefined.");
+        }
+
+        const res = await fetch(url, options);
+        const text = await res.text();
+        responsePayload = {
+          success: true,
+          status: res.status,
+          statusText: res.statusText,
+          body: text
+        };
+
+      } catch (err) {
+        console.error("[fetchProxy] fetch failed:", err);
+        responsePayload = {
+          success: false,
+          error: err.message || String(err)
+        };
+      }
+
+      // Send the response back to the specific tab that initiated the request
+      if (tabId !== null) {
+        try {
+          chrome.tabs.sendMessage(tabId, {
+            source: "surge-background",
+            requestId: requestId,
+            payload: responsePayload
+          });
+        } catch (sendErr) {
+          console.error("[fetchProxy] failed to send message back to tab:", sendErr);
+        }
+      }
+    };
+
+    runFetch();
+    return false; // No callback needed for this action
+  }
+
+  // Handle fetchProxy direct callback fallback (e.g. from old content script)
+  if (message.action === "fetchProxy") {
+    let { url, options } = message;
+
+    // Resolve localhost to 127.0.0.1 to avoid DNS resolution hanging in MV3 Service Workers
+    if (url) {
+      try {
+        const urlObj = new URL(url);
+        if (urlObj.hostname.toLowerCase() === "localhost") {
+          urlObj.hostname = "127.0.0.1";
+          url = urlObj.toString();
+        }
+      } catch (e) {}
+    }
+
+    console.log("[fetchProxy callback fallback] URL:", url, "options:", options);
+
+    const runFetchFallback = async () => {
+      let responsePayload;
+      try {
+        if (!url) {
+          throw new Error("URL is empty or undefined.");
+        }
+
+        const res = await fetch(url, options);
+        const text = await res.text();
+        responsePayload = {
+          success: true,
+          status: res.status,
+          statusText: res.statusText,
+          body: text
+        };
+      } catch (err) {
+        console.error("[fetchProxy callback fallback] fetch failed:", err);
+        responsePayload = {
+          success: false,
+          error: err.message || String(err)
+        };
+      }
+      sendResponse(responsePayload);
+    };
+
+    runFetchFallback();
+    return true; // Keep message channel open for sendResponse
+  }
+
   if (message.action === "clearRequestRules") {
     const { ruleId } = message;
 

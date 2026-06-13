@@ -225,6 +225,37 @@ export function AgentSettingsView({
                         </div>
                     </div>
 
+                    {/* Bypass CORS via Extension Checkbox */}
+                    <div className="flex items-start space-x-2 pt-1">
+                        <input
+                            type="checkbox"
+                            id="bypassCorsWithExtension"
+                            checked={selectedProfile.bypassCorsWithExtension !== undefined ? selectedProfile.bypassCorsWithExtension : (
+                                (() => {
+                                    let hostname = "";
+                                    try {
+                                        const parsed = new URL(selectedProfile.endpoint);
+                                        hostname = parsed.hostname;
+                                    } catch (e) {}
+                                    return /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) || hostname === "localhost" || hostname.endsWith(".local");
+                                })()
+                            )}
+                            onChange={(e) => handleUpdateField("bypassCorsWithExtension", e.target.checked)}
+                            className="w-4 h-4 mt-0.5 rounded border-white/10 bg-neutral-900 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-neutral-950 cursor-pointer"
+                        />
+                        <div className="grid gap-1.5 leading-none">
+                            <label
+                                htmlFor="bypassCorsWithExtension"
+                                className="text-xs font-semibold text-white/80 cursor-pointer select-none"
+                            >
+                                Bypass CORS via Extension
+                            </label>
+                            <p className="text-[10px] text-white/40 leading-normal">
+                                Route LLM requests through the helper extension to bypass browser CORS restrictions (auto-enabled for local hosts/addresses).
+                            </p>
+                        </div>
+                    </div>
+
                     {/* API Key */}
                     {selectedProfile.provider !== "custom" && (
                         <div className="space-y-2">

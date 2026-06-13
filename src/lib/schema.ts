@@ -191,6 +191,7 @@ export interface AgentProfile {
   endpoint: string;
   model: string;
   enableJsonFallback?: boolean;
+  bypassCorsWithExtension?: boolean;
 }
 
 export interface Message {
