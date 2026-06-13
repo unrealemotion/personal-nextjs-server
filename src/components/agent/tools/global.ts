@@ -61,8 +61,8 @@ check_extension_connection
      - If the tool returns connected: false, you MUST instruct the user to access the [Chrome Web Store](https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf) to install/enable it.
      - Share the following steps to install and enable:
        1. Access the [Chrome Web Store](https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf) extension page.
-       2. Click "Add to Chrome" to install the extension.
-       3. Open Chrome Extension settings (chrome://extensions/), verify that the "Surge API Request Helper" extension is toggled to Enabled and not blocked by policies.
+       2. Click "Add to Chrome" (or "Get" if using Microsoft Edge) to install the extension.
+       3. Open extension settings (chrome://extensions/ or edge://extensions/), verify that the "Surge API Request Helper" extension is toggled to Enabled and not blocked by policies.
        4. Reload the current page tab to activate the connection.
 
 switch_tab

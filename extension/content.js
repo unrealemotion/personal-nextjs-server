@@ -1,5 +1,10 @@
 // Expose extension presence to the page
 document.documentElement.setAttribute("data-surge-extension-active", "true");
+try {
+  document.documentElement.setAttribute("data-surge-extension-version", chrome.runtime.getManifest().version);
+} catch (e) {
+  console.warn("Failed to set extension version:", e);
+}
 
 // Map of active request IDs to resolve responses from the background script
 const pendingRequests = new Map();
@@ -21,6 +26,27 @@ window.addEventListener("message", (event) => {
       payload: { success: false, error: "Extension reloaded. Please refresh the page to reconnect." },
       relay: true
     }, "*");
+    return;
+  }
+
+  // Handle direct version check
+  if (data.payload && data.payload.action === "getVersion") {
+    try {
+      window.postMessage({
+        source: "surge-extension",
+        requestId: data.requestId,
+        payload: { success: true, version: chrome.runtime.getManifest().version },
+        relay: true
+      }, "*");
+    } catch (err) {
+      console.error("Failed to respond to getVersion query:", err);
+      window.postMessage({
+        source: "surge-extension",
+        requestId: data.requestId,
+        payload: { success: false, error: err.message || String(err) },
+        relay: true
+      }, "*");
+    }
     return;
   }
 

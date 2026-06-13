@@ -14,7 +14,6 @@ import {
   Table as TableIcon, 
   Download, 
   Trash2, 
-  Sparkles, 
   Eye, 
   ChevronLeft, 
   ChevronRight, 

@@ -9,7 +9,6 @@ import {
   Table,
   ArrowRightLeft,
   Layers,
-  Sparkles,
   Command,
   FileSpreadsheet,
   Split,

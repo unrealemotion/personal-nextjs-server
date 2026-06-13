@@ -13,26 +13,30 @@ export function EtherealAiSymbol({ className = "w-6 h-6" }: EtherealAiSymbolProp
             className={`${className} overflow-visible`}
         >
             <defs>
-                {/* Core radial gradient */}
-                <radialGradient id="aiCoreGrad" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-                    <stop offset="0%" stopColor="#818cf8" stopOpacity="1" /> {/* Indigo-400 */}
-                    <stop offset="40%" stopColor="#c084fc" stopOpacity="0.8" /> {/* Purple-400 */}
-                    <stop offset="100%" stopColor="#6366f1" stopOpacity="0" /> {/* Indigo-500 */}
-                </radialGradient>
-                
-                {/* Ring linear gradients */}
-                <linearGradient id="aiRingGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#6366f1" />
-                    <stop offset="100%" stopColor="#d946ef" />
+                <linearGradient id="etherealGradientBrilliant" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#ffffff" /> 
+                    <stop offset="25%" stopColor="#e879f9" /> {/* Fuchsia 400 */}
+                    <stop offset="50%" stopColor="#22d3ee" /> {/* Cyan 400 */}
+                    <stop offset="100%" stopColor="#818cf8" /> {/* Indigo 400 */}
                 </linearGradient>
-                <linearGradient id="aiRingGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="#38bdf8" />
-                    <stop offset="100%" stopColor="#818cf8" />
+                <linearGradient id="etherealGradientCore" x1="100%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stopColor="#ffffff" />
+                    <stop offset="50%" stopColor="#a78bfa" /> {/* Purple 400 */}
+                    <stop offset="100%" stopColor="#38bdf8" /> {/* Sky 400 */}
                 </linearGradient>
-                
-                {/* Glow filter */}
-                <filter id="aiGlow" x="-50%" y="-50%" width="200%" height="200%">
-                    <feGaussianBlur stdDeviation="6" result="blur" />
+                <filter id="etherealGlowBright" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="6" result="blur1" />
+                    <feGaussianBlur stdDeviation="12" result="blur2" />
+                    <feGaussianBlur stdDeviation="24" result="blur3" />
+                    <feMerge>
+                        <feMergeNode in="blur3" />
+                        <feMergeNode in="blur2" />
+                        <feMergeNode in="blur1" />
+                        <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                </filter>
+                <filter id="coreGlowBright" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="1.5" result="blur" />
                     <feMerge>
                         <feMergeNode in="blur" />
                         <feMergeNode in="SourceGraphic" />
@@ -40,59 +44,64 @@ export function EtherealAiSymbol({ className = "w-6 h-6" }: EtherealAiSymbolProp
                 </filter>
             </defs>
 
-            {/* Glowing Aura */}
-            <circle cx="50" cy="50" r="30" fill="url(#aiCoreGrad)" className="animate-pulse" style={{ animationDuration: '3s' }} />
+            <style>
+                {`
+                    @keyframes ethereal-spin {
+                        from { transform: rotate(0deg); }
+                        to { transform: rotate(360deg); }
+                    }
+                    @keyframes ethereal-spin-reverse {
+                        from { transform: rotate(360deg); }
+                        to { transform: rotate(0deg); }
+                    }
+                    @keyframes ethereal-pulse-bright {
+                        0%, 100% { opacity: 0.3; transform: scale(0.95); }
+                        50% { opacity: 0.6; transform: scale(1.05); }
+                    }
+                    .ethereal-spin-element {
+                        transform-origin: 50px 50px;
+                        animation: ethereal-spin 15s linear infinite;
+                    }
+                    .ethereal-spin-reverse-element {
+                        transform-origin: 50px 50px;
+                        animation: ethereal-spin-reverse 12s linear infinite;
+                    }
+                    .ethereal-pulse-element {
+                        transform-origin: 50px 50px;
+                        animation: ethereal-pulse-bright 3s ease-in-out infinite;
+                    }
+                `}
+            </style>
 
-            {/* Core Element */}
-            <circle cx="50" cy="50" r="10" fill="#ffffff" filter="url(#aiGlow)" className="animate-pulse" style={{ animationDuration: '2s' }} />
-            <circle cx="50" cy="50" r="6" fill="#818cf8" />
-
-            {/* Outer Orbital Ring 1 (diagonally tilted, counter-clockwise) */}
-            <ellipse
-                cx="50"
-                cy="50"
-                rx="36"
-                ry="12"
-                stroke="url(#aiRingGrad1)"
-                strokeWidth="1.5"
-                strokeDasharray="120 40"
-                fill="none"
-                style={{
-                    transform: 'rotate(-30deg)',
-                    transformOrigin: '50px 50px',
-                    animation: 'spin-counter 6s linear infinite'
-                }}
+            {/* Glowing background aura */}
+            <circle 
+                cx="50" cy="50" r="26" 
+                fill="url(#etherealGradientBrilliant)" 
+                filter="url(#etherealGlowBright)" 
+                className="ethereal-pulse-element" 
             />
 
-            {/* Outer Orbital Ring 2 (diagonally tilted, clockwise) */}
-            <ellipse
-                cx="50"
-                cy="50"
-                rx="36"
-                ry="12"
-                stroke="url(#aiRingGrad2)"
-                strokeWidth="1.5"
-                strokeDasharray="80 30"
-                fill="none"
-                style={{
-                    transform: 'rotate(45deg)',
-                    transformOrigin: '50px 50px',
-                    animation: 'spin-clockwise 8s linear infinite'
-                }}
+            {/* The main sharp spark / 4-pointed star */}
+            <path
+                d="M 50 0 Q 50 50 100 50 Q 50 50 50 100 Q 50 50 0 50 Q 50 50 50 0 Z"
+                fill="url(#etherealGradientBrilliant)"
+                opacity="0.9"
+                filter="url(#coreGlowBright)"
+                className="ethereal-spin-element"
             />
 
-            {/* Orbital node / particle */}
-            <circle
-                cx="50"
-                cy="50"
-                r="3"
-                fill="#38bdf8"
-                filter="url(#aiGlow)"
-                style={{
-                    animation: 'orbit-particle 4s linear infinite',
-                    transformOrigin: '50px 50px'
-                }}
+            {/* The secondary sharp spark / 4-pointed star (makes it 8-pointed) */}
+            <path
+                d="M 50 15 Q 50 50 85 50 Q 50 50 50 85 Q 50 50 15 50 Q 50 50 50 15 Z"
+                fill="url(#etherealGradientCore)"
+                opacity="0.95"
+                filter="url(#coreGlowBright)"
+                className="ethereal-spin-reverse-element"
             />
+
+            {/* Central intensely bright core */}
+            <circle cx="50" cy="50" r="5" fill="#ffffff" filter="url(#coreGlowBright)" />
+            <circle cx="50" cy="50" r="2" fill="#ffffff" />
         </svg>
     );
 }

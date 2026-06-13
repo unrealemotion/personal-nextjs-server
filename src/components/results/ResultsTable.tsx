@@ -20,7 +20,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Download, Plus, Trash2, Eye, EyeOff, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play, Settings, Database, ArrowUpRight, ArrowDownLeft, Activity, AlertCircle, Clock, Sparkles } from "lucide-react";
+import { Download, Plus, Trash2, Eye, EyeOff, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play, Settings, Database, ArrowUpRight, ArrowDownLeft, Activity, AlertCircle, Clock } from "lucide-react";
+import { EtherealAiSymbol } from "@/components/agent/EtherealAiSymbol";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as xlsx from "xlsx";
 import Editor from "@monaco-editor/react";
@@ -675,7 +676,7 @@ const sourceConfig: Record<string, {
         borderColor: "border-pink-500/15 hover:border-pink-500/30",
         borderLeft: "border-l-pink-500/70",
         textColor: "text-pink-400",
-        icon: Sparkles
+        icon: EtherealAiSymbol
     }
 };
 

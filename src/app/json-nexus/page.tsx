@@ -5,7 +5,8 @@ import { useLocalTransition } from "@/lib/transitions";
 import { LoadingTransition } from "@/components/layout/LoadingTransition";
 import { JSONToTable } from "@/components/json-nexus/JSONToTable";
 import { JSONCompare } from "@/components/json-nexus/JSONCompare";
-import { Table as TableIcon, ArrowRightLeft, Sparkles } from "lucide-react";
+import { Table as TableIcon, ArrowRightLeft } from "lucide-react";
+import { EtherealAiSymbol } from "@/components/agent/EtherealAiSymbol";
 
 export default function JSONNexusPage() {
   const [activeTab, setActiveTab] = useState("to-table");
@@ -25,7 +26,7 @@ export default function JSONNexusPage() {
       <header className="sticky top-16 z-45 w-full bg-neutral-950/80 backdrop-blur-md border-b border-white/5 shadow-sm shrink-0">
         <div className="w-full px-4 lg:px-8 xl:px-12 py-2 flex items-center justify-between gap-4">
           <div className="flex items-center space-x-2 text-xs font-bold text-white/60">
-            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <EtherealAiSymbol className="w-4 h-4" />
             <span>JSON Nexus Workspace</span>
           </div>
 

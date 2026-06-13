@@ -5,7 +5,6 @@ import Editor, { DiffEditor } from "@monaco-editor/react";
 import { 
   ArrowRightLeft, 
   Trash2, 
-  Sparkles, 
   CheckCircle2, 
   XCircle, 
   AlertCircle, 
@@ -16,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp
 } from "lucide-react";
+import { EtherealAiSymbol } from "@/components/agent/EtherealAiSymbol";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -369,7 +369,7 @@ export function JSONCompare() {
             onClick={loadSampleData} 
             className="text-xs text-white/60 hover:text-white"
           >
-            <Sparkles className="w-3.5 h-3.5 mr-2 text-indigo-400" />
+            <EtherealAiSymbol className="w-3.5 h-3.5 mr-2" />
             Sample Data
           </Button>
           <Button 
