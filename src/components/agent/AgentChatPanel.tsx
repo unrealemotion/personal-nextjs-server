@@ -34,7 +34,7 @@ import {
     SelectTrigger, 
     SelectValue 
 } from "@/components/ui/select";
-import { setAgentPanelPosition } from "@/lib/store";
+import { setAgentPanelPosition, setAgentPanelSize } from "@/lib/store";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 
@@ -74,37 +74,106 @@ export function AgentChatPanel() {
         confirmRevert,
         isDirty,
         agentPanelPosition,
+        agentPanelSize,
         handleStop,
         handleMergeQueuedMessage
     } = useAgent();
 
+    const [zoom, setZoom] = React.useState(1);
+    const baselinePixelRatioRef = useRef(1);
+
+    // Track browser zoom level reactively
+    useEffect(() => {
+        if (typeof window !== "undefined") {
+            baselinePixelRatioRef.current = window.devicePixelRatio || 1;
+            
+            const handleZoom = () => {
+                const currentRatio = window.devicePixelRatio || 1;
+                const newZoom = currentRatio / baselinePixelRatioRef.current;
+                setZoom(newZoom || 1);
+            };
+
+            window.addEventListener("resize", handleZoom);
+            handleZoom();
+
+            return () => window.removeEventListener("resize", handleZoom);
+        }
+    }, []);
+
+    const zoomIndependentStyle = React.useMemo(() => {
+        const width = agentPanelSize?.width ?? 450;
+        const height = agentPanelSize?.height ?? 650;
+        const baseStyle: React.CSSProperties = {
+            position: "fixed",
+            width: `${width / zoom}px`,
+            height: `${height / zoom}px`,
+            maxWidth: `calc(100vw - ${32 / zoom}px)`,
+            maxHeight: `calc(100vh - ${48 / zoom}px)`,
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 20px rgba(99, 102, 241, 0.15)',
+            overscrollBehavior: "contain"
+        };
+
+        if (agentPanelPosition) {
+            return {
+                ...baseStyle,
+                left: `${agentPanelPosition.x / zoom}px`,
+                top: `${agentPanelPosition.y / zoom}px`,
+                bottom: "auto",
+                right: "auto",
+            };
+        } else {
+            return {
+                ...baseStyle,
+                bottom: `${24 / zoom}px`,
+                right: `${24 / zoom}px`,
+                left: "auto",
+                top: "auto",
+            };
+        }
+    }, [agentPanelPosition, agentPanelSize, zoom]);
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
+    const resizeStartRef = useRef<{
+        mouseX: number;
+        mouseY: number;
+        panelX: number;
+        panelY: number;
+        panelWidth: number;
+        panelHeight: number;
+        handle: string;
+    } | null>(null);
 
     // Handle window resize to clamp panel inside the screen
     useEffect(() => {
         const handleResize = () => {
             if (agentPanelPosition) {
-                const panelWidth = 450;
-                const panelHeight = 650;
+                const width = agentPanelSize?.width ?? 450;
+                const height = agentPanelSize?.height ?? 650;
+                const panelWidth = width / zoom;
+                const panelHeight = height / zoom;
                 const minX = 12;
                 const maxX = window.innerWidth - panelWidth - 12;
                 const minY = 12;
                 const maxY = window.innerHeight - panelHeight - 12;
 
-                const clampedX = Math.max(minX, Math.min(maxX, agentPanelPosition.x));
-                const clampedY = Math.max(minY, Math.min(maxY, agentPanelPosition.y));
+                const currentX = agentPanelPosition.x / zoom;
+                const currentY = agentPanelPosition.y / zoom;
 
-                if (clampedX !== agentPanelPosition.x || clampedY !== agentPanelPosition.y) {
-                    setAgentPanelPosition({ x: clampedX, y: clampedY });
+                const clampedX = Math.max(minX, Math.min(maxX, currentX));
+                const clampedY = Math.max(minY, Math.min(maxY, currentY));
+
+                if (clampedX !== currentX || clampedY !== currentY) {
+                    setAgentPanelPosition({ x: clampedX * zoom, y: clampedY * zoom });
                 }
             }
         };
 
         window.addEventListener("resize", handleResize);
+        handleResize(); // Also run immediately on zoom/position changes
         return () => window.removeEventListener("resize", handleResize);
-    }, [agentPanelPosition]);
+    }, [agentPanelPosition, agentPanelSize, zoom]);
 
     // Header Mouse Down Event Handler (direct DOM updates during drag for 60fps performance)
     const handleHeaderMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -146,8 +215,10 @@ export function AgentChatPanel() {
             const newX = dragStartRef.current.panelX + dx;
             const newY = dragStartRef.current.panelY + dy;
 
-            const panelWidth = 450;
-            const panelHeight = 650;
+            const width = agentPanelSize?.width ?? 450;
+            const height = agentPanelSize?.height ?? 650;
+            const panelWidth = width / zoom;
+            const panelHeight = height / zoom;
             const minX = 12;
             const maxX = window.innerWidth - panelWidth - 12;
             const minY = 12;
@@ -175,8 +246,10 @@ export function AgentChatPanel() {
                 const newX = dragStartRef.current.panelX + dx;
                 const newY = dragStartRef.current.panelY + dy;
 
-                const panelWidth = 450;
-                const panelHeight = 650;
+                const width = agentPanelSize?.width ?? 450;
+                const height = agentPanelSize?.height ?? 650;
+                const panelWidth = width / zoom;
+                const panelHeight = height / zoom;
                 const minX = 12;
                 const maxX = window.innerWidth - panelWidth - 12;
                 const minY = 12;
@@ -204,9 +277,120 @@ export function AgentChatPanel() {
                 }
 
                 // Save final position to global store once dragging completes
-                setAgentPanelPosition({ x: clampedX, y: clampedY });
+                setAgentPanelPosition({ x: clampedX * zoom, y: clampedY * zoom });
             }
             dragStartRef.current = null;
+        };
+
+        document.addEventListener("mousemove", handleMouseMove);
+        document.addEventListener("mouseup", handleMouseUp);
+    };
+
+    // Handler for resizing the chat panel
+    const handleResizeMouseDown = (e: React.MouseEvent, handle: string) => {
+        if (e.button !== 0) return; // Left click only
+        e.preventDefault();
+        e.stopPropagation(); // Prevent header dragging if corner overlaps header
+
+        const panelEl = panelRef.current;
+        if (!panelEl) return;
+
+        const rect = panelEl.getBoundingClientRect();
+
+        resizeStartRef.current = {
+            mouseX: e.clientX,
+            mouseY: e.clientY,
+            panelX: rect.left,
+            panelY: rect.top,
+            panelWidth: rect.width,
+            panelHeight: rect.height,
+            handle
+        };
+
+        document.body.style.cursor = 
+            handle === "l" || handle === "r" ? "ew-resize" :
+            handle === "t" || handle === "b" ? "ns-resize" :
+            handle === "tl" || handle === "br" ? "nwse-resize" :
+            "nesw-resize";
+
+        panelEl.style.transition = 'none';
+        panelEl.style.willChange = 'transform, width, height, left, top';
+
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            if (!resizeStartRef.current || !panelRef.current) return;
+            const start = resizeStartRef.current;
+            const dx = moveEvent.clientX - start.mouseX;
+            const dy = moveEvent.clientY - start.mouseY;
+
+            let newWidth = start.panelWidth;
+            let newHeight = start.panelHeight;
+            let newLeft = start.panelX;
+            let newTop = start.panelY;
+
+            // min/max sizes in CSS pixels
+            const minWidth = 320;
+            const minHeight = 400;
+            const maxWidth = window.innerWidth - 24;
+            const maxHeight = window.innerHeight - 24;
+
+            // Handle horizontal resizing
+            if (start.handle.includes("l")) {
+                const requestedWidth = start.panelWidth - dx;
+                newWidth = Math.max(minWidth, Math.min(maxWidth, requestedWidth));
+                const actualDx = start.panelWidth - newWidth;
+                newLeft = start.panelX + actualDx;
+            } else if (start.handle.includes("r")) {
+                const requestedWidth = start.panelWidth + dx;
+                newWidth = Math.max(minWidth, Math.min(maxWidth, requestedWidth));
+            }
+
+            // Handle vertical resizing
+            if (start.handle.includes("t")) {
+                const requestedHeight = start.panelHeight - dy;
+                newHeight = Math.max(minHeight, Math.min(maxHeight, requestedHeight));
+                const actualDy = start.panelHeight - newHeight;
+                newTop = start.panelY + actualDy;
+            } else if (start.handle.includes("b")) {
+                const requestedHeight = start.panelHeight + dy;
+                newHeight = Math.max(minHeight, Math.min(maxHeight, requestedHeight));
+            }
+
+            // Update DOM style directly for 60fps performance
+            panelRef.current.style.width = `${newWidth}px`;
+            panelRef.current.style.height = `${newHeight}px`;
+            panelRef.current.style.left = `${newLeft}px`;
+            panelRef.current.style.top = `${newTop}px`;
+            panelRef.current.style.bottom = 'auto';
+            panelRef.current.style.right = 'auto';
+        };
+
+        const handleMouseUp = (upEvent: MouseEvent) => {
+            document.removeEventListener("mousemove", handleMouseMove);
+            document.removeEventListener("mouseup", handleMouseUp);
+            document.body.style.cursor = '';
+
+            if (resizeStartRef.current && panelRef.current) {
+                // Calculate final dimensions and position
+                const rect = panelRef.current.getBoundingClientRect();
+                
+                // Save final size and position to store (converting to zoom-independent values)
+                const finalWidth = rect.width * zoom;
+                const finalHeight = rect.height * zoom;
+                const finalX = rect.left * zoom;
+                const finalY = rect.top * zoom;
+
+                setAgentPanelSize({ width: finalWidth, height: finalHeight });
+                setAgentPanelPosition({ x: finalX, y: finalY });
+
+                const el = panelRef.current;
+                setTimeout(() => {
+                    if (el) {
+                        el.style.transition = '';
+                        el.style.willChange = '';
+                    }
+                }, 50);
+            }
+            resizeStartRef.current = null;
         };
 
         document.addEventListener("mousemove", handleMouseMove);
@@ -268,30 +452,12 @@ export function AgentChatPanel() {
             {/* Slide-out Chat Panel Container */}
             <div 
                 ref={panelRef}
-                className={`z-50 w-[450px] max-w-[calc(100vw-32px)] h-[650px] max-h-[calc(100vh-48px)] flex flex-col bg-neutral-950/90 border border-indigo-500/30 rounded-2xl shadow-2xl backdrop-blur-md overflow-hidden overscroll-contain origin-center chat-panel-transition ${
+                className={`z-50 flex flex-col bg-neutral-950/90 border border-indigo-500/30 rounded-2xl backdrop-blur-md overflow-hidden overscroll-contain origin-center chat-panel-transition ${
                     isOpen
                         ? "opacity-100 scale-100 translate-y-0 pointer-events-auto"
                         : "opacity-0 scale-95 translate-y-4 pointer-events-none"
                 }`}
-                style={
-                    agentPanelPosition 
-                        ? { 
-                            position: "fixed",
-                            left: `${agentPanelPosition.x}px`,
-                            top: `${agentPanelPosition.y}px`,
-                            bottom: "auto",
-                            right: "auto",
-                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 20px rgba(99, 102, 241, 0.15)',
-                            overscrollBehavior: "contain"
-                          }
-                        : {
-                            position: "fixed",
-                            bottom: "24px",
-                            right: "24px",
-                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 20px rgba(99, 102, 241, 0.15)',
-                            overscrollBehavior: "contain"
-                          }
-                }
+                style={zoomIndependentStyle}
             >
                     
                     {/* Header bar */}
@@ -634,6 +800,16 @@ export function AgentChatPanel() {
                             </form>
                         </div>
                     )}
+
+                    {/* Resize handles */}
+                    <div className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "l")} />
+                    <div className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "r")} />
+                    <div className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "t")} />
+                    <div className="absolute bottom-0 left-0 right-0 h-1 cursor-ns-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "b")} />
+                    <div className="absolute top-0 left-0 w-3 h-3 cursor-nwse-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-tl-xl" onMouseDown={(e) => handleResizeMouseDown(e, "tl")} />
+                    <div className="absolute top-0 right-0 w-3 h-3 cursor-nesw-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-tr-xl" onMouseDown={(e) => handleResizeMouseDown(e, "tr")} />
+                    <div className="absolute bottom-0 left-0 w-3 h-3 cursor-nesw-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-bl-xl" onMouseDown={(e) => handleResizeMouseDown(e, "bl")} />
+                    <div className="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-br-xl" onMouseDown={(e) => handleResizeMouseDown(e, "br")} />
                 </div>
 
             {/* Custom Warning Confirmation Dialog for Reverting prompt */}

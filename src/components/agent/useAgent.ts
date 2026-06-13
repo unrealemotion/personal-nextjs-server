@@ -20,7 +20,8 @@ import {
     updateCollection,
     addCollection,
     updateTabResponse,
-    updateTabLoading
+    updateTabLoading,
+    setAgentPanelSize
 } from "@/lib/store";
 import { addItemToCollectionTree, stripJsonComments } from "@/lib/utils";
 import { simulateRowExecutionChain } from "@/lib/agent-executor";
@@ -39,6 +40,7 @@ export function useAgent() {
     const messages = useStore(store, (state) => state.agentChatMessages || []);
     const setMessages = setAgentChatMessages;
     const agentPanelPosition = useStore(store, (state) => state.agentPanelPosition);
+    const agentPanelSize = useStore(store, (state) => state.agentPanelSize);
     const [revertTargetId, setRevertTargetId] = useState<string | null>(null);
     const [hasCheckpoint, setHasCheckpoint] = useState(false);
     const [revertCheckpointData, setRevertCheckpointData] = useState<any | null>(null);
@@ -1279,6 +1281,8 @@ export function useAgent() {
         activeProfile,
         agentProfiles: storeProfiles,
         agentPanelPosition,
+        agentPanelSize,
+        setAgentPanelSize,
         fileData,
         results,
         saveConfig,

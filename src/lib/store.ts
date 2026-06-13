@@ -102,6 +102,7 @@ export type AppState = {
     activeAgentProfileId: string | null;
     agentChatMessages: Message[];
     agentPanelPosition: { x: number; y: number } | null;
+    agentPanelSize?: { width: number; height: number } | null;
     exportExcelTrigger?: { onlyFiltered: boolean } | null;
 };
 
@@ -179,6 +180,7 @@ const defaultState: AppState = {
         }
     ],
     agentPanelPosition: null,
+    agentPanelSize: null,
     exportExcelTrigger: null,
 };
 
@@ -419,6 +421,7 @@ export const hydrateStore = async () => {
                 );
             }
             let agentPanelPosition = parsed.agentPanelPosition !== undefined ? parsed.agentPanelPosition : defaultState.agentPanelPosition;
+            let agentPanelSize = parsed.agentPanelSize !== undefined ? parsed.agentPanelSize : defaultState.agentPanelSize;
 
             if ((!parsed.agentProfiles || parsed.agentProfiles.length === 0) && migratedProfiles.length > 0) {
                 agentProfiles = migratedProfiles;
@@ -435,7 +438,8 @@ export const hydrateStore = async () => {
                 agentProfiles,
                 activeAgentProfileId,
                 agentChatMessages,
-                agentPanelPosition
+                agentPanelPosition,
+                agentPanelSize
             }));
 
             // Initialize prevStates
@@ -459,7 +463,8 @@ export const hydrateStore = async () => {
                 agentProfiles,
                 activeAgentProfileId,
                 agentChatMessages,
-                agentPanelPosition
+                agentPanelPosition,
+                agentPanelSize
             };
 
             prevDataState = {
@@ -519,7 +524,8 @@ const saveConfigDebounced = () => {
                 agentProfiles: state.agentProfiles,
                 activeAgentProfileId: state.activeAgentProfileId,
                 agentChatMessages: state.agentChatMessages,
-                agentPanelPosition: state.agentPanelPosition
+                agentPanelPosition: state.agentPanelPosition,
+                agentPanelSize: state.agentPanelSize
             };
             await saveToDB(config, "workspaceConfig");
         } catch (e) {
@@ -587,7 +593,8 @@ if (typeof window !== "undefined") {
                     agentProfiles: state.agentProfiles,
                     activeAgentProfileId: state.activeAgentProfileId,
                     agentChatMessages: state.agentChatMessages,
-                    agentPanelPosition: state.agentPanelPosition
+                    agentPanelPosition: state.agentPanelPosition,
+                    agentPanelSize: state.agentPanelSize
                 };
                 const data = {
                     fileData: state.fileData,
@@ -632,7 +639,8 @@ if (typeof window !== "undefined") {
             state.agentProfiles !== prevConfigState.agentProfiles ||
             state.activeAgentProfileId !== prevConfigState.activeAgentProfileId ||
             state.agentChatMessages !== prevConfigState.agentChatMessages ||
-            state.agentPanelPosition !== prevConfigState.agentPanelPosition;
+            state.agentPanelPosition !== prevConfigState.agentPanelPosition ||
+            state.agentPanelSize !== prevConfigState.agentPanelSize;
 
         // 2. Check if Data changed
         const hasDataChanged =
@@ -669,7 +677,8 @@ if (typeof window !== "undefined") {
                 agentProfiles: state.agentProfiles,
                 activeAgentProfileId: state.activeAgentProfileId,
                 agentChatMessages: state.agentChatMessages,
-                agentPanelPosition: state.agentPanelPosition
+                agentPanelPosition: state.agentPanelPosition,
+                agentPanelSize: state.agentPanelSize
             };
             saveConfigDebounced();
         }
@@ -788,6 +797,7 @@ export const importState = (json: string) => {
         const activeAgentProfileId = parsed.activeAgentProfileId || defaultState.activeAgentProfileId;
         const agentChatMessages = parsed.agentChatMessages || defaultState.agentChatMessages;
         const agentPanelPosition = parsed.agentPanelPosition !== undefined ? parsed.agentPanelPosition : defaultState.agentPanelPosition;
+        const agentPanelSize = parsed.agentPanelSize !== undefined ? parsed.agentPanelSize : defaultState.agentPanelSize;
 
         store.setState(() => ({
             ...defaultState, // Start with default to ensure all keys are present
@@ -798,7 +808,8 @@ export const importState = (json: string) => {
             agentProfiles,
             activeAgentProfileId,
             agentChatMessages,
-            agentPanelPosition
+            agentPanelPosition,
+            agentPanelSize
         }));
     } catch (e) {
         alert("Failed to import: " + (e instanceof Error ? e.message : "Unknown error"));
@@ -1324,6 +1335,13 @@ export const setAgentPanelPosition = (pos: { x: number; y: number } | null) => {
     store.setState((state) => ({
         ...state,
         agentPanelPosition: pos
+    }));
+};
+
+export const setAgentPanelSize = (size: { width: number; height: number } | null) => {
+    store.setState((state) => ({
+        ...state,
+        agentPanelSize: size
     }));
 };
 
