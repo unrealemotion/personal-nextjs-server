@@ -1,13 +1,13 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
-import { 
-    X, 
-    Trash2, 
-    Settings, 
-    Send, 
-    AlertCircle, 
-    Loader2, 
+import {
+    X,
+    Trash2,
+    Settings,
+    Send,
+    AlertCircle,
+    Loader2,
     RefreshCw,
     Square,
     CornerLeftUp,
@@ -27,12 +27,12 @@ import { useAgent } from "./useAgent";
 import { AgentSettingsView } from "./AgentSettingsView";
 import { AgentMessageItem } from "./AgentMessageItem";
 import { EtherealAiSymbol } from "./EtherealAiSymbol";
-import { 
-    Select, 
-    SelectContent, 
-    SelectItem, 
-    SelectTrigger, 
-    SelectValue 
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue
 } from "@/components/ui/select";
 import { setAgentPanelPosition, setAgentPanelSize } from "@/lib/store";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -86,7 +86,7 @@ export function AgentChatPanel() {
     useEffect(() => {
         if (typeof window !== "undefined") {
             baselinePixelRatioRef.current = window.devicePixelRatio || 1;
-            
+
             const handleZoom = () => {
                 const currentRatio = window.devicePixelRatio || 1;
                 const newZoom = currentRatio / baselinePixelRatioRef.current;
@@ -178,12 +178,12 @@ export function AgentChatPanel() {
     // Header Mouse Down Event Handler (direct DOM updates during drag for 60fps performance)
     const handleHeaderMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
         if (e.button !== 0) return; // Left click only
-        
+
         // Prevent dragging when clicking buttons, links, or dropdown selectors in the header
         const target = e.target as HTMLElement;
         if (
-            target.closest('button') || 
-            target.closest('a') || 
+            target.closest('button') ||
+            target.closest('a') ||
             target.closest('[data-slot="select-trigger"]') ||
             target.closest('[role="combobox"]')
         ) return;
@@ -265,7 +265,7 @@ export function AgentChatPanel() {
                     panelRef.current.style.bottom = 'auto';
                     panelRef.current.style.right = 'auto';
                     panelRef.current.style.transform = 'none';
-                    
+
                     // Delay restoring transition classes to let the transform: none render instantly without animating
                     const el = panelRef.current;
                     setTimeout(() => {
@@ -307,11 +307,11 @@ export function AgentChatPanel() {
             handle
         };
 
-        document.body.style.cursor = 
+        document.body.style.cursor =
             handle === "l" || handle === "r" ? "ew-resize" :
-            handle === "t" || handle === "b" ? "ns-resize" :
-            handle === "tl" || handle === "br" ? "nwse-resize" :
-            "nesw-resize";
+                handle === "t" || handle === "b" ? "ns-resize" :
+                    handle === "tl" || handle === "br" ? "nwse-resize" :
+                        "nesw-resize";
 
         panelEl.style.transition = 'none';
         panelEl.style.willChange = 'transform, width, height, left, top';
@@ -372,7 +372,7 @@ export function AgentChatPanel() {
             if (resizeStartRef.current && panelRef.current) {
                 // Calculate final dimensions and position
                 const rect = panelRef.current.getBoundingClientRect();
-                
+
                 // Save final size and position to store (converting to zoom-independent values)
                 const finalWidth = rect.width * zoom;
                 const finalHeight = rect.height * zoom;
@@ -412,11 +412,10 @@ export function AgentChatPanel() {
             {/* Floating Agent Chat Button */}
             <button
                 onClick={() => setIsOpen(true)}
-                className={`fixed bottom-6 right-6 z-40 w-16 h-16 rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 group border border-indigo-500/35 ${
-                    isOpen
+                className={`fixed bottom-6 right-6 z-40 w-16 h-16 rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 group border border-indigo-500/35 ${isOpen
                         ? "opacity-0 pointer-events-none scale-75 translate-y-4"
                         : "opacity-100 scale-100 translate-y-0 hover:scale-110 active:scale-95"
-                }`}
+                    }`}
                 style={{
                     background: 'radial-gradient(circle at center, rgba(30, 27, 75, 0.9) 0%, rgba(9, 9, 11, 0.95) 100%)',
                     boxShadow: '0 0 25px rgba(99, 102, 241, 0.25), inset 0 0 14px rgba(129, 140, 248, 0.2)',
@@ -436,7 +435,7 @@ export function AgentChatPanel() {
                         animation: 'pulse 3s ease-in-out infinite',
                     }}
                 />
-                
+
                 {/* Glowing Core Hover Effect */}
                 <div className="absolute inset-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500"
                     style={{
@@ -450,367 +449,364 @@ export function AgentChatPanel() {
             </button>
 
             {/* Slide-out Chat Panel Container */}
-            <div 
+            <div
                 ref={panelRef}
-                className={`z-50 flex flex-col bg-neutral-950/90 border border-indigo-500/30 rounded-2xl backdrop-blur-md overflow-hidden overscroll-contain origin-center chat-panel-transition ${
-                    isOpen
+                className={`z-50 flex flex-col bg-neutral-950/90 border border-indigo-500/30 rounded-2xl backdrop-blur-md overflow-hidden overscroll-contain origin-center chat-panel-transition ${isOpen
                         ? "opacity-100 scale-100 translate-y-0 pointer-events-auto"
                         : "opacity-0 scale-95 translate-y-4 pointer-events-none"
-                }`}
+                    }`}
                 style={zoomIndependentStyle}
             >
-                    
-                    {/* Header bar */}
-                    <div 
-                        onMouseDown={handleHeaderMouseDown}
-                        className="px-4 py-3 border-b border-white/5 bg-neutral-900/50 flex items-center justify-between cursor-grab active:cursor-grabbing select-none"
-                    >
-                        <div className="flex items-center space-x-2">
-                            <EtherealAiSymbol className="w-5.5 h-5.5" />
-                            <span className="text-sm font-bold text-white">Surge AI Agent</span>
-                            <Select
-                                value={tempActiveProfileId || ""}
-                                onValueChange={(val) => setTempActiveProfileId(val)}
-                                modal={false}
+
+                {/* Header bar */}
+                <div
+                    onMouseDown={handleHeaderMouseDown}
+                    className="px-4 py-3 border-b border-white/5 bg-neutral-900/50 flex items-center justify-between cursor-grab active:cursor-grabbing select-none"
+                >
+                    <div className="flex items-center space-x-2">
+                        <EtherealAiSymbol className="w-5.5 h-5.5" />
+                        <span className="text-sm font-bold text-white">Splurge</span>
+                        <Select
+                            value={tempActiveProfileId || ""}
+                            onValueChange={(val) => setTempActiveProfileId(val)}
+                            modal={false}
+                        >
+                            <SelectTrigger
+                                size="sm"
+                                className="bg-indigo-500/15 hover:bg-indigo-500/25 border-transparent shadow-none text-indigo-300 h-5 px-1.5 text-[9px] uppercase font-black tracking-wider rounded cursor-pointer transition-colors focus:ring-0 focus-visible:ring-[0px] focus-visible:ring-offset-0 focus:ring-offset-0 [&_svg]:size-3 shrink-0 select-none"
                             >
-                                <SelectTrigger 
-                                    size="sm"
-                                    className="bg-indigo-500/15 hover:bg-indigo-500/25 border-transparent shadow-none text-indigo-300 h-5 px-1.5 text-[9px] uppercase font-black tracking-wider rounded cursor-pointer transition-colors focus:ring-0 focus-visible:ring-[0px] focus-visible:ring-offset-0 focus:ring-offset-0 [&_svg]:size-3 shrink-0 select-none"
-                                >
-                                    <SelectValue placeholder="Model" />
-                                </SelectTrigger>
-                                <SelectContent 
-                                    position="popper" 
-                                    className="bg-neutral-950 border-white/10 text-white min-w-[140px]"
-                                >
-                                    {agentProfiles.map((p) => (
-                                        <SelectItem 
-                                            key={p.id} 
-                                            value={p.id} 
-                                            className="hover:bg-white/5 cursor-pointer text-xs"
-                                        >
-                                            {p.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        
-                        <div className="flex items-center space-x-1">
-                            {view === "chat" && messages.length > 1 && (
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={handleClearChat}
-                                    className="w-8 h-8 rounded-lg hover:bg-white/5 text-red-400 hover:text-red-300"
-                                    title="Clear Chat"
-                                >
-                                    <Trash2 className="w-4 h-4" />
-                                </Button>
-                            )}
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => setView(view === "chat" ? "settings" : "chat")}
-                                className="w-8 h-8 rounded-lg hover:bg-white/5 text-white/70 hover:text-white"
-                                title={view === "settings" ? "Back to Chat" : "Agent Settings"}
+                                <SelectValue placeholder="Model" />
+                            </SelectTrigger>
+                            <SelectContent
+                                position="popper"
+                                className="bg-neutral-950 border-white/10 text-white min-w-[140px]"
                             >
-                                {view === "settings" ? (
-                                    <MessageSquare className="w-4 h-4 text-indigo-400" />
-                                ) : (
-                                    <Settings className="w-4 h-4" />
-                                )}
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => setIsOpen(false)}
-                                className="w-8 h-8 rounded-lg hover:bg-white/5 text-white/70 hover:text-white"
-                            >
-                                <X className="w-4 h-4" />
-                            </Button>
-                        </div>
+                                {agentProfiles.map((p) => (
+                                    <SelectItem
+                                        key={p.id}
+                                        value={p.id}
+                                        className="hover:bg-white/5 cursor-pointer text-xs"
+                                    >
+                                        {p.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                     </div>
 
-                    {/* Settings Panel View */}
-                    {view === "settings" ? (
-                        <AgentSettingsView
-                            profiles={tempProfiles}
-                            activeProfileId={editingProfileId}
-                            onChangeProfiles={setTempProfiles}
-                            onChangeActiveProfileId={setEditingProfileId}
-                            onSave={(newProfiles) => {
-                                saveConfig(newProfiles, tempActiveProfileId || "");
-                            }}
-                            onCancel={() => setView("chat")}
-                            tempActiveProfileId={tempActiveProfileId}
-                            onChangeTempActiveProfileId={setTempActiveProfileId}
-                            isDirty={isDirty}
-                        />
-                    ) : (
-                        /* Chat Window View */
-                        <div className="flex-grow flex flex-col min-h-0">
-                            
-                            {/* Messages Container */}
-                            <div 
-                                className="flex-grow p-4 overflow-y-auto overscroll-contain custom-scrollbar space-y-4 select-text"
+                    <div className="flex items-center space-x-1">
+                        {view === "chat" && messages.length > 1 && (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={handleClearChat}
+                                className="w-8 h-8 rounded-lg hover:bg-white/5 text-red-400 hover:text-red-300"
+                                title="Clear Chat"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                            </Button>
+                        )}
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setView(view === "chat" ? "settings" : "chat")}
+                            className="w-8 h-8 rounded-lg hover:bg-white/5 text-white/70 hover:text-white"
+                            title={view === "settings" ? "Back to Chat" : "Agent Settings"}
+                        >
+                            {view === "settings" ? (
+                                <MessageSquare className="w-4 h-4 text-indigo-400" />
+                            ) : (
+                                <Settings className="w-4 h-4" />
+                            )}
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setIsOpen(false)}
+                            className="w-8 h-8 rounded-lg hover:bg-white/5 text-white/70 hover:text-white"
+                        >
+                            <X className="w-4 h-4" />
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Settings Panel View */}
+                {view === "settings" ? (
+                    <AgentSettingsView
+                        profiles={tempProfiles}
+                        activeProfileId={editingProfileId}
+                        onChangeProfiles={setTempProfiles}
+                        onChangeActiveProfileId={setEditingProfileId}
+                        onSave={(newProfiles) => {
+                            saveConfig(newProfiles, tempActiveProfileId || "");
+                        }}
+                        onCancel={() => setView("chat")}
+                        tempActiveProfileId={tempActiveProfileId}
+                        onChangeTempActiveProfileId={setTempActiveProfileId}
+                        isDirty={isDirty}
+                    />
+                ) : (
+                    /* Chat Window View */
+                    <div className="flex-grow flex flex-col min-h-0">
+
+                        {/* Messages Container */}
+                        <div
+                            className="flex-grow p-4 overflow-y-auto overscroll-contain custom-scrollbar space-y-4 select-text"
+                            style={{ overscrollBehavior: "contain" }}
+                        >
+                            {messages.filter((m) => m.role !== "tool").map((m) => (
+                                <AgentMessageItem
+                                    key={m.id}
+                                    message={m}
+                                    allMessages={messages}
+                                    onRevert={handleRevert}
+                                />
+                            ))}
+
+                            {/* Spinner when loading */}
+                            {isLoading && !activeToolName && (
+                                <div className="flex justify-start items-center space-x-2">
+                                    <div className="w-7 h-7 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0">
+                                        <EtherealAiSymbol className="w-5.5 h-5.5" />
+                                    </div>
+                                    <div className="bg-neutral-900 text-white/60 px-3 py-2 rounded-xl border border-white/5 flex items-center space-x-2 text-xs">
+                                        <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                                        <span>Thinking...</span>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={handleStop}
+                                        className="w-7 h-7 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 flex items-center justify-center shrink-0 cursor-pointer backdrop-blur-sm"
+                                        title="Stop Agent Execution"
+                                    >
+                                        <Square className="w-2.5 h-2.5 fill-red-400" />
+                                    </Button>
+                                </div>
+                            )}
+
+                            {/* Spinner when executing a tool */}
+                            {isLoading && activeToolName && (
+                                <div className="flex justify-start items-center space-x-2">
+                                    <div className="w-7 h-7 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0">
+                                        <EtherealAiSymbol className="w-5.5 h-5.5" />
+                                    </div>
+                                    <div className="bg-neutral-900 text-white/80 px-3 py-2 rounded-xl border border-indigo-500/15 flex items-center space-x-2 text-xs">
+                                        <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
+                                        <span>Running local tool: <strong className="text-indigo-400 font-semibold">{activeToolName}</strong>...</span>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={handleStop}
+                                        className="w-7 h-7 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 flex items-center justify-center shrink-0 cursor-pointer backdrop-blur-sm"
+                                        title="Stop Agent Execution"
+                                    >
+                                        <Square className="w-2.5 h-2.5 fill-red-400" />
+                                    </Button>
+                                </div>
+                            )}
+
+                            <div ref={messagesEndRef} />
+                        </div>
+
+                        {/* Prompt presets / suggestions triggers */}
+                        {messages.length <= 1 && fileData.length > 0 && (
+                            <div className="px-4 py-2 border-t border-white/5 flex flex-wrap gap-1.5 bg-neutral-950/40">
+                                <button
+                                    onClick={() => handleSend("Describe the columns in the dataset")}
+                                    className="text-[10px] text-indigo-400 hover:text-white bg-indigo-500/5 hover:bg-indigo-500/20 border border-indigo-500/20 hover:border-indigo-500/50 px-2 py-1 rounded-full cursor-pointer transition-colors"
+                                >
+                                    Describe Columns
+                                </button>
+                                <button
+                                    onClick={() => handleSend("What is the current execution engine config?")}
+                                    className="text-[10px] text-indigo-400 hover:text-white bg-indigo-500/5 hover:bg-indigo-500/20 border border-indigo-500/20 hover:border-indigo-500/50 px-2 py-1 rounded-full cursor-pointer transition-colors"
+                                >
+                                    Check Engine Settings
+                                </button>
+                                {results.length > 0 && (
+                                    <button
+                                        onClick={() => handleSend("Troubleshoot Row 0 template run")}
+                                        className="text-[10px] text-indigo-400 hover:text-white bg-indigo-500/5 hover:bg-indigo-500/20 border border-indigo-500/20 hover:border-indigo-500/50 px-2 py-1 rounded-full cursor-pointer transition-colors"
+                                    >
+                                        Troubleshoot Row 0
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Message Queue Indicator */}
+                        {messageQueue.length > 0 && (
+                            <div
+                                className={`px-4 py-2.5 border-t border-white/5 bg-indigo-950/20 backdrop-blur-md select-text shrink-0 flex flex-col ${messageQueue.length > 1
+                                        ? "h-[160px] overflow-hidden"
+                                        : "max-h-[110px] overflow-y-auto overscroll-contain custom-scrollbar"
+                                    }`}
                                 style={{ overscrollBehavior: "contain" }}
                             >
-                                {messages.filter((m) => m.role !== "tool").map((m) => (
-                                    <AgentMessageItem
-                                        key={m.id}
-                                        message={m}
-                                        allMessages={messages}
-                                        onRevert={handleRevert}
-                                    />
-                                ))}
-
-                                {/* Spinner when loading */}
-                                {isLoading && !activeToolName && (
-                                    <div className="flex justify-start items-center space-x-2">
-                                        <div className="w-7 h-7 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0">
-                                            <EtherealAiSymbol className="w-5.5 h-5.5" />
-                                        </div>
-                                        <div className="bg-neutral-900 text-white/60 px-3 py-2 rounded-xl border border-white/5 flex items-center space-x-2 text-xs">
-                                            <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                                            <span>Thinking...</span>
-                                        </div>
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={handleStop}
-                                            className="w-7 h-7 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 flex items-center justify-center shrink-0 cursor-pointer backdrop-blur-sm"
-                                            title="Stop Agent Execution"
-                                        >
-                                            <Square className="w-2.5 h-2.5 fill-red-400" />
-                                        </Button>
-                                    </div>
-                                )}
-
-                                {/* Spinner when executing a tool */}
-                                {isLoading && activeToolName && (
-                                    <div className="flex justify-start items-center space-x-2">
-                                        <div className="w-7 h-7 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0">
-                                            <EtherealAiSymbol className="w-5.5 h-5.5" />
-                                        </div>
-                                        <div className="bg-neutral-900 text-white/80 px-3 py-2 rounded-xl border border-indigo-500/15 flex items-center space-x-2 text-xs">
-                                            <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
-                                            <span>Running local tool: <strong className="text-indigo-400 font-semibold">{activeToolName}</strong>...</span>
-                                        </div>
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={handleStop}
-                                            className="w-7 h-7 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 flex items-center justify-center shrink-0 cursor-pointer backdrop-blur-sm"
-                                            title="Stop Agent Execution"
-                                        >
-                                            <Square className="w-2.5 h-2.5 fill-red-400" />
-                                        </Button>
-                                    </div>
-                                )}
-                                
-                                <div ref={messagesEndRef} />
-                            </div>
-
-                            {/* Prompt presets / suggestions triggers */}
-                            {messages.length <= 1 && fileData.length > 0 && (
-                                <div className="px-4 py-2 border-t border-white/5 flex flex-wrap gap-1.5 bg-neutral-950/40">
-                                    <button
-                                        onClick={() => handleSend("Describe the columns in the dataset")}
-                                        className="text-[10px] text-indigo-400 hover:text-white bg-indigo-500/5 hover:bg-indigo-500/20 border border-indigo-500/20 hover:border-indigo-500/50 px-2 py-1 rounded-full cursor-pointer transition-colors"
+                                <div className="flex items-center justify-between text-[10px] font-bold text-indigo-400 uppercase tracking-widest select-none pb-1.5 shrink-0">
+                                    <span>Queued prompts ({messageQueue.length})</span>
+                                </div>
+                                <div className="flex-grow flex flex-col min-h-0 space-y-2">
+                                    {/* Next prompt (First in queue) */}
+                                    <div
+                                        className={`bg-indigo-500/15 border border-indigo-500/25 px-2.5 py-1.5 rounded-lg text-xs transition-colors flex flex-col space-y-0.5 relative group animate-fade-in shrink-0 ${messageQueue.length > 1 ? "max-h-[56px]" : "max-h-[75px]"
+                                            }`}
                                     >
-                                        Describe Columns
-                                    </button>
-                                    <button
-                                        onClick={() => handleSend("What is the current execution engine config?")}
-                                        className="text-[10px] text-indigo-400 hover:text-white bg-indigo-500/5 hover:bg-indigo-500/20 border border-indigo-500/20 hover:border-indigo-500/50 px-2 py-1 rounded-full cursor-pointer transition-colors"
-                                    >
-                                        Check Engine Settings
-                                    </button>
-                                    {results.length > 0 && (
-                                        <button
-                                            onClick={() => handleSend("Troubleshoot Row 0 template run")}
-                                            className="text-[10px] text-indigo-400 hover:text-white bg-indigo-500/5 hover:bg-indigo-500/20 border border-indigo-500/20 hover:border-indigo-500/50 px-2 py-1 rounded-full cursor-pointer transition-colors"
+                                        <div className="flex items-center justify-between text-[9px] font-semibold text-indigo-300 uppercase tracking-wider select-none shrink-0">
+                                            <span>Next to send</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveQueuedMessage(0)}
+                                                className="text-indigo-400 hover:text-red-400 transition-colors shrink-0 p-0.5 rounded hover:bg-white/5 cursor-pointer flex items-center justify-center"
+                                                title="Cancel prompt"
+                                            >
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                        <div
+                                            className="text-white text-xs leading-relaxed text-left whitespace-pre-wrap break-words pr-5 overflow-y-auto overscroll-contain custom-scrollbar min-h-0"
+                                            style={{ overscrollBehavior: "contain" }}
                                         >
-                                            Troubleshoot Row 0
-                                        </button>
+                                            {messageQueue[0]}
+                                        </div>
+                                    </div>
+
+                                    {/* Remaining queued prompts */}
+                                    {messageQueue.length > 1 && (
+                                        <div className="flex-grow flex flex-col min-h-0 space-y-1.5 pt-0.5">
+                                            <div className="text-[9px] font-semibold text-white/40 uppercase tracking-wider pl-1 select-none text-left shrink-0">
+                                                Upcoming Queue
+                                            </div>
+                                            <div
+                                                className="flex-grow overflow-y-auto overscroll-contain custom-scrollbar space-y-1"
+                                                style={{ overscrollBehavior: "contain" }}
+                                            >
+                                                {messageQueue.slice(1).map((msg, idx) => {
+                                                    const realIdx = idx + 1;
+                                                    return (
+                                                        <div
+                                                            key={realIdx}
+                                                            className="flex items-center justify-between gap-2 bg-neutral-900 border border-white/5 px-2.5 py-1.5 rounded-md text-[11px] transition-colors shrink-0"
+                                                        >
+                                                            <span
+                                                                onClick={() => handleMergeQueuedMessage(realIdx)}
+                                                                className="text-white/60 hover:text-indigo-300 cursor-pointer truncate flex-grow text-left select-none transition-colors"
+                                                                title="Click to merge as next line of 'Next to send'"
+                                                            >
+                                                                {realIdx}. {msg}
+                                                            </span>
+                                                            <div className="flex items-center space-x-1 shrink-0">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleMergeQueuedMessage(realIdx)}
+                                                                    className="text-white/40 hover:text-indigo-400 transition-colors p-0.5 rounded hover:bg-white/5 cursor-pointer flex items-center justify-center"
+                                                                    title="Merge with 'Next to send' (adds as next line)"
+                                                                >
+                                                                    <CornerLeftUp className="w-3.5 h-3.5" />
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleRemoveQueuedMessage(realIdx)}
+                                                                    className="text-white/40 hover:text-red-400 transition-colors p-0.5 rounded hover:bg-white/5 cursor-pointer flex items-center justify-center"
+                                                                    title="Cancel prompt"
+                                                                >
+                                                                    <X className="w-3 h-3" />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
-                            )}
+                            </div>
+                        )}
 
-                            {/* Message Queue Indicator */}
-                            {messageQueue.length > 0 && (
-                                <div 
-                                    className={`px-4 py-2.5 border-t border-white/5 bg-indigo-950/20 backdrop-blur-md select-text shrink-0 flex flex-col ${
-                                        messageQueue.length > 1 
-                                            ? "h-[160px] overflow-hidden" 
-                                            : "max-h-[110px] overflow-y-auto overscroll-contain custom-scrollbar"
-                                    }`}
-                                    style={{ overscrollBehavior: "contain" }}
-                                >
-                                    <div className="flex items-center justify-between text-[10px] font-bold text-indigo-400 uppercase tracking-widest select-none pb-1.5 shrink-0">
-                                        <span>Queued prompts ({messageQueue.length})</span>
-                                    </div>
-                                    <div className="flex-grow flex flex-col min-h-0 space-y-2">
-                                        {/* Next prompt (First in queue) */}
-                                        <div 
-                                            className={`bg-indigo-500/15 border border-indigo-500/25 px-2.5 py-1.5 rounded-lg text-xs transition-colors flex flex-col space-y-0.5 relative group animate-fade-in shrink-0 ${
-                                                messageQueue.length > 1 ? "max-h-[56px]" : "max-h-[75px]"
-                                            }`}
+                        {/* Chat Input form */}
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                handleSend();
+                            }}
+                            className="p-3 border-t border-white/5 bg-neutral-950 flex items-center space-x-2 shrink-0 w-full"
+                        >
+                            {(() => {
+                                const isDisabled = !activeProfile || (!activeProfile.apiKey && activeProfile.provider !== "custom");
+                                const inputArea = (
+                                    <div className="flex items-center space-x-2 flex-grow min-w-0">
+                                        <Textarea
+                                            disabled={isDisabled}
+                                            value={input}
+                                            onChange={(e) => setInput(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter" && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    handleSend();
+                                                }
+                                            }}
+                                            placeholder={
+                                                isDisabled
+                                                    ? "Configure API Key in Settings first..."
+                                                    : isLoading
+                                                        ? "Type to queue next message..."
+                                                        : "Ask about data, configs, troubleshoot failures..."
+                                            }
+                                            className="bg-neutral-900 border-white/10 text-white rounded-lg text-xs resize-none min-h-[36px] py-2 overscroll-contain custom-scrollbar flex-grow"
+                                            style={{ overscrollBehavior: "contain" }}
+                                        />
+                                        <Button
+                                            type="submit"
+                                            size="icon"
+                                            disabled={
+                                                !input.trim() ||
+                                                isLoading ||
+                                                isDisabled
+                                            }
+                                            className="h-9 w-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg shrink-0"
                                         >
-                                            <div className="flex items-center justify-between text-[9px] font-semibold text-indigo-300 uppercase tracking-wider select-none shrink-0">
-                                                <span>Next to send</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleRemoveQueuedMessage(0)}
-                                                    className="text-indigo-400 hover:text-red-400 transition-colors shrink-0 p-0.5 rounded hover:bg-white/5 cursor-pointer flex items-center justify-center"
-                                                    title="Cancel prompt"
-                                                >
-                                                    <X className="w-3 h-3" />
-                                                </button>
-                                            </div>
-                                            <div 
-                                                className="text-white text-xs leading-relaxed text-left whitespace-pre-wrap break-words pr-5 overflow-y-auto overscroll-contain custom-scrollbar min-h-0"
-                                                style={{ overscrollBehavior: "contain" }}
-                                            >
-                                                {messageQueue[0]}
-                                            </div>
-                                        </div>
-
-                                        {/* Remaining queued prompts */}
-                                        {messageQueue.length > 1 && (
-                                            <div className="flex-grow flex flex-col min-h-0 space-y-1.5 pt-0.5">
-                                                <div className="text-[9px] font-semibold text-white/40 uppercase tracking-wider pl-1 select-none text-left shrink-0">
-                                                    Upcoming Queue
-                                                </div>
-                                                <div 
-                                                    className="flex-grow overflow-y-auto overscroll-contain custom-scrollbar space-y-1"
-                                                    style={{ overscrollBehavior: "contain" }}
-                                                >
-                                                    {messageQueue.slice(1).map((msg, idx) => {
-                                                        const realIdx = idx + 1;
-                                                        return (
-                                                            <div 
-                                                                key={realIdx} 
-                                                                className="flex items-center justify-between gap-2 bg-neutral-900 border border-white/5 px-2.5 py-1.5 rounded-md text-[11px] transition-colors shrink-0"
-                                                            >
-                                                                <span 
-                                                                    onClick={() => handleMergeQueuedMessage(realIdx)}
-                                                                    className="text-white/60 hover:text-indigo-300 cursor-pointer truncate flex-grow text-left select-none transition-colors"
-                                                                    title="Click to merge as next line of 'Next to send'"
-                                                                >
-                                                                    {realIdx}. {msg}
-                                                                </span>
-                                                                <div className="flex items-center space-x-1 shrink-0">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleMergeQueuedMessage(realIdx)}
-                                                                        className="text-white/40 hover:text-indigo-400 transition-colors p-0.5 rounded hover:bg-white/5 cursor-pointer flex items-center justify-center"
-                                                                        title="Merge with 'Next to send' (adds as next line)"
-                                                                    >
-                                                                        <CornerLeftUp className="w-3.5 h-3.5" />
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleRemoveQueuedMessage(realIdx)}
-                                                                        className="text-white/40 hover:text-red-400 transition-colors p-0.5 rounded hover:bg-white/5 cursor-pointer flex items-center justify-center"
-                                                                        title="Cancel prompt"
-                                                                    >
-                                                                        <X className="w-3 h-3" />
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-                                        )}
+                                            <Send className="w-4 h-4" />
+                                        </Button>
                                     </div>
-                                </div>
-                            )}
+                                );
 
-                            {/* Chat Input form */}
-                            <form
-                                onSubmit={(e) => {
-                                    e.preventDefault();
-                                    handleSend();
-                                }}
-                                className="p-3 border-t border-white/5 bg-neutral-950 flex items-center space-x-2 shrink-0 w-full"
-                            >
-                                {(() => {
-                                    const isDisabled = !activeProfile || (!activeProfile.apiKey && activeProfile.provider !== "custom");
-                                    const inputArea = (
-                                        <div className="flex items-center space-x-2 flex-grow min-w-0">
-                                            <Textarea
-                                                disabled={isDisabled}
-                                                value={input}
-                                                onChange={(e) => setInput(e.target.value)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === "Enter" && !e.shiftKey) {
-                                                        e.preventDefault();
-                                                        handleSend();
-                                                    }
-                                                }}
-                                                placeholder={
-                                                    isDisabled
-                                                        ? "Configure API Key in Settings first..."
-                                                        : isLoading
-                                                            ? "Type to queue next message..."
-                                                            : "Ask about data, configs, troubleshoot failures..."
-                                                }
-                                                className="bg-neutral-900 border-white/10 text-white rounded-lg text-xs resize-none min-h-[36px] py-2 overscroll-contain custom-scrollbar flex-grow"
-                                                style={{ overscrollBehavior: "contain" }}
-                                            />
-                                            <Button
-                                                type="submit"
-                                                size="icon"
-                                                disabled={
-                                                    !input.trim() || 
-                                                    isLoading ||
-                                                    isDisabled
-                                                }
-                                                className="h-9 w-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg shrink-0"
-                                            >
-                                                <Send className="w-4 h-4" />
-                                            </Button>
-                                        </div>
+                                if (isDisabled) {
+                                    return (
+                                        <TooltipProvider delayDuration={200}>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <div className="flex items-center space-x-2 w-full cursor-not-allowed">
+                                                        {inputArea}
+                                                    </div>
+                                                </TooltipTrigger>
+                                                <TooltipContent className="bg-neutral-950 border border-indigo-500/20 text-white text-xs px-3 py-1.5 rounded-lg shadow-2xl max-w-xs leading-relaxed">
+                                                    To chat with the agent, you must configure a valid agent profile and API key in the Agent Settings (click the settings gear icon above).
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </TooltipProvider>
                                     );
+                                }
 
-                                    if (isDisabled) {
-                                        return (
-                                            <TooltipProvider delayDuration={200}>
-                                                <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                        <div className="flex items-center space-x-2 w-full cursor-not-allowed">
-                                                            {inputArea}
-                                                        </div>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent className="bg-neutral-950 border border-indigo-500/20 text-white text-xs px-3 py-1.5 rounded-lg shadow-2xl max-w-xs leading-relaxed">
-                                                        To chat with the agent, you must configure a valid agent profile and API key in the Agent Settings (click the settings gear icon above).
-                                                    </TooltipContent>
-                                                </Tooltip>
-                                            </TooltipProvider>
-                                        );
-                                    }
+                                return inputArea;
+                            })()}
+                        </form>
+                    </div>
+                )}
 
-                                    return inputArea;
-                                })()}
-                            </form>
-                        </div>
-                    )}
-
-                    {/* Resize handles */}
-                    <div className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "l")} />
-                    <div className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "r")} />
-                    <div className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "t")} />
-                    <div className="absolute bottom-0 left-0 right-0 h-1 cursor-ns-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "b")} />
-                    <div className="absolute top-0 left-0 w-3 h-3 cursor-nwse-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-tl-xl" onMouseDown={(e) => handleResizeMouseDown(e, "tl")} />
-                    <div className="absolute top-0 right-0 w-3 h-3 cursor-nesw-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-tr-xl" onMouseDown={(e) => handleResizeMouseDown(e, "tr")} />
-                    <div className="absolute bottom-0 left-0 w-3 h-3 cursor-nesw-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-bl-xl" onMouseDown={(e) => handleResizeMouseDown(e, "bl")} />
-                    <div className="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-br-xl" onMouseDown={(e) => handleResizeMouseDown(e, "br")} />
-                </div>
+                {/* Resize handles */}
+                <div className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "l")} />
+                <div className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "r")} />
+                <div className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "t")} />
+                <div className="absolute bottom-0 left-0 right-0 h-1 cursor-ns-resize z-50 hover:bg-indigo-500/30 transition-colors duration-150" onMouseDown={(e) => handleResizeMouseDown(e, "b")} />
+                <div className="absolute top-0 left-0 w-3 h-3 cursor-nwse-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-tl-xl" onMouseDown={(e) => handleResizeMouseDown(e, "tl")} />
+                <div className="absolute top-0 right-0 w-3 h-3 cursor-nesw-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-tr-xl" onMouseDown={(e) => handleResizeMouseDown(e, "tr")} />
+                <div className="absolute bottom-0 left-0 w-3 h-3 cursor-nesw-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-bl-xl" onMouseDown={(e) => handleResizeMouseDown(e, "bl")} />
+                <div className="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize z-50 hover:bg-indigo-500/50 transition-colors duration-150 rounded-br-xl" onMouseDown={(e) => handleResizeMouseDown(e, "br")} />
+            </div>
 
             {/* Custom Warning Confirmation Dialog for Reverting prompt */}
             <Dialog open={revertTargetId !== null} onOpenChange={(open) => { if (!open) setRevertTargetId(null); }}>
@@ -821,7 +817,7 @@ export function AgentChatPanel() {
                             <DialogTitle>Revert & Edit Prompt</DialogTitle>
                         </div>
                         <DialogDescription className="text-xs text-white/60 leading-relaxed pt-1">
-                            Are you sure you want to pull this prompt back to the chat input box? 
+                            Are you sure you want to pull this prompt back to the chat input box?
                             This message and all succeeding responses/actions will be <span className="text-red-400 font-semibold">permanently deleted</span> from history and cannot be recovered.
                         </DialogDescription>
                     </DialogHeader>

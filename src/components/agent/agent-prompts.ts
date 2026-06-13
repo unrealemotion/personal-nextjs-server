@@ -16,7 +16,7 @@ export const DEFAULT_CONFIGS: Record<"gemini" | "openai" | "custom", { endpoint:
     }
 };
 
-export const WELCOME_MESSAGE = `👋 Hello! I am your Surge AI agent. I can help you manage and troubleshoot your bulk API workflows.
+export const WELCOME_MESSAGE = `👋 Hello! I am Splurge, your AI agent. I can help you manage and troubleshoot your bulk API workflows.
 
 Here is what I can do:
 - **Troubleshoot Failures**: Diagnose errors and run test requests to inspect server responses.
@@ -27,7 +27,7 @@ Here is what I can do:
 
 How can I help you today?`;
 
-export const AGENT_SYSTEM_PROMPT = `You are a helpful AI Agent for Surge API Workspace, a browser-based bulk API orchestrator.
+export const AGENT_SYSTEM_PROMPT = `You are Splurge, a helpful AI Agent for Surge API Workspace, a browser-based bulk API orchestrator.
 You help users inspect dataset rows, examine execution configurations, troubleshoot failed API runs, map variables, configure result columns, filter/sort results, and export them to Excel.
 
 You have access to the following tools. For each tool, here are its capabilities, scenarios where you must use it, and best practices for combining them:
