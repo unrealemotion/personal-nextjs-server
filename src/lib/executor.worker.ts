@@ -46,6 +46,87 @@ function pLimit(concurrency: number) {
 
 let abortController: AbortController | null = null;
 
+async function executeRowSteps(
+    row: any,
+    templates: RequestTemplate[],
+    maxRetries: number,
+    retryStatusCodes: string,
+    stopOnFailure: boolean,
+    index: number,
+    iter: number,
+    signal: AbortSignal
+): Promise<{ steps: StepResult[]; chainFailed: boolean; totalTime: number }> {
+    const steps: StepResult[] = [];
+    let chainFailed = false;
+    const chainStartTime = performance.now();
+    
+    const executionContext = { ...row };
+
+    for (const tmpl of templates) {
+        if (isPaused) {
+            await new Promise<void>(resolveResume => {
+                const onResume = () => {
+                    resolveResume();
+                };
+                resumeListeners.push(onResume);
+            });
+        }
+        if (signal.aborted) {
+            steps.push(createCancelledOrSkippedStep(tmpl.id, tmpl.name, "Cancelled"));
+            chainFailed = true;
+            continue;
+        }
+
+        if (chainFailed && stopOnFailure) {
+            steps.push(createCancelledOrSkippedStep(tmpl.id, tmpl.name, "Skipped (Previous Step Failed)"));
+            continue;
+        }
+
+        const stepResult = await executeStep(tmpl, executionContext, maxRetries, retryStatusCodes, signal);
+        steps.push(stepResult);
+
+        self.postMessage({
+            type: "STEP_PROGRESS",
+            index,
+            iteration: iter,
+            stepResult,
+            stepIndex: steps.length - 1
+        });
+
+        if (stepResult.error) {
+            chainFailed = true;
+        }
+
+        const idx = steps.length;
+        populateExecutionContext(tmpl, stepResult, idx, executionContext);
+    }
+
+    const totalTime = Math.round(performance.now() - chainStartTime);
+    return { steps, chainFailed, totalTime };
+}
+
+function buildChainResultPayload(steps: StepResult[], totalTime: number, chainFailed: boolean) {
+    const lastStep = steps[steps.length - 1];
+    return {
+        status: chainFailed ? "error" : "success",
+        statusCode: lastStep?.statusCode || 0,
+        responseTimeMs: totalTime,
+        requestUrl: steps[0]?.requestUrl || null,
+        requestMethod: steps[0]?.requestMethod || null,
+        requestHeaders: steps[0]?.requestHeaders || null,
+        requestParams: steps[0]?.requestParams || null,
+        requestBody: steps[0]?.requestBody || null,
+        responseBody: lastStep?.responseBody || null,
+        responseHeaders: lastStep?.responseHeaders || null,
+        responseType: lastStep?.responseType || null,
+        responseRedirected: lastStep?.responseRedirected || null,
+        responseStatusText: lastStep?.responseStatusText || null,
+        ipAddress: lastStep?.ipAddress || null,
+        steps,
+        error: chainFailed ? steps.filter(s => s.error).map(s => s.error).join("; ") : undefined,
+    };
+}
+
 self.onmessage = async (e: MessageEvent) => {
     const { type } = e.data;
 
@@ -89,75 +170,18 @@ self.onmessage = async (e: MessageEvent) => {
                             return;
                         }
 
-                        const steps: StepResult[] = [];
-                        let chainFailed = false;
-                        const chainStartTime = performance.now();
-                        
-                        // Build dynamic context for step-to-step variable interpolation
-                        const executionContext = { ...row };
+                        const { steps, chainFailed, totalTime } = await executeRowSteps(
+                            row,
+                            templates,
+                            maxRetries,
+                            retryStatusCodes,
+                            stopOnFailure,
+                            index,
+                            iter,
+                            signal
+                        );
 
-                        for (const tmpl of templates) {
-                            if (isPaused) {
-                                await new Promise<void>(resolveResume => {
-                                    const onResume = () => {
-                                        resolveResume();
-                                    };
-                                    resumeListeners.push(onResume);
-                                });
-                            }
-                            if (signal.aborted) {
-                                steps.push(createCancelledOrSkippedStep(tmpl.id, tmpl.name, "Cancelled"));
-                                chainFailed = true;
-                                continue;
-                            }
-
-                            // Stop chain on step failure if configured
-                            if (chainFailed && stopOnFailure) {
-                                steps.push(createCancelledOrSkippedStep(tmpl.id, tmpl.name, "Skipped (Previous Step Failed)"));
-                                continue;
-                            }
-
-                            const stepResult = await executeStep(tmpl, executionContext, maxRetries, retryStatusCodes, signal);
-                            steps.push(stepResult);
-
-                            self.postMessage({
-                                type: "STEP_PROGRESS",
-                                index,
-                                iteration: iter,
-                                stepResult,
-                                stepIndex: steps.length - 1
-                            });
-
-                            if (stepResult.error) {
-                                chainFailed = true;
-                            }
-
-                            // Populate executionContext with step outputs for variables usage
-                            const idx = steps.length; // 1-based step order
-                            populateExecutionContext(tmpl, stepResult, idx, executionContext);
-                        }
-
-                        const totalTime = Math.round(performance.now() - chainStartTime);
-                        const lastStep = steps[steps.length - 1];
-
-                        const resultPayload = {
-                            status: chainFailed ? "error" : "success",
-                            statusCode: lastStep?.statusCode || 0,
-                            responseTimeMs: totalTime,
-                            requestUrl: steps[0]?.requestUrl || null,
-                            requestMethod: steps[0]?.requestMethod || null,
-                            requestHeaders: steps[0]?.requestHeaders || null,
-                            requestParams: steps[0]?.requestParams || null,
-                            requestBody: steps[0]?.requestBody || null,
-                            responseBody: lastStep?.responseBody || null,
-                            responseHeaders: lastStep?.responseHeaders || null,
-                            responseType: lastStep?.responseType || null,
-                            responseRedirected: lastStep?.responseRedirected || null,
-                            responseStatusText: lastStep?.responseStatusText || null,
-                            ipAddress: lastStep?.ipAddress || null,
-                            steps,
-                            error: chainFailed ? steps.filter(s => s.error).map(s => s.error).join("; ") : undefined,
-                        };
+                        const resultPayload = buildChainResultPayload(steps, totalTime, chainFailed);
 
                         completed++;
                         self.postMessage({

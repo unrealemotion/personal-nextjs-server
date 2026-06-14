@@ -138,6 +138,43 @@ function getValueChildren(val: any): string[] {
     return [];
 }
 
+function getTargetStep(col: ColumnMapping, steps: StepResult[] | undefined, useLast: boolean): StepResult | undefined {
+    const list = steps || [];
+    if (col.stepId) {
+        return list.find(s => s.stepId === col.stepId);
+    }
+    return useLast ? list[list.length - 1] : list[0];
+}
+
+function mapResponseTimeColumn(col: ColumnMapping, res: ExecutionResult): string {
+    const step = getTargetStep(col, res.steps, true);
+    if (step) {
+        return `${step.responseTimeMs} ms`;
+    }
+    return res.status === "pending" ? "..." : `${res.responseTimeMs} ms`;
+}
+
+function mapRequestBodyColumn(col: ColumnMapping, res: ExecutionResult): string {
+    const step = getTargetStep(col, res.steps, false);
+    return step?.requestBody
+        ? getByDotNotation(step.requestBody, col.path)
+        : "";
+}
+
+function mapRequestParamColumn(col: ColumnMapping, res: ExecutionResult, rowData: any): string {
+    const step = getTargetStep(col, res.steps, false);
+    return (step?.requestParams?.[col.path] ?? rowData[col.path]) ?? "";
+}
+
+function mapResponseColumn(col: ColumnMapping, res: ExecutionResult): string {
+    const step = getTargetStep(col, res.steps, true);
+    const body = step?.responseBody ?? res.responseBody;
+    if (body !== undefined && body !== null) {
+        return getByDotNotation(body, col.path);
+    }
+    return res.status === "pending" ? "..." : "";
+}
+
 function mapColumnValue(col: ColumnMapping, idx: number, res: ExecutionResult, rowData: any, isModified: boolean): any {
     if (col.source === "status") {
         return res.status === "pending" ? "Pending" : res.statusCode;
@@ -146,50 +183,56 @@ function mapColumnValue(col: ColumnMapping, idx: number, res: ExecutionResult, r
         return res.error || "";
     }
     if (col.source === "response_time") {
-        const steps = res.steps || [];
-        const step = col.stepId
-            ? steps.find(s => s.stepId === col.stepId)
-            : steps[steps.length - 1];
-        if (step) {
-            return `${step.responseTimeMs} ms`;
-        }
-        return res.status === "pending" ? "..." : `${res.responseTimeMs} ms`;
+        return mapResponseTimeColumn(col, res);
     }
     if (col.source === "variable") {
         return rowData[col.path] ?? "";
     }
     if (col.source === "request_body") {
-        const steps = res.steps || [];
-        const step = col.stepId
-            ? steps.find(s => s.stepId === col.stepId)
-            : steps[0];
-        return step?.requestBody
-            ? getByDotNotation(step.requestBody, col.path)
-            : "";
+        return mapRequestBodyColumn(col, res);
     }
     if (col.source === "request_param") {
-        const steps = res.steps || [];
-        const step = col.stepId
-            ? steps.find(s => s.stepId === col.stepId)
-            : steps[0];
-        return (step?.requestParams?.[col.path] ?? rowData[col.path]) ?? "";
+        return mapRequestParamColumn(col, res, rowData);
     }
     if (col.source === "response") {
-        const steps = res.steps || [];
-        const step = col.stepId
-            ? steps.find(s => s.stepId === col.stepId)
-            : steps[steps.length - 1];
-        const body = step?.responseBody ?? res.responseBody;
-        if (body !== undefined && body !== null) {
-            return getByDotNotation(body, col.path);
-        }
-        return res.status === "pending" ? "..." : "";
+        return mapResponseColumn(col, res);
     }
     if (col.source === "modified") {
         return isModified ? "modified" : "original";
     }
     return "";
 }
+
+function TableCellRenderer({ col, value }: { col: ColumnMapping; value: any }) {
+    if (col.source === "status") {
+        if (value === "Pending") {
+            return <Badge variant="secondary" className="animate-pulse px-3">Pending...</Badge>;
+        }
+        const status = Number(value);
+        return (
+            <Badge variant={status >= 200 && status < 300 ? "default" : status === 0 ? "outline" : "destructive"}>
+                {status || "Error"}
+            </Badge>
+        );
+    }
+    if (col.source === "modified") {
+        const isMod = value === "modified";
+        return (
+            <Badge variant={isMod ? "default" : "outline"} className={isMod ? "bg-amber-500/20 text-amber-500 border-amber-500/30 hover:bg-amber-500/20" : "text-neutral-500 border-neutral-800"}>
+                {isMod ? "modified" : "original"}
+            </Badge>
+        );
+    }
+    const stringValue = String(value ?? "");
+    if (!stringValue) return null;
+    return (
+        <CopyableText
+            value={stringValue}
+            className="max-w-[200px] text-xs"
+        />
+    );
+}
+
 
 function tryParseJson(body: any): any | undefined {
     if (typeof body === "string") {
@@ -1687,36 +1730,7 @@ export function ResultsTable() {
                         rawTableData={rawTableData}
                     />
                 ),
-                cell: (info) => {
-                    const value = info.getValue() as string | number;
-                    if (col.source === "status") {
-                        if (value === "Pending") {
-                            return <Badge variant="secondary" className="animate-pulse px-3">Pending...</Badge>;
-                        }
-                        const status = Number(value);
-                        return (
-                            <Badge variant={status >= 200 && status < 300 ? "default" : status === 0 ? "outline" : "destructive"}>
-                                {status || "Error"}
-                            </Badge>
-                        );
-                    }
-                    if (col.source === "modified") {
-                        const isMod = value === "modified";
-                        return (
-                            <Badge variant={isMod ? "default" : "outline"} className={isMod ? "bg-amber-500/20 text-amber-500 border-amber-500/30 hover:bg-amber-500/20" : "text-neutral-500 border-neutral-800"}>
-                                {isMod ? "modified" : "original"}
-                            </Badge>
-                        );
-                    }
-                    const stringValue = String(value ?? "");
-                    if (!stringValue) return null;
-                    return (
-                        <CopyableText
-                            value={stringValue}
-                            className="max-w-[200px] text-xs"
-                        />
-                    );
-                }
+                cell: (info) => <TableCellRenderer col={col} value={info.getValue()} />
             });
         });
 

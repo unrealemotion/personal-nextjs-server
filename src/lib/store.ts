@@ -25,96 +25,29 @@ Here is what I can do:
 
 How can I help you today?`;
 
-export type VariableType = "string" | "number" | "boolean";
+import type { VariableType, AppState } from "./store-helpers";
+import {
+    generateId,
+    createDefaultTemplate,
+    createDefaultApiRequest,
+    createDefaultTab,
+    resolveTableFilterConfig as resolveTableFilterConfigHelper,
+    resolveColumnMappings as resolveColumnMappingsHelper,
+    getConfigStateSnapshot,
+    applyTypes
+} from "./store-helpers";
+import {
+    saveToDB,
+    loadFromDB,
+    deleteFromDB,
+    clearDB,
+    saveCheckpoint,
+    loadCheckpoint,
+    deleteCheckpoint
+} from "./store-db";
 
-export function generateId(): string {
-    return Math.random().toString(36).substring(2, 10);
-}
-
-function createDefaultTemplate(name?: string): RequestTemplate {
-    return {
-        id: generateId(),
-        name: name || "Request 1",
-        method: "GET",
-        url: "",
-        params: [],
-        headers: [],
-        body: {
-            mode: "none",
-            raw: "{\n  \n}",
-            formdata: [],
-            urlencoded: [],
-        },
-    };
-}
-
-export function createDefaultApiRequest(name = "Untitled Request"): ApiRequest {
-    return {
-        id: generateId(),
-        name,
-        method: "GET",
-        url: "",
-        params: [],
-        headers: [],
-        body: {
-            mode: "none",
-            raw: "{\n  \n}",
-            formdata: [],
-            urlencoded: [],
-        },
-        preRequestScript: "",
-        testScript: "",
-    };
-}
-
-function createDefaultTab(name = "Untitled Request", request?: ApiRequest): RequestTab {
-    const req = request || createDefaultApiRequest(name);
-    return {
-        id: generateId(),
-        name: req.name,
-        isDirty: false,
-        request: req,
-        requestId: request ? req.id : undefined,
-        response: null,
-        loading: false,
-        activeSubTab: "params",
-    };
-}
-
-type AppState = {
-    originalData: Array<Record<string, any>>;
-    fileData: Array<Record<string, any>>;
-    headers: string[];
-    headerTypes: Record<string, VariableType>;
-    templates: RequestTemplate[];
-    activeTemplateId: string;
-    results: ExecutionResult[];
-    maxRetries: number;
-    retryStatusCodes: string;
-    stopOnFailure: boolean;
-    throttleDelayMs: number;
-    rowIterations: number;
-    concurrency: number;
-    columnMappings: ColumnMapping[];
-    tableFilterConfig: TableFilterConfig;
-    fileName: string;
-
-    // API Client state
-    currentView: "bulk" | "api_client";
-    collections: ApiCollection[];
-    environments: Environment[];
-    activeEnvironmentId: string | null;
-    apiTabs: RequestTab[];
-    activeTabId: string | null;
-
-    // Agent state
-    agentProfiles: AgentProfile[];
-    activeAgentProfileId: string | null;
-    agentChatMessages: Message[];
-    agentPanelPosition: { x: number; y: number } | null;
-    agentPanelSize?: { width: number; height: number } | null;
-    exportExcelTrigger?: { onlyFiltered: boolean } | null;
-};
+export type { VariableType };
+export { generateId, createDefaultApiRequest, saveCheckpoint, loadCheckpoint, deleteCheckpoint };
 
 const LOCAL_STORAGE_KEY = "surge_api_workspace";
 
@@ -195,126 +128,13 @@ const defaultState: AppState = {
 };
 
 function resolveTableFilterConfig(imported?: any): TableFilterConfig {
-    const importedFilterConfig = imported || {};
-    return {
-        ...defaultState.tableFilterConfig,
-        ...importedFilterConfig,
-        columnFilters: {
-            ...defaultState.tableFilterConfig.columnFilters,
-            ...(importedFilterConfig.columnFilters || {})
-        }
-    };
+    return resolveTableFilterConfigHelper(defaultState, imported);
 }
 
 function resolveColumnMappings(columnMappings?: any[]): ColumnMapping[] {
-    const list = columnMappings || defaultState.columnMappings;
-    return list.map((col: any) => ({
-        ...col,
-        id: col.id || `col_${generateId()}`
-    }));
+    return resolveColumnMappingsHelper(defaultState, columnMappings);
 }
 
-const getConfigStateSnapshot = (state: AppState, resetResponse = false) => ({
-    templates: state.templates,
-    activeTemplateId: state.activeTemplateId,
-    maxRetries: state.maxRetries,
-    retryStatusCodes: state.retryStatusCodes,
-    stopOnFailure: state.stopOnFailure,
-    throttleDelayMs: state.throttleDelayMs,
-    rowIterations: state.rowIterations,
-    concurrency: state.concurrency,
-    columnMappings: state.columnMappings,
-    tableFilterConfig: state.tableFilterConfig,
-    currentView: state.currentView,
-    collections: state.collections,
-    environments: state.environments,
-    activeEnvironmentId: state.activeEnvironmentId,
-    apiTabs: resetResponse
-        ? (state.apiTabs || []).map(tab => ({ ...tab, response: null }))
-        : state.apiTabs,
-    activeTabId: state.activeTabId,
-    agentProfiles: state.agentProfiles,
-    activeAgentProfileId: state.activeAgentProfileId,
-    agentChatMessages: state.agentChatMessages,
-    agentPanelPosition: state.agentPanelPosition,
-    agentPanelSize: state.agentPanelSize
-});
-
-// --- Hydration & Persistence ---
-const DB_NAME = "SurgeWorkspaceDB";
-const STORE_NAME = "stateStore";
-const DB_KEY = "workspaceState";
-
-let dbInstance: IDBDatabase | null = null;
-
-function getDB(): Promise<IDBDatabase> {
-    if (dbInstance) return Promise.resolve(dbInstance);
-    return new Promise((resolve, reject) => {
-        if (typeof window === "undefined") {
-            reject(new Error("Browser environment required for IndexedDB"));
-            return;
-        }
-        const request = indexedDB.open(DB_NAME, 1);
-        request.onupgradeneeded = () => {
-            const db = request.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.createObjectStore(STORE_NAME);
-            }
-        };
-        request.onsuccess = () => {
-            dbInstance = request.result;
-            dbInstance.onversionchange = () => {
-                dbInstance?.close();
-                dbInstance = null;
-            };
-            resolve(dbInstance);
-        };
-        request.onerror = () => reject(request.error);
-    });
-}
-
-function runReadTx<T>(operation: (store: IDBObjectStore) => IDBRequest): Promise<T> {
-    return getDB().then((db) => {
-        return new Promise<T>((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, "readonly");
-            const store = tx.objectStore(STORE_NAME);
-            const request = operation(store);
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
-    });
-}
-
-function runWriteTx<T>(operation: (store: IDBObjectStore) => IDBRequest): Promise<T> {
-    return getDB().then((db) => {
-        return new Promise<T>((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, "readwrite");
-            const store = tx.objectStore(STORE_NAME);
-            const request = operation(store);
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
-    });
-}
-
-function saveToDB(value: any, key: string = DB_KEY): Promise<void> {
-    return runWriteTx<void>((store) => store.put(value, key));
-}
-
-function loadFromDB(key: string = DB_KEY): Promise<any> {
-    return runReadTx((store) => store.get(key)).catch((e) => {
-        console.warn(`Failed to load key ${key} from IndexedDB:`, e);
-        return null;
-    });
-}
-
-function deleteFromDB(key: string): Promise<void> {
-    return runWriteTx<void>((store) => store.delete(key));
-}
-
-function clearDB(): Promise<void> {
-    return runWriteTx<void>((store) => store.clear());
-}
 
 const globalForStore = globalThis as unknown as {
     store: Store<AppState> | undefined;
@@ -647,39 +467,6 @@ if (typeof window !== "undefined") {
         }
     });
 }
-
-// --- Helpers ---
-
-const castValue = (val: any, type: VariableType): any => {
-    if (val === undefined || val === null || val === "") return val;
-
-    if (type === "string") return String(val);
-
-    if (type === "number") {
-        const parsed = Number(val);
-        return isNaN(parsed) ? val : parsed;
-    }
-
-    if (type === "boolean") {
-        if (typeof val === "string") {
-            const low = val.toLowerCase();
-            return low === "true" || low === "1";
-        }
-        return Boolean(val);
-    }
-
-    return val;
-};
-
-const applyTypes = (data: Array<Record<string, any>>, types: Record<string, VariableType>): Array<Record<string, any>> => {
-    return data.map(row => {
-        const newRow = { ...row };
-        Object.keys(types).forEach(header => {
-            newRow[header] = castValue(row[header], types[header]);
-        });
-        return newRow;
-    });
-};
 
 // --- Workspace actions ---
 
@@ -1281,18 +1068,6 @@ export const setAgentPanelSize = (size: { width: number; height: number } | null
         ...state,
         agentPanelSize: size
     }));
-};
-
-export const saveCheckpoint = async (messageId: string, stateSnapshot: any) => {
-    await saveToDB(stateSnapshot, `checkpoint_${messageId}`);
-};
-
-export const loadCheckpoint = async (messageId: string) => {
-    return await loadFromDB(`checkpoint_${messageId}`);
-};
-
-export const deleteCheckpoint = async (messageId: string) => {
-    await deleteFromDB(`checkpoint_${messageId}`);
 };
 
 

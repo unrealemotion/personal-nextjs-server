@@ -333,70 +333,22 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
         setIsLoading(true);
 
         const activeHistory = [...updatedHistory];
-        let maxIterations = activeProfile!.maxExecutionLimit !== undefined ? activeProfile!.maxExecutionLimit : 6;
-        const isInfinite = maxIterations === 0;
-
         const controller = new AbortController();
         abortControllerRef.current = controller;
         const signal = controller.signal;
 
         try {
-            while (isInfinite || maxIterations > 0) {
-                if (signal.aborted) {
-                    throw new DOMException("The user aborted a request.", "AbortError");
-                }
-
-                // Filter tools to only those registered and allowed in profile
-                const allowedTools = tools.filter(t => 
-                    !activeProfile!.allowedTools || activeProfile!.allowedTools.includes(t.function.name)
-                );
-
-                const response = await callLLM(
-                    activeHistory,
-                    activeProfile!,
-                    systemPromptRef.current || DEFAULT_SYSTEM,
-                    allowedTools,
-                    fetchProxy,
-                    signal
-                );
-
-                if (response.toolCalls && response.toolCalls.length > 0) {
-                    const assistantMessage: Message = {
-                        id: `msg_${Date.now()}_assistant`,
-                        role: "assistant",
-                        content: response.text || "Executing tools...",
-                        tool_calls: response.toolCalls,
-                        geminiParts: response.geminiParts,
-                        reasoning: response.reasoning
-                    };
-
-                    activeHistory.push(assistantMessage);
-                    setMessages([...activeHistory]);
-
-                    for (const tc of response.toolCalls) {
-                        await executeSingleTool(tc, signal, runToolHandler, activeHistory, setMessages);
-                    }
-
-                    if (!isInfinite) {
-                        maxIterations--;
-                    }
-                } else {
-                    const assistantMessage: Message = {
-                        id: `msg_${Date.now()}_assistant`,
-                        role: "assistant",
-                        content: response.text,
-                        geminiParts: response.geminiParts,
-                        reasoning: response.reasoning
-                    };
-                    activeHistory.push(assistantMessage);
-                    setMessages([...activeHistory]);
-                    break;
-                }
-            }
-
-            if (!isInfinite && maxIterations === 0) {
-                showToast("warning", "Agent loop hit maximum function execution limit.");
-            }
+            await runAgentInteraction(
+                activeHistory,
+                activeProfile!,
+                tools,
+                systemPromptRef.current || DEFAULT_SYSTEM,
+                fetchProxy,
+                signal,
+                runToolHandler,
+                setMessages,
+                showToast
+            );
         } catch (e: any) {
             console.error(e);
             let errMsg = e.message || String(e);
@@ -680,3 +632,75 @@ async function executeSingleTool(
     activeHistory.push(toolMsg);
     setMessages([...activeHistory]);
 }
+
+async function runAgentInteraction(
+    activeHistory: Message[],
+    activeProfile: AgentProfile,
+    tools: ToolDefinition[],
+    systemPrompt: string,
+    fetchProxy: any,
+    signal: AbortSignal,
+    runToolHandler: (name: string, args: any) => Promise<any>,
+    setMessages: (messages: Message[]) => void,
+    showToast: any
+): Promise<void> {
+    let maxIterations = activeProfile.maxExecutionLimit !== undefined ? activeProfile.maxExecutionLimit : 6;
+    const isInfinite = maxIterations === 0;
+
+    while (isInfinite || maxIterations > 0) {
+        if (signal.aborted) {
+            throw new DOMException("The user aborted a request.", "AbortError");
+        }
+
+        const allowedTools = tools.filter(t => 
+            !activeProfile.allowedTools || activeProfile.allowedTools.includes(t.function.name)
+        );
+
+        const response = await callLLM(
+            activeHistory,
+            activeProfile,
+            systemPrompt,
+            allowedTools,
+            fetchProxy,
+            signal
+        );
+
+        if (response.toolCalls && response.toolCalls.length > 0) {
+            const assistantMessage: Message = {
+                id: `msg_${Date.now()}_assistant`,
+                role: "assistant",
+                content: response.text || "Executing tools...",
+                tool_calls: response.toolCalls,
+                geminiParts: response.geminiParts,
+                reasoning: response.reasoning
+            };
+
+            activeHistory.push(assistantMessage);
+            setMessages([...activeHistory]);
+
+            for (const tc of response.toolCalls) {
+                await executeSingleTool(tc, signal, runToolHandler, activeHistory, setMessages);
+            }
+
+            if (!isInfinite) {
+                maxIterations--;
+            }
+        } else {
+            const assistantMessage: Message = {
+                id: `msg_${Date.now()}_assistant`,
+                role: "assistant",
+                content: response.text,
+                geminiParts: response.geminiParts,
+                reasoning: response.reasoning
+            };
+            activeHistory.push(assistantMessage);
+            setMessages([...activeHistory]);
+            break;
+        }
+    }
+
+    if (!isInfinite && maxIterations === 0) {
+        showToast("warning", "Agent loop hit maximum function execution limit.");
+    }
+}
+

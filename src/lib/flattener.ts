@@ -25,6 +25,45 @@ export function jsonToTableData(jsonVal: any, options: ConvertOptions): any[] {
   return expandItem(jsonVal, options);
 }
 
+function processArrayField(rows: any[], val: any[], path: string, options: ConvertOptions): any[] {
+  if (options.splitArrays) {
+    if (val.length === 0) {
+      return rows.map((r) => ({ ...r, [path]: null }));
+    }
+
+    const nextRows: any[] = [];
+    for (const r of rows) {
+      for (const el of val) {
+        const subRows = expandValue(el, path, options);
+        for (const subRow of subRows) {
+          nextRows.push({ ...r, ...subRow });
+        }
+      }
+    }
+    return nextRows;
+  } else {
+    return rows.map((r) => ({ ...r, [path]: JSON.stringify(val) }));
+  }
+}
+
+function processObjectField(rows: any[], val: any, path: string, options: ConvertOptions): any[] {
+  if (options.flattenObjects) {
+    const keys = Object.keys(val);
+    if (keys.length === 0) {
+      return rows.map((r) => ({ ...r, [path]: "{}" }));
+    }
+
+    let tempRows = [...rows];
+    for (const k of keys) {
+      const subPath = path ? `${path}.${k}` : k;
+      tempRows = processField(tempRows, val[k], subPath, options);
+    }
+    return tempRows;
+  } else {
+    return rows.map((r) => ({ ...r, [path]: JSON.stringify(val) }));
+  }
+}
+
 // Helper to process a value at a given path into an array of rows
 function processField(rows: any[], val: any, path: string, options: ConvertOptions): any[] {
   // 1. Handle Null or Undefined
@@ -34,43 +73,12 @@ function processField(rows: any[], val: any, path: string, options: ConvertOptio
 
   // 2. Handle Arrays
   if (Array.isArray(val)) {
-    if (options.splitArrays) {
-      if (val.length === 0) {
-        return rows.map((r) => ({ ...r, [path]: null }));
-      }
-
-      const nextRows: any[] = [];
-      for (const r of rows) {
-        for (const el of val) {
-          const subRows = expandValue(el, path, options);
-          for (const subRow of subRows) {
-            nextRows.push({ ...r, ...subRow });
-          }
-        }
-      }
-      return nextRows;
-    } else {
-      return rows.map((r) => ({ ...r, [path]: JSON.stringify(val) }));
-    }
+    return processArrayField(rows, val, path, options);
   }
 
   // 3. Handle Nested Objects
   if (typeof val === "object") {
-    if (options.flattenObjects) {
-      const keys = Object.keys(val);
-      if (keys.length === 0) {
-        return rows.map((r) => ({ ...r, [path]: "{}" }));
-      }
-
-      let tempRows = [...rows];
-      for (const k of keys) {
-        const subPath = path ? `${path}.${k}` : k;
-        tempRows = processField(tempRows, val[k], subPath, options);
-      }
-      return tempRows;
-    } else {
-      return rows.map((r) => ({ ...r, [path]: JSON.stringify(val) }));
-    }
+    return processObjectField(rows, val, path, options);
   }
 
   // 4. Handle Primitives

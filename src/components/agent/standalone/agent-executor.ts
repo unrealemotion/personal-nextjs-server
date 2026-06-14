@@ -96,15 +96,8 @@ function extractJsonFallbackToolCalls(text: string, toolCalls: any[]): void {
     }
 }
 
-async function callGemini(
-    params: LLMCallParams
-): Promise<{ text: string; toolCalls: any[]; geminiParts?: any[]; reasoning?: string }> {
-    const { chatMessages, config, systemPrompt, agentTools, fetchProxy, abortSignal } = params;
-    const { apiKey, endpoint, model } = config;
-    const apiTargetUrl = `${endpoint.endsWith('/') ? endpoint : endpoint + '/'}${model}:generateContent?key=${apiKey}`;
-
-    // Map messages to Gemini's role/parts format
-    const geminiContents = chatMessages.map(m => {
+function mapMessagesToGeminiContents(chatMessages: Message[]): any[] {
+    return chatMessages.map(m => {
         if (m.role === "system") return null;
         if (m.role === "assistant") {
             if (m.geminiParts && m.geminiParts.length > 0) {
@@ -140,8 +133,10 @@ async function callGemini(
             parts: [{ text: m.content }]
         };
     }).filter(Boolean);
+}
 
-    const geminiTools = [
+function mapToolsToGeminiTools(agentTools: ToolDefinition[]): any[] {
+    return [
         {
             functionDeclarations: agentTools.map((t: any) => ({
                 name: t.function.name,
@@ -150,6 +145,91 @@ async function callGemini(
             }))
         }
     ];
+}
+
+function handleGeminiErrorResponse(response: Response, errText: string): never {
+    let errMsg = "";
+    let errStatus = "";
+    let friendlyAdvice = "";
+    try {
+        const parsed = JSON.parse(errText);
+        if (parsed.error) {
+            errMsg = parsed.error.message || "";
+            errStatus = parsed.error.status || "";
+            if (Array.isArray(parsed.error.details)) {
+                const detailsMsg = parsed.error.details
+                    .map((d: any) => d.message || d.reason || JSON.stringify(d))
+                    .filter(Boolean)
+                    .join("; ");
+                if (detailsMsg) {
+                    errMsg += ` (Details: ${detailsMsg})`;
+                }
+            }
+        }
+    } catch {
+        errMsg = errText;
+    }
+
+    if (!errMsg) {
+        errMsg = `HTTP Error ${response.status}`;
+    }
+
+    if (response.status === 400) {
+        if (errMsg.toLowerCase().includes("key") || errStatus === "INVALID_ARGUMENT") {
+            friendlyAdvice = " Please verify your API Key is correct and active in Settings.";
+        } else {
+            friendlyAdvice = " Please verify that the request parameters and model inputs are correct.";
+        }
+    } else if (response.status === 403) {
+        friendlyAdvice = " Access denied. Please ensure the API key is active and has the required permissions or billing enabled.";
+    } else if (response.status === 404) {
+        friendlyAdvice = " The specified model or endpoint was not found. Please check your model name and base endpoint URL in Settings.";
+    } else if (response.status === 429) {
+        friendlyAdvice = " Quota exceeded or rate limit reached. Please wait a moment before trying again, or check your Gemini billing/usage limits.";
+    } else if (response.status >= 500) {
+        friendlyAdvice = " Gemini server error. Please try again in a few seconds.";
+    }
+
+    const fullMsg = `Gemini API Error (${response.status}${errStatus ? ` - ${errStatus}` : ""}): ${errMsg}.${friendlyAdvice}`;
+    throw new Error(fullMsg);
+}
+
+function checkGeminiSafetyAndFinishReasons(data: any, candidate: any): void {
+    if (data.promptFeedback && data.promptFeedback.blockReason) {
+        throw new Error(`Gemini API Prompt Blocked: The input prompt was blocked by safety/policy filters (Reason: ${data.promptFeedback.blockReason}).`);
+    }
+
+    if (!candidate) {
+        throw new Error("Gemini API Error: No response candidates were returned. The request may have been blocked or filtered.");
+    }
+
+    if (candidate.finishReason && candidate.finishReason !== "STOP" && candidate.finishReason !== "MAX_TOKENS") {
+        const reason = candidate.finishReason;
+        let extra = "";
+        if (reason === "SAFETY" && candidate.safetyRatings) {
+            const blockedCategories = candidate.safetyRatings
+                .filter((r: any) => r.blocked || r.probability === "MEDIUM" || r.probability === "HIGH")
+                .map((r: any) => `${r.category} (${r.probability})`)
+                .join(", ");
+            if (blockedCategories) {
+                extra = ` Flagged categories: ${blockedCategories}.`;
+            }
+        } else if (reason === "RECITATION") {
+            extra = " The model output potentially resembles copyrighted data and was blocked by recitation filters.";
+        }
+        throw new Error(`Gemini API Blocked: Response generation stopped prematurely (Reason: ${reason}).${extra}`);
+    }
+}
+
+async function callGemini(
+    params: LLMCallParams
+): Promise<{ text: string; toolCalls: any[]; geminiParts?: any[]; reasoning?: string }> {
+    const { chatMessages, config, systemPrompt, agentTools, fetchProxy, abortSignal } = params;
+    const { apiKey, endpoint, model } = config;
+    const apiTargetUrl = `${endpoint.endsWith('/') ? endpoint : endpoint + '/'}${model}:generateContent?key=${apiKey}`;
+
+    const geminiContents = mapMessagesToGeminiContents(chatMessages);
+    const geminiTools = mapToolsToGeminiTools(agentTools);
 
     const shouldProxy = checkShouldProxy(config, apiTargetUrl, fetchProxy);
 
@@ -185,81 +265,13 @@ async function callGemini(
 
     if (!response.ok) {
         const errText = await response.text();
-        let errMsg = "";
-        let errStatus = "";
-        let friendlyAdvice = "";
-        try {
-            const parsed = JSON.parse(errText);
-            if (parsed.error) {
-                errMsg = parsed.error.message || "";
-                errStatus = parsed.error.status || "";
-                if (Array.isArray(parsed.error.details)) {
-                    const detailsMsg = parsed.error.details
-                        .map((d: any) => d.message || d.reason || JSON.stringify(d))
-                        .filter(Boolean)
-                        .join("; ");
-                    if (detailsMsg) {
-                        errMsg += ` (Details: ${detailsMsg})`;
-                    }
-                }
-            }
-        } catch {
-            errMsg = errText;
-        }
-
-        if (!errMsg) {
-            errMsg = `HTTP Error ${response.status}`;
-        }
-
-        if (response.status === 400) {
-            if (errMsg.toLowerCase().includes("key") || errStatus === "INVALID_ARGUMENT") {
-                friendlyAdvice = " Please verify your API Key is correct and active in Settings.";
-            } else {
-                friendlyAdvice = " Please verify that the request parameters and model inputs are correct.";
-            }
-        } else if (response.status === 403) {
-            friendlyAdvice = " Access denied. Please ensure the API key is active and has the required permissions or billing enabled.";
-        } else if (response.status === 404) {
-            friendlyAdvice = " The specified model or endpoint was not found. Please check your model name and base endpoint URL in Settings.";
-        } else if (response.status === 429) {
-            friendlyAdvice = " Quota exceeded or rate limit reached. Please wait a moment before trying again, or check your Gemini billing/usage limits.";
-        } else if (response.status >= 500) {
-            friendlyAdvice = " Gemini server error. Please try again in a few seconds.";
-        }
-
-        const fullMsg = `Gemini API Error (${response.status}${errStatus ? ` - ${errStatus}` : ""}): ${errMsg}.${friendlyAdvice}`;
-        throw new Error(fullMsg);
+        handleGeminiErrorResponse(response, errText);
     }
 
     const data = await response.json();
-
-    // Check for prompt block feedback
-    if (data.promptFeedback && data.promptFeedback.blockReason) {
-        throw new Error(`Gemini API Prompt Blocked: The input prompt was blocked by safety/policy filters (Reason: ${data.promptFeedback.blockReason}).`);
-    }
-
     const candidate = data.candidates?.[0];
-    if (!candidate) {
-        throw new Error("Gemini API Error: No response candidates were returned. The request may have been blocked or filtered.");
-    }
 
-    // Check if response was blocked by safety filters
-    if (candidate.finishReason && candidate.finishReason !== "STOP" && candidate.finishReason !== "MAX_TOKENS") {
-        const reason = candidate.finishReason;
-        let extra = "";
-        if (reason === "SAFETY" && candidate.safetyRatings) {
-            const blockedCategories = candidate.safetyRatings
-                .filter((r: any) => r.blocked || r.probability === "MEDIUM" || r.probability === "HIGH")
-                .map((r: any) => `${r.category} (${r.probability})`)
-                .join(", ");
-            if (blockedCategories) {
-                extra = ` Flagged categories: ${blockedCategories}.`;
-            }
-        } else if (reason === "RECITATION") {
-            extra = " The model output potentially resembles copyrighted data and was blocked by recitation filters.";
-        }
-        throw new Error(`Gemini API Blocked: Response generation stopped prematurely (Reason: ${reason}).${extra}`);
-    }
+    checkGeminiSafetyAndFinishReasons(data, candidate);
 
     const text = candidate?.content?.parts?.find((p: any) => p.text)?.text || "";
     const rawCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall) || [];
@@ -282,22 +294,8 @@ async function callGemini(
     return { text, toolCalls, geminiParts, reasoning };
 }
 
-async function callOpenAi(
-    params: LLMCallParams
-): Promise<{ text: string; toolCalls: any[]; reasoning?: string }> {
-    const { chatMessages, config, systemPrompt, agentTools, fetchProxy, abortSignal } = params;
-    const { provider, apiKey, endpoint, model } = config;
-    // OpenAI and Custom OpenAI-compatible endpoints
-    const apiTargetUrl = `${endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint}/chat/completions`;
-
-    const openaiHeaders: Record<string, string> = {
-        "Content-Type": "application/json"
-    };
-    if (apiKey) {
-        openaiHeaders["Authorization"] = `Bearer ${apiKey}`;
-    }
-
-    const openaiMessages = [
+function mapMessagesToOpenAiMessages(chatMessages: Message[], systemPrompt: string): any[] {
+    return [
         { role: "system", content: systemPrompt },
         ...chatMessages.map(m => {
             if (m.role === "tool") {
@@ -315,6 +313,57 @@ async function callOpenAi(
             };
         })
     ];
+}
+
+function handleOpenAiErrorResponse(response: Response, errText: string, provider: string): never {
+    let errMsg = "";
+    let errCode = "";
+    let friendlyAdvice = "";
+    try {
+        const parsed = JSON.parse(errText);
+        if (parsed.error) {
+            errMsg = parsed.error.message || "";
+            errCode = parsed.error.code || "";
+        }
+    } catch {
+        errMsg = errText;
+    }
+
+    if (!errMsg) {
+        errMsg = `HTTP Error ${response.status}`;
+    }
+
+    if (response.status === 401) {
+        friendlyAdvice = " Unauthorized. Please check your API key in Settings.";
+    } else if (response.status === 403) {
+        friendlyAdvice = " Access denied. Please ensure your account has access to the requested model.";
+    } else if (response.status === 404) {
+        friendlyAdvice = " Model or endpoint not found. Verify the model name and base endpoint URL in Settings.";
+    } else if (response.status === 429) {
+        friendlyAdvice = " Rate limit or quota exceeded. Please wait a moment or check your API usage limits.";
+    } else if (response.status >= 500) {
+        friendlyAdvice = " Server error from provider. Please try again later.";
+    }
+
+    const fullMsg = `${provider === "openai" ? "OpenAI" : "Custom Endpoint"} API Error (${response.status}${errCode ? ` - ${errCode}` : ""}): ${errMsg}.${friendlyAdvice}`;
+    throw new Error(fullMsg);
+}
+
+async function callOpenAi(
+    params: LLMCallParams
+): Promise<{ text: string; toolCalls: any[]; reasoning?: string }> {
+    const { chatMessages, config, systemPrompt, agentTools, fetchProxy, abortSignal } = params;
+    const { provider, apiKey, endpoint, model } = config;
+    const apiTargetUrl = `${endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint}/chat/completions`;
+
+    const openaiHeaders: Record<string, string> = {
+        "Content-Type": "application/json"
+    };
+    if (apiKey) {
+        openaiHeaders["Authorization"] = `Bearer ${apiKey}`;
+    }
+
+    const openaiMessages = mapMessagesToOpenAiMessages(chatMessages, systemPrompt);
 
     const shouldProxy = checkShouldProxy(config, apiTargetUrl, fetchProxy);
 
@@ -355,37 +404,7 @@ async function callOpenAi(
 
     if (!response.ok) {
         const errText = await response.text();
-        let errMsg = "";
-        let errCode = "";
-        let friendlyAdvice = "";
-        try {
-            const parsed = JSON.parse(errText);
-            if (parsed.error) {
-                errMsg = parsed.error.message || "";
-                errCode = parsed.error.code || "";
-            }
-        } catch {
-            errMsg = errText;
-        }
-
-        if (!errMsg) {
-            errMsg = `HTTP Error ${response.status}`;
-        }
-
-        if (response.status === 401) {
-            friendlyAdvice = " Unauthorized. Please check your API key in Settings.";
-        } else if (response.status === 403) {
-            friendlyAdvice = " Access denied. Please ensure your account has access to the requested model.";
-        } else if (response.status === 404) {
-            friendlyAdvice = " Model or endpoint not found. Verify the model name and base endpoint URL in Settings.";
-        } else if (response.status === 429) {
-            friendlyAdvice = " Rate limit or quota exceeded. Please wait a moment or check your API usage limits.";
-        } else if (response.status >= 500) {
-            friendlyAdvice = " Server error from provider. Please try again later.";
-        }
-
-        const fullMsg = `${provider === "openai" ? "OpenAI" : "Custom Endpoint"} API Error (${response.status}${errCode ? ` - ${errCode}` : ""}): ${errMsg}.${friendlyAdvice}`;
-        throw new Error(fullMsg);
+        handleOpenAiErrorResponse(response, errText, provider);
     }
 
     const data = await response.json();
