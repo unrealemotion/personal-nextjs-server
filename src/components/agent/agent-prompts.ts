@@ -1,33 +1,7 @@
 import { SURGE_DOCUMENTATION } from "@/lib/surge-docs";
-import { getAgentToolsPrompt, getAllAgentToolsPrompt } from "./tools";
+import { getAllAgentToolsPrompt } from "./tools";
 
-export const DEFAULT_CONFIGS: Record<"gemini" | "openai" | "custom", { endpoint: string; model: string }> = {
-    gemini: {
-        endpoint: "https://generativelanguage.googleapis.com/v1beta/models/",
-        model: "gemini-2.5-flash"
-    },
-    openai: {
-        endpoint: "https://api.openai.com/v1",
-        model: "gpt-4o-mini"
-    },
-    custom: {
-        endpoint: "http://localhost:11434/v1",
-        model: "llama3"
-    }
-};
-
-export const WELCOME_MESSAGE = `👋 Hello! I am Splurge, your AI agent. I can help you manage and troubleshoot your bulk API workflows.
-
-Here is what I can do:
-- **Troubleshoot Failures**: Diagnose errors and run test requests to inspect server responses.
-- **Adjust Requests & Settings**: Update URLs, headers, concurrency, retries, and rate limits.
-- **Manage Data & Variables**: Search your CSV/Excel dataset, correct typos, and map variables.
-- **Configure & Export Grid**: Set table columns, apply filters, and export results to Excel.
-- **Verify Extension**: Ensure the [Chrome Extension Helper](https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf) is active to bypass CORS rules.
-
-How can I help you today?`;
-
-export const AGENT_SYSTEM_PROMPT = `You are Splurge, a helpful AI Agent for Surge API Workspace, a browser-based bulk API orchestrator.
+const AGENT_SYSTEM_PROMPT = `You are Splurge, a helpful AI Agent for Surge API Workspace, a browser-based bulk API orchestrator.
 You help users inspect dataset rows, examine execution configurations, troubleshoot failed API runs, map variables, configure result columns, filter/sort results, and export them to Excel.
 
 You have access to the following tools. For each tool, here are its capabilities, scenarios where you must use it, and best practices for combining them:

@@ -1,6 +1,6 @@
-import { GLOBAL_TOOLS, GLOBAL_TOOLS_PROMPT } from "./global";
-import { BULK_RUNNER_TOOLS, BULK_RUNNER_TOOLS_PROMPT } from "./bulk-runner";
-import { API_CLIENT_TOOLS, API_CLIENT_TOOLS_PROMPT } from "./api-client";
+import { GLOBAL_TOOLS_PROMPT } from "./global";
+import { BULK_RUNNER_TOOLS_PROMPT } from "./bulk-runner";
+import { API_CLIENT_TOOLS_PROMPT } from "./api-client";
 import { store } from "@/lib/store";
 
 function filterToolPrompts(prompt: string): string {
@@ -27,36 +27,6 @@ function filterToolPrompts(prompt: string): string {
     }
     
     return filteredLines.join("\n");
-}
-
-export function getAgentTools(currentView: "bulk" | "api_client") {
-    const tools: any[] = [...GLOBAL_TOOLS];
-    
-    if (currentView === "bulk") {
-        tools.push(...BULK_RUNNER_TOOLS);
-    } else if (currentView === "api_client") {
-        tools.push(...API_CLIENT_TOOLS);
-    }
-    
-    const state = store.state;
-    const activeProfile = state.agentProfiles?.find(p => p.id === state.activeAgentProfileId) || state.agentProfiles?.[0];
-    if (activeProfile?.allowedTools) {
-        return tools.filter(t => activeProfile.allowedTools!.includes(t.function.name));
-    }
-    
-    return tools;
-}
-
-export function getAgentToolsPrompt(currentView: "bulk" | "api_client"): string {
-    let prompt = GLOBAL_TOOLS_PROMPT;
-    
-    if (currentView === "bulk") {
-        prompt += "\n" + BULK_RUNNER_TOOLS_PROMPT;
-    } else if (currentView === "api_client") {
-        prompt += "\n" + API_CLIENT_TOOLS_PROMPT;
-    }
-    
-    return filterToolPrompts(prompt);
 }
 
 export function getToolDisplayName(name: string): string {
@@ -92,16 +62,6 @@ export function getToolDisplayName(name: string): string {
         modify_collections: "Modify Collection Structure"
     };
     return names[name] || name;
-}
-
-export function getAllAgentTools() {
-    const tools = [...GLOBAL_TOOLS, ...BULK_RUNNER_TOOLS, ...API_CLIENT_TOOLS];
-    const state = store.state;
-    const activeProfile = state.agentProfiles?.find(p => p.id === state.activeAgentProfileId) || state.agentProfiles?.[0];
-    if (activeProfile?.allowedTools) {
-        return tools.filter(t => activeProfile.allowedTools!.includes(t.function.name));
-    }
-    return tools;
 }
 
 export function getAllAgentToolsPrompt(): string {

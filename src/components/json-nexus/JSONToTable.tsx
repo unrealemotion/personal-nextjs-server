@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { 
   useReactTable, 
   getCoreRowModel, 
@@ -12,9 +12,6 @@ import {
 } from "@tanstack/react-table";
 import { 
   Table as TableIcon, 
-  Download, 
-  Trash2, 
-  Eye, 
   ChevronLeft, 
   ChevronRight, 
   ChevronsLeft, 
@@ -388,7 +385,7 @@ export function JSONToTable() {
   };
 
   // Parse and Convert via Web Worker
-  const handleConvert = () => {
+  const handleConvert = useCallback(() => {
     if (!jsonInput.trim()) {
       toast.warning("Please enter some JSON content first.");
       return;
@@ -436,7 +433,12 @@ export function JSONToTable() {
       flattenObjects,
       splitArrays
     });
-  };
+  }, [jsonInput, flattenObjects, splitArrays]);
+
+  const stateRef = React.useRef({ isConverted, jsonInput });
+  useEffect(() => {
+    stateRef.current = { isConverted, jsonInput };
+  });
 
   const convertRef = React.useRef(handleConvert);
   useEffect(() => {
@@ -444,7 +446,8 @@ export function JSONToTable() {
   }, [handleConvert]);
 
   useEffect(() => {
-    if (isConverted && jsonInput.trim()) {
+    const { isConverted: converted, jsonInput: input } = stateRef.current;
+    if (converted && input.trim()) {
       convertRef.current();
     }
   }, [flattenObjects, splitArrays]);
@@ -466,7 +469,7 @@ export function JSONToTable() {
       document.body.removeChild(link);
       
       toast.success("CSV file downloaded successfully!");
-    } catch (err) {
+    } catch {
       toast.error("Failed to export CSV file.");
     }
   };
@@ -481,7 +484,7 @@ export function JSONToTable() {
       
       XLSX.writeFile(workbook, "json_nexus_export.xlsx");
       toast.success("Excel file (.xlsx) downloaded successfully!");
-    } catch (err) {
+    } catch {
       toast.error("Failed to export Excel file.");
     }
   };
@@ -544,6 +547,7 @@ export function JSONToTable() {
     }));
   }, [tableColumns]);
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: convertedRows,
     columns: memoizedColumns,

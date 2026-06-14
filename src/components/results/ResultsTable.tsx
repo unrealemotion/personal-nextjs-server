@@ -26,10 +26,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import * as xlsx from "xlsx";
 import Editor from "@monaco-editor/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn, stripJsonComments } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { stripJsonComments } from "@/lib/executor-utils";
 import { CopyableText } from "@/components/ui/CopyableText";
 import { sendToExtension } from "@/lib/extension";
 import { toast } from "sonner";
+import { resolveHostnameIp, getHostname } from "@/lib/dns";
 
 
 function SearchableSelect({ value, onChange, options, placeholder, className }: {
@@ -98,7 +100,7 @@ function getByDotNotation(obj: any, path: string): string {
         if (value === undefined || value === null) return "";
         if (typeof value === "object") return JSON.stringify(value);
         return String(value);
-    } catch (e) {
+    } catch {
         return "";
     }
 }
@@ -120,7 +122,7 @@ function getValueByPath(obj: any, path: string): any {
             current = current[part];
         }
         return current;
-    } catch (e) {
+    } catch {
         return undefined;
     }
 }
@@ -134,6 +136,59 @@ function getValueChildren(val: any): string[] {
         return Object.keys(val);
     }
     return [];
+}
+
+function mapColumnValue(col: ColumnMapping, idx: number, res: ExecutionResult, rowData: any, isModified: boolean): any {
+    if (col.source === "status") {
+        return res.status === "pending" ? "Pending" : res.statusCode;
+    }
+    if (col.source === "error") {
+        return res.error || "";
+    }
+    if (col.source === "response_time") {
+        const steps = res.steps || [];
+        const step = col.stepId
+            ? steps.find(s => s.stepId === col.stepId)
+            : steps[steps.length - 1];
+        if (step) {
+            return `${step.responseTimeMs} ms`;
+        }
+        return res.status === "pending" ? "..." : `${res.responseTimeMs} ms`;
+    }
+    if (col.source === "variable") {
+        return rowData[col.path] ?? "";
+    }
+    if (col.source === "request_body") {
+        const steps = res.steps || [];
+        const step = col.stepId
+            ? steps.find(s => s.stepId === col.stepId)
+            : steps[0];
+        return step?.requestBody
+            ? getByDotNotation(step.requestBody, col.path)
+            : "";
+    }
+    if (col.source === "request_param") {
+        const steps = res.steps || [];
+        const step = col.stepId
+            ? steps.find(s => s.stepId === col.stepId)
+            : steps[0];
+        return (step?.requestParams?.[col.path] ?? rowData[col.path]) ?? "";
+    }
+    if (col.source === "response") {
+        const steps = res.steps || [];
+        const step = col.stepId
+            ? steps.find(s => s.stepId === col.stepId)
+            : steps[steps.length - 1];
+        const body = step?.responseBody ?? res.responseBody;
+        if (body !== undefined && body !== null) {
+            return getByDotNotation(body, col.path);
+        }
+        return res.status === "pending" ? "..." : "";
+    }
+    if (col.source === "modified") {
+        return isModified ? "modified" : "original";
+    }
+    return "";
 }
 
 function getJsonBodiesForMapping(col: ColumnMapping, results: ExecutionResult[]): any[] {
@@ -160,7 +215,7 @@ function getJsonBodiesForMapping(col: ColumnMapping, results: ExecutionResult[])
                 if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
                     try {
                         bodies.push(JSON.parse(trimmed));
-                    } catch (e) {
+                    } catch {
                         // ignore
                     }
                 }
@@ -278,7 +333,7 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
     }, []);
 
     // Helper to commit changes immediately
-    const commitValue = (val: string) => {
+    const commitValue = useCallback((val: string) => {
         if (timerRef.current) {
             clearTimeout(timerRef.current);
             timerRef.current = null;
@@ -286,7 +341,7 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
         if (val !== valueRef.current) {
             onChange(val);
         }
-    };
+    }, [onChange]);
 
     // Debounce updates while typing
     const handleLocalValueChange = (newVal: string) => {
@@ -309,7 +364,7 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
         }
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
+    }, [commitValue]);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (!isOpen || suggestions.length === 0) {
@@ -385,7 +440,7 @@ function formatBody(body: any): string {
         if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
             try {
                 return JSON.stringify(JSON.parse(trimmed), null, 2);
-            } catch (e) {
+            } catch {
                 // Fall through to plain text
             }
         }
@@ -828,6 +883,7 @@ const ResultsTableView = React.memo(function ResultsTableView({
     onRowClick: (row: any) => void;
 }) {
 
+    // eslint-disable-next-line react-hooks/incompatible-library
     const table = useReactTable({
         data,
         columns,
@@ -1235,30 +1291,7 @@ export function ResultsTable() {
         return keys.map(k => `${k}=${rowData[k]}`).join(", ");
     };
 
-    // Resolve IP address using Cloudflare DNS JSON API
-    const resolveHostnameIpClient = async (urlStr: string): Promise<string | null> => {
-        try {
-            const urlObj = new URL(urlStr);
-            const hostname = urlObj.hostname;
-            if (/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) || hostname === "localhost" || hostname.endsWith(".local")) {
-                return null;
-            }
-            const dnsUrl = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=A`;
-            const res = await fetch(dnsUrl, {
-                headers: { "accept": "application/dns-json" }
-            });
-            if (res.ok) {
-                const dnsData = await res.json();
-                if (dnsData && dnsData.Answer && dnsData.Answer.length > 0) {
-                    const aRecord = dnsData.Answer.find((ans: any) => ans.type === 1);
-                    if (aRecord) {
-                        return aRecord.data;
-                    }
-                }
-            }
-        } catch (e) {}
-        return null;
-    };
+
 
     // Helper to format timestamps down to the second
     const formatTimestamp = (isoString?: string) => {
@@ -1268,7 +1301,7 @@ export function ResultsTable() {
             if (isNaN(date.getTime())) return "Unknown Time";
             const pad = (n: number) => String(n).padStart(2, "0");
             return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-        } catch (e) {
+        } catch {
             return "Unknown Time";
         }
     };
@@ -1395,7 +1428,7 @@ export function ResultsTable() {
                     bodyInit = cleaned;
                     try {
                         requestBodyForLog = JSON.parse(cleaned);
-                    } catch (e) {
+                    } catch {
                         requestBodyForLog = editBody;
                     }
                 }
@@ -1404,7 +1437,7 @@ export function ResultsTable() {
             const startTime = performance.now();
             let statusCode = 0;
             let responseStatusText = "";
-            let responseHeaders: Record<string, string> = {};
+            const responseHeaders: Record<string, string> = {};
             let responseBody: any = null;
             let errorMsg: string | undefined = undefined;
             let responseType = "";
@@ -1417,15 +1450,7 @@ export function ResultsTable() {
             let extensionRuleId: number | null = null;
             if (isExtensionActive) {
                 try {
-                    let urlFilter = "*";
-                    try {
-                        let urlStr = url.trim();
-                        if (!/^https?:\/\//i.test(urlStr)) {
-                            urlStr = "http://" + urlStr;
-                        }
-                        const parsed = new URL(urlStr);
-                        urlFilter = parsed.hostname;
-                    } catch (e) {}
+                    const urlFilter = getHostname(url);
 
                     const extHeaders = Object.entries(reqHeaders).map(([key, value]) => ({
                         name: key,
@@ -1464,8 +1489,8 @@ export function ResultsTable() {
                     });
 
                     try {
-                        ipAddress = await resolveHostnameIpClient(url);
-                    } catch (e) {}
+                        ipAddress = await resolveHostnameIp(url);
+                    } catch {}
 
                     const contentType = res.headers.get("content-type");
                     if (contentType && contentType.includes("application/json")) {
@@ -1573,50 +1598,7 @@ export function ResultsTable() {
 
             columnMappings.forEach((col, idx) => {
                 const key = col.id || `col_${idx}`;
-                if (col.source === "status") {
-                    rowMap[key] = res.status === "pending" ? "Pending" : res.statusCode;
-                } else if (col.source === "error") {
-                    rowMap[key] = res.error || "";
-                } else if (col.source === "response_time") {
-                    const steps = res.steps || [];
-                    const step = col.stepId
-                        ? steps.find(s => s.stepId === col.stepId)
-                        : steps[steps.length - 1];
-                    if (step) {
-                        rowMap[key] = `${step.responseTimeMs} ms`;
-                    } else {
-                        rowMap[key] = res.status === "pending" ? "..." : `${res.responseTimeMs} ms`;
-                    }
-                } else if (col.source === "variable") {
-                    rowMap[key] = rowData[col.path] ?? "";
-                } else if (col.source === "request_body") {
-                    const steps = res.steps || [];
-                    const step = col.stepId
-                        ? steps.find(s => s.stepId === col.stepId)
-                        : steps[0];
-                    rowMap[key] = step?.requestBody
-                        ? getByDotNotation(step.requestBody, col.path)
-                        : "";
-                } else if (col.source === "request_param") {
-                    const steps = res.steps || [];
-                    const step = col.stepId
-                        ? steps.find(s => s.stepId === col.stepId)
-                        : steps[0];
-                    rowMap[key] = (step?.requestParams?.[col.path] ?? rowData[col.path]) ?? "";
-                } else if (col.source === "response") {
-                    const steps = res.steps || [];
-                    const step = col.stepId
-                        ? steps.find(s => s.stepId === col.stepId)
-                        : steps[steps.length - 1];
-                    const body = step?.responseBody ?? res.responseBody;
-                    if (body !== undefined && body !== null) {
-                        rowMap[key] = getByDotNotation(body, col.path);
-                    } else {
-                        rowMap[key] = res.status === "pending" ? "..." : "";
-                    }
-                } else if (col.source === "modified") {
-                    rowMap[key] = isModified ? "modified" : "original";
-                }
+                rowMap[key] = mapColumnValue(col, idx, res, rowData, isModified);
             });
             rowMap.__isModified = isModified;
             rowMap.__status = res.status;
@@ -1649,7 +1631,7 @@ export function ResultsTable() {
                             return regex.test(String(row[key] ?? ""));
                         });
                     });
-                } catch (e) {
+                } catch {
                     const lowerQuery = query.toLowerCase();
                     filtered = filtered.filter(row => {
                         return Object.keys(row).some(key => {
@@ -1764,7 +1746,7 @@ export function ResultsTable() {
 
 
 
-    const executeExport = (onlyFiltered: boolean) => {
+    const executeExport = useCallback((onlyFiltered: boolean) => {
         const dataToExport = onlyFiltered ? data : rawTableData;
         if (dataToExport.length === 0) {
             alert("No results to export.");
@@ -1812,14 +1794,14 @@ export function ResultsTable() {
         const workbook = xlsx.utils.book_new();
         xlsx.utils.book_append_sheet(workbook, worksheet, "Results");
         xlsx.writeFile(workbook, exportFileName);
-    };
+    }, [data, rawTableData, columnMappings, fileName]);
 
     useEffect(() => {
         if (exportExcelTrigger) {
             executeExport(exportExcelTrigger.onlyFiltered);
             store.setState((s) => ({ ...s, exportExcelTrigger: null }));
         }
-    }, [exportExcelTrigger]);
+    }, [exportExcelTrigger, executeExport]);
 
     const handleExport = () => {
         if (rawTableData.length === 0) return;

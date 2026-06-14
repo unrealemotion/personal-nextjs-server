@@ -1,13 +1,9 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { stripJsonComments } from "./executor-utils"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
-}
-
-export function stripJsonComments(str: string): string {
-  if (!str) return str;
-  return str.replace(/\\"|"(?:\\"|[^"])*"|(\/\/.*|\/\*[\s\S]*?\*\/)/g, (m, g) => g ? "" : m);
 }
 
 import { type ApiFolder, type ApiRequest } from "./schema";

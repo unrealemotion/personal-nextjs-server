@@ -25,8 +25,7 @@ import {
     Trash2,
     Upload,
     FolderPlus,
-    FilePlus,
-    Edit2
+    FilePlus
 } from "lucide-react";
 import { type ApiCollection, type ApiFolder, type ApiRequest } from "@/lib/schema";
 import { toast } from "sonner";
@@ -185,7 +184,7 @@ export function CollectionSidebar() {
                     const collection = importPostmanCollection(content);
                     addCollection(collection);
                     toast.success(`Imported collection "${collection.name}"!`);
-                } catch (err: any) {
+                } catch {
                     toast.error("Failed to parse Postman collection. Check file format.");
                 }
             }

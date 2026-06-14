@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { type Message, type AgentProfile, type ToolDefinition, type CheckpointProvider } from "./types";
 import { callLLM } from "./agent-executor";
 
-export interface AgentContextType {
+interface AgentContextType {
     isOpen: boolean;
     setIsOpen: (open: boolean) => void;
     view: "chat" | "settings";
@@ -206,13 +206,13 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
         }
     }, [welcomeMessage, messages.length]);
 
-    const showToast = (type: "success" | "error" | "info" | "warning", msg: string) => {
+    const showToast = useCallback((type: "success" | "error" | "info" | "warning", msg: string) => {
         if (toast && toast[type]) {
             toast[type](msg);
         } else {
             console.log(`[Agent Toast - ${type}]`, msg);
         }
-    };
+    }, [toast]);
 
     const saveConfig = (newProfiles: AgentProfile[], activeId: string) => {
         setAgentProfiles(newProfiles);
@@ -237,7 +237,7 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
     };
 
     // Main execution wrapper for tool calls
-    const runToolHandler = async (name: string, args: any): Promise<any> => {
+    const runToolHandler = useCallback(async (name: string, args: any): Promise<any> => {
         setActiveToolName(name);
         try {
             // Find tool configuration
@@ -277,9 +277,33 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
         } finally {
             setActiveToolName(null);
         }
+    }, [tools, activeProfile, onStateChange]);
+
+    const handleQueueMessage = useCallback((text: string) => {
+        if (!text.trim()) return;
+        setMessageQueue(prev => [...prev, text]);
+    }, []);
+
+    const handleRemoveQueuedMessage = (index: number) => {
+        setMessageQueue(prev => prev.filter((_, idx) => idx !== index));
+        showToast("success", "Prompt removed from queue");
     };
 
-    const handleSend = async (userText: string = input) => {
+    const handleMergeQueuedMessage = (index: number) => {
+        if (index <= 0) return;
+        setMessageQueue(prev => {
+            if (prev.length <= index) return prev;
+            const nextToSend = prev[0];
+            const merged = `${nextToSend}\n${prev[index]}`;
+            const newQueue = [...prev];
+            newQueue[0] = merged;
+            newQueue.splice(index, 1);
+            return newQueue;
+        });
+        showToast("success", "Prompt merged with 'Next to send'");
+    };
+
+    const handleSend = useCallback(async (userText: string = input) => {
         if (!userText.trim()) return;
 
         if (isLoading) {
@@ -288,16 +312,7 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
             return;
         }
 
-        if (!activeProfile) {
-            showToast("error", "No active agent profile found. Please configure settings.");
-            setView("settings");
-            return;
-        }
-
-        const { apiKey, provider } = activeProfile;
-        if (!apiKey && provider !== "custom") {
-            showToast("error", "API Key is missing. Please set it up in Settings first!");
-            setView("settings");
+        if (!validateActiveProfile(activeProfile, showToast, setView)) {
             return;
         }
 
@@ -318,7 +333,7 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
         setIsLoading(true);
 
         const activeHistory = [...updatedHistory];
-        let maxIterations = activeProfile.maxExecutionLimit !== undefined ? activeProfile.maxExecutionLimit : 6;
+        let maxIterations = activeProfile!.maxExecutionLimit !== undefined ? activeProfile!.maxExecutionLimit : 6;
         const isInfinite = maxIterations === 0;
 
         const controller = new AbortController();
@@ -333,12 +348,12 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
 
                 // Filter tools to only those registered and allowed in profile
                 const allowedTools = tools.filter(t => 
-                    !activeProfile.allowedTools || activeProfile.allowedTools.includes(t.function.name)
+                    !activeProfile!.allowedTools || activeProfile!.allowedTools.includes(t.function.name)
                 );
 
                 const response = await callLLM(
                     activeHistory,
-                    activeProfile,
+                    activeProfile!,
                     systemPromptRef.current || DEFAULT_SYSTEM,
                     allowedTools,
                     fetchProxy,
@@ -359,29 +374,7 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
                     setMessages([...activeHistory]);
 
                     for (const tc of response.toolCalls) {
-                        if (signal.aborted) {
-                            throw new DOMException("The user aborted a request.", "AbortError");
-                        }
-
-                        const toolArgs = JSON.parse(tc.function.arguments || "{}");
-                        const toolName = tc.function.name;
-
-                        const toolResult = await runToolHandler(toolName, toolArgs);
-
-                        if (signal.aborted) {
-                            throw new DOMException("The user aborted a request.", "AbortError");
-                        }
-
-                        const toolMsg: Message = {
-                            id: `tool_${Date.now()}_${tc.id}`,
-                            role: "tool",
-                            name: toolName,
-                            tool_call_id: tc.id,
-                            content: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult)
-                        };
-
-                        activeHistory.push(toolMsg);
-                        setMessages([...activeHistory]);
+                        await executeSingleTool(tc, signal, runToolHandler, activeHistory, setMessages);
                     }
 
                     if (!isInfinite) {
@@ -449,31 +442,9 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
                 }
             }
         }
-    };
+    }, [input, isLoading, activeProfile, messages, tools, checkpointProvider, fetchProxy, runToolHandler, showToast, setView, setMessages, setInput, handleQueueMessage]);
 
-    const handleQueueMessage = (text: string) => {
-        if (!text.trim()) return;
-        setMessageQueue(prev => [...prev, text]);
-    };
 
-    const handleRemoveQueuedMessage = (index: number) => {
-        setMessageQueue(prev => prev.filter((_, idx) => idx !== index));
-        showToast("success", "Prompt removed from queue");
-    };
-
-    const handleMergeQueuedMessage = (index: number) => {
-        if (index <= 0) return;
-        setMessageQueue(prev => {
-            if (prev.length <= index) return prev;
-            const nextToSend = prev[0];
-            const merged = `${nextToSend}\n${prev[index]}`;
-            const newQueue = [...prev];
-            newQueue[0] = merged;
-            newQueue.splice(index, 1);
-            return newQueue;
-        });
-        showToast("success", "Prompt merged with 'Next to send'");
-    };
 
     // Process next message in queue when current loading finishes
     useEffect(() => {
@@ -482,7 +453,7 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
             setMessageQueue(prev => prev.slice(1));
             handleSend(nextPrompt);
         }
-    }, [isLoading, messageQueue]);
+    }, [isLoading, messageQueue, handleSend]);
 
     const handleStop = () => {
         if (abortControllerRef.current) {
@@ -653,4 +624,59 @@ function areProfilesEqual(a: AgentProfile[], b: AgentProfile[]) {
         }
     }
     return true;
+}
+
+// Helper: Validate active agent profile
+function validateActiveProfile(
+    activeProfile: AgentProfile | undefined,
+    showToast: (type: "success" | "error" | "info" | "warning", msg: string) => void,
+    setView: (view: "chat" | "settings") => void
+): boolean {
+    if (!activeProfile) {
+        showToast("error", "No active agent profile found. Please configure settings.");
+        setView("settings");
+        return false;
+    }
+
+    const { apiKey, provider } = activeProfile;
+    if (!apiKey && provider !== "custom") {
+        showToast("error", "API Key is missing. Please set it up in Settings first!");
+        setView("settings");
+        return false;
+    }
+
+    return true;
+}
+
+// Helper: Execute a single tool call and update the message history
+async function executeSingleTool(
+    tc: any,
+    signal: AbortSignal,
+    runToolHandler: (name: string, args: any) => Promise<any>,
+    activeHistory: Message[],
+    setMessages: (messages: Message[]) => void
+): Promise<void> {
+    if (signal.aborted) {
+        throw new DOMException("The user aborted a request.", "AbortError");
+    }
+
+    const toolArgs = JSON.parse(tc.function.arguments || "{}");
+    const toolName = tc.function.name;
+
+    const toolResult = await runToolHandler(toolName, toolArgs);
+
+    if (signal.aborted) {
+        throw new DOMException("The user aborted a request.", "AbortError");
+    }
+
+    const toolMsg: Message = {
+        id: `tool_${Date.now()}_${tc.id}`,
+        role: "tool",
+        name: toolName,
+        tool_call_id: tc.id,
+        content: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult)
+    };
+
+    activeHistory.push(toolMsg);
+    setMessages([...activeHistory]);
 }

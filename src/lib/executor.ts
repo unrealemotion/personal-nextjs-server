@@ -130,7 +130,7 @@ export async function runBulkExecution(
                     }
                     const parsed = new URL(urlStr);
                     hostname = parsed.hostname;
-                } catch (e) {}
+                } catch {}
 
                 if (!hostnameRules[hostname]) {
                     hostnameRules[hostname] = [];

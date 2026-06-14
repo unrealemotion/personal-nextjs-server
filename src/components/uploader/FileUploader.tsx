@@ -3,7 +3,7 @@
 import React, { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import * as xlsx from "xlsx";
-import { UploadCloud, FileSpreadsheet, AlertCircle, Settings2, Table as TableIcon } from "lucide-react";
+import { UploadCloud, FileSpreadsheet, AlertCircle, Table as TableIcon } from "lucide-react";
 import { setFileData, setHeaderType, store, VariableType } from "@/lib/store";
 import { useStore } from "@tanstack/react-store";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

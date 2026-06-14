@@ -1,9 +1,6 @@
 import React from "react";
-import { useStore } from "@tanstack/react-store";
 import { 
     store, 
-    saveAgentProfiles, 
-    setActiveAgentProfileId, 
     setActiveEnvironmentId,
     setActiveTabId,
     setActiveSubTab,
@@ -23,11 +20,13 @@ import {
     updateTabResponse,
     updateTabLoading
 } from "@/lib/store";
-import { addItemToCollectionTree, stripJsonComments } from "@/lib/utils";
+import { addItemToCollectionTree } from "@/lib/utils";
+import { stripJsonComments } from "@/lib/executor-utils";
 import { simulateRowExecutionChain } from "@/lib/agent-executor";
 import { runBulkExecution } from "@/lib/executor";
 import { resolveVariables, runPreRequestScript, runTestScript } from "@/lib/sandbox";
 import { sendToExtension } from "@/lib/extension";
+import { getHostname } from "@/lib/dns";
 
 import { GLOBAL_TOOLS } from "./tools/global";
 import { BULK_RUNNER_TOOLS } from "./tools/bulk-runner";
@@ -911,7 +910,7 @@ export function useSurgeAgentTools() {
                                     let variables = {};
                                     try {
                                         variables = JSON.parse(stripJsonComments(varsStr));
-                                    } catch (e) {}
+                                    } catch {}
                                     fetchBody = JSON.stringify({ query, variables });
                                     if (!headers.has("Content-Type")) {
                                         headers.append("Content-Type", "application/json");
@@ -960,15 +959,7 @@ export function useSurgeAgentTools() {
                             let extensionRuleId: number | null = null;
                             if (isExtensionActive) {
                                 try {
-                                    let urlFilter = "*";
-                                    try {
-                                        let urlStr = interpolatedUrl.trim();
-                                        if (!/^https?:\/\//i.test(urlStr)) {
-                                            urlStr = "http://" + urlStr;
-                                        }
-                                        const parsed = new URL(urlStr);
-                                        urlFilter = parsed.hostname;
-                                    } catch (e) {}
+                                    const urlFilter = getHostname(interpolatedUrl);
                                     
                                     const extHeaders = Object.entries(rawHeadersMap).map(([key, value]) => ({
                                         name: key,

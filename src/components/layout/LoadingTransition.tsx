@@ -84,7 +84,7 @@ function LoadingTransitionInner({ local = false, isLoading: controlledIsLoading 
                     ) {
                         handleStart();
                     }
-                } catch (err) {
+                } catch {
                     // Ignore parsing errors for malformed hrefs
                 }
             }

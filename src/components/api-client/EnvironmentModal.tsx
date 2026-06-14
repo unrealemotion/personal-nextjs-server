@@ -14,14 +14,12 @@ import {
     Dialog,
     DialogContent,
     DialogDescription,
-    DialogHeader,
     DialogTitle,
-    DialogTrigger,
-    DialogFooter
+    DialogTrigger
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Trash2, Check, Settings, Eye, EyeOff, Search, Globe, Copy, MoreHorizontal, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Check, Settings, Eye, EyeOff, Search, Globe, Copy } from "lucide-react";
 import { type Environment, type EnvVariable } from "@/lib/schema";
 import { toast } from "sonner";
 

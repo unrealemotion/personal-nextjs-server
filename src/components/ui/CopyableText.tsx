@@ -54,13 +54,13 @@ export function CopyableText({
                     } else {
                         toast.error("Copy failed");
                     }
-                } catch (err) {
+                } catch {
                     toast.error("Copy failed");
                 } finally {
                     document.body.removeChild(textArea);
                 }
             }
-        } catch (err) {
+        } catch {
             // If Clipboard API fails (e.g., in iframe), try fallback
             const textArea = document.createElement("textarea");
             textArea.value = value;
@@ -81,7 +81,7 @@ export function CopyableText({
                 } else {
                     toast.error("Copy failed");
                 }
-            } catch (fallbackErr) {
+            } catch {
                 toast.error("Copy failed");
             } finally {
                 document.body.removeChild(textArea);

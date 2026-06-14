@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useCallback, useRef, useEffect } from "react";
-import Editor, { useMonaco } from "@monaco-editor/react";
+import Editor from "@monaco-editor/react";
 import { useStore } from "@tanstack/react-store";
 import { store, updateTemplate, addTemplate, removeTemplate, setActiveTemplate, reorderTemplates } from "@/lib/store";
-import { stripJsonComments, processTemplateForFormatting } from "@/lib/utils";
+import { processTemplateForFormatting } from "@/lib/utils";
+import { normalizeKey } from "@/lib/executor-utils";
 import { RequestTemplate } from "@/lib/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,9 +13,8 @@ import { VariableInput } from "@/components/ui/VariableInput";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Code, Terminal, Copy, Braces, Minimize2, GripVertical, ChevronUp, ChevronDown } from "lucide-react";
+
+import { Plus, Trash2, Copy, GripVertical, ChevronDown } from "lucide-react";
 import { parseCurl, generateCurl, generateFetch, generateAxios, generatePython } from "@/lib/curl";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
@@ -29,21 +29,12 @@ import {
     DragEndEvent,
 } from "@dnd-kit/core";
 import {
-    arrayMove,
     SortableContext,
     sortableKeyboardCoordinates,
     useSortable,
     verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-
-const normalizeKey = (key: string): string => {
-    let k = key.trim();
-    if (k.startsWith("{{") && k.endsWith("}}")) {
-        k = k.slice(2, -2).trim();
-    }
-    return k;
-};
 
 const RAW_LANGUAGES = [
     { label: "Text", value: "text" },
@@ -172,7 +163,7 @@ export function RequestDesigner() {
     const headers = useStore(store, (state) => state.headers);
     const template = templates.find(t => t.id === activeTemplateId) || templates[0];
 
-    const monaco = useMonaco();
+
     const editorRef = useRef<any>(null);
     const monacoRef = useRef<any>(null);
     const decorationsRef = useRef<any[]>([]);
@@ -267,7 +258,7 @@ export function RequestDesigner() {
         updateTemplate({ params: newParams });
     };
 
-    const updateDecorations = () => {
+    const updateDecorations = useCallback(() => {
         const editor = editorRef.current;
         const monaco = monacoRef.current;
         if (!editor || !monaco) return;
@@ -295,7 +286,7 @@ export function RequestDesigner() {
             });
         }
         decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
-    };
+    }, [headers]);
 
     const latestUpdateDecorationsRef = useRef(updateDecorations);
     latestUpdateDecorationsRef.current = updateDecorations;
@@ -343,7 +334,7 @@ export function RequestDesigner() {
 
     useEffect(() => {
         updateDecorations();
-    }, [headers, activeTemplateId]);
+    }, [headers, activeTemplateId, updateDecorations]);
 
     useEffect(() => {
         const monaco = monacoRef.current;
@@ -447,7 +438,7 @@ export function RequestDesigner() {
                     >
                         <SortableContext items={templates.map(t => t.id)} strategy={verticalListSortingStrategy}>
                             <div className="space-y-1.5">
-                                {templates.map((tmpl, idx) => (
+                                {templates.map((tmpl) => (
                                     <SortableStepItem
                                         key={tmpl.id}
                                         tmpl={tmpl}
@@ -626,7 +617,7 @@ export function RequestDesigner() {
                                                             try {
                                                                 const beautified = processTemplateForFormatting(rawText);
                                                                 handleBodyRawChange(beautified);
-                                                            } catch (e) {
+                                                            } catch {
                                                                 toast.error("Invalid JSON format");
                                                             }
                                                         }}

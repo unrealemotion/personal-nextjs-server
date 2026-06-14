@@ -4,11 +4,9 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { 
   ArrowLeft,
-  BookOpen,
   Info,
   Table,
   ArrowRightLeft,
-  Layers,
   Command,
   FileSpreadsheet,
   Split,

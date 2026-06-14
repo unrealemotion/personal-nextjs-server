@@ -25,6 +25,99 @@ export function jsonToTableData(jsonVal: any, options: ConvertOptions): any[] {
   return expandItem(jsonVal, options);
 }
 
+// Helper to process a value at a given path into an array of rows
+function processField(rows: any[], val: any, path: string, options: ConvertOptions): any[] {
+  // 1. Handle Null or Undefined
+  if (val === null || val === undefined) {
+    return rows.map((r) => ({ ...r, [path]: null }));
+  }
+
+  // 2. Handle Arrays
+  if (Array.isArray(val)) {
+    if (options.splitArrays) {
+      if (val.length === 0) {
+        return rows.map((r) => ({ ...r, [path]: null }));
+      }
+
+      const nextRows: any[] = [];
+      for (const r of rows) {
+        for (const el of val) {
+          const subRows = expandValue(el, path, options);
+          for (const subRow of subRows) {
+            nextRows.push({ ...r, ...subRow });
+          }
+        }
+      }
+      return nextRows;
+    } else {
+      return rows.map((r) => ({ ...r, [path]: JSON.stringify(val) }));
+    }
+  }
+
+  // 3. Handle Nested Objects
+  if (typeof val === "object") {
+    if (options.flattenObjects) {
+      const keys = Object.keys(val);
+      if (keys.length === 0) {
+        return rows.map((r) => ({ ...r, [path]: "{}" }));
+      }
+
+      let tempRows = [...rows];
+      for (const k of keys) {
+        const subPath = path ? `${path}.${k}` : k;
+        tempRows = processField(tempRows, val[k], subPath, options);
+      }
+      return tempRows;
+    } else {
+      return rows.map((r) => ({ ...r, [path]: JSON.stringify(val) }));
+    }
+  }
+
+  // 4. Handle Primitives
+  return rows.map((r) => ({ ...r, [path]: val }));
+}
+
+// Helper to expand a sub-value at a specific path, returning an array of sub-row objects
+function expandValue(val: any, path: string, options: ConvertOptions): any[] {
+  if (val === null || val === undefined) {
+    return [{ [path]: null }];
+  }
+
+  if (Array.isArray(val)) {
+    if (options.splitArrays) {
+      if (val.length === 0) {
+        return [{ [path]: null }];
+      }
+      const nextRows: any[] = [];
+      for (const el of val) {
+        nextRows.push(...expandValue(el, path, options));
+      }
+      return nextRows;
+    } else {
+      return [{ [path]: JSON.stringify(val) }];
+    }
+  }
+
+  if (typeof val === "object") {
+    if (options.flattenObjects) {
+      let subRows: any[] = [{}];
+      const keys = Object.keys(val);
+      if (keys.length === 0) {
+        return [{ [path]: "{}" }];
+      }
+      for (const k of keys) {
+        const subPath = path ? `${path}.${k}` : k;
+        subRows = processField(subRows, val[k], subPath, options);
+      }
+      return subRows;
+    } else {
+      return [{ [path]: JSON.stringify(val) }];
+    }
+  }
+
+  return [{ [path]: val }];
+}
+
 /**
  * Expands a single item (object or primitive) into one or more flat rows.
  */
@@ -36,99 +129,6 @@ function expandItem(item: any, options: ConvertOptions): any[] {
 
   let currentRows: any[] = [{}];
 
-  // Helper to process a value at a given path into an array of rows
-  function processField(rows: any[], val: any, path: string): any[] {
-    // 1. Handle Null or Undefined
-    if (val === null || val === undefined) {
-      return rows.map((r) => ({ ...r, [path]: null }));
-    }
-
-    // 2. Handle Arrays
-    if (Array.isArray(val)) {
-      if (options.splitArrays) {
-        if (val.length === 0) {
-          return rows.map((r) => ({ ...r, [path]: null }));
-        }
-
-        const nextRows: any[] = [];
-        for (const r of rows) {
-          for (const el of val) {
-            const subRows = expandValue(el, path);
-            for (const subRow of subRows) {
-              nextRows.push({ ...r, ...subRow });
-            }
-          }
-        }
-        return nextRows;
-      } else {
-        return rows.map((r) => ({ ...r, [path]: JSON.stringify(val) }));
-      }
-    }
-
-    // 3. Handle Nested Objects
-    if (typeof val === "object") {
-      if (options.flattenObjects) {
-        const keys = Object.keys(val);
-        if (keys.length === 0) {
-          return rows.map((r) => ({ ...r, [path]: "{}" }));
-        }
-
-        let tempRows = [...rows];
-        for (const k of keys) {
-          const subPath = path ? `${path}.${k}` : k;
-          tempRows = processField(tempRows, val[k], subPath);
-        }
-        return tempRows;
-      } else {
-        return rows.map((r) => ({ ...r, [path]: JSON.stringify(val) }));
-      }
-    }
-
-    // 4. Handle Primitives
-    return rows.map((r) => ({ ...r, [path]: val }));
-  }
-
-  // Helper to expand a sub-value at a specific path, returning an array of sub-row objects
-  function expandValue(val: any, path: string): any[] {
-    if (val === null || val === undefined) {
-      return [{ [path]: null }];
-    }
-
-    if (Array.isArray(val)) {
-      if (options.splitArrays) {
-        if (val.length === 0) {
-          return [{ [path]: null }];
-        }
-        const nextRows: any[] = [];
-        for (const el of val) {
-          nextRows.push(...expandValue(el, path));
-        }
-        return nextRows;
-      } else {
-        return [{ [path]: JSON.stringify(val) }];
-      }
-    }
-
-    if (typeof val === "object") {
-      if (options.flattenObjects) {
-        let subRows: any[] = [{}];
-        const keys = Object.keys(val);
-        if (keys.length === 0) {
-          return [{ [path]: "{}" }];
-        }
-        for (const k of keys) {
-          const subPath = path ? `${path}.${k}` : k;
-          subRows = processField(subRows, val[k], subPath);
-        }
-        return subRows;
-      } else {
-        return [{ [path]: JSON.stringify(val) }];
-      }
-    }
-
-    return [{ [path]: val }];
-  }
-
   // Process all top-level keys
   const keys = Object.keys(item);
   if (keys.length === 0) {
@@ -136,7 +136,7 @@ function expandItem(item: any, options: ConvertOptions): any[] {
   }
 
   for (const k of keys) {
-    currentRows = processField(currentRows, item[k], k);
+    currentRows = processField(currentRows, item[k], k, options);
   }
 
   return currentRows;

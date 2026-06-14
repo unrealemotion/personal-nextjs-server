@@ -1,7 +1,7 @@
 import { RequestTemplate } from "./schema";
-import { stripJsonComments } from "./utils";
+import { stripJsonComments } from "./executor-utils";
 
-export function getRawBodyString(bodyObj: any): string {
+function getRawBodyString(bodyObj: any): string {
     if (!bodyObj) return "";
     if (typeof bodyObj === "string") return bodyObj;
     if (bodyObj.mode === "raw") return bodyObj.raw || "";
@@ -9,7 +9,7 @@ export function getRawBodyString(bodyObj: any): string {
         let variables = {};
         try {
             variables = JSON.parse(bodyObj.graphql.variables || "{}");
-        } catch (e) {}
+        } catch {}
         return JSON.stringify({ query: bodyObj.graphql.query || "", variables }, null, 2);
     }
     if (bodyObj.mode === "urlencoded" && bodyObj.urlencoded) {
@@ -26,6 +26,28 @@ export function getRawBodyString(bodyObj: any): string {
     }
     if (bodyObj.mode === "binary") return bodyObj.binary || "";
     return "";
+}
+
+function buildUrlWithParams(urlStr: string, params?: Array<{ key: string; value: string }>): string {
+    if (!params || params.length === 0) return urlStr;
+    try {
+        const urlObj = new URL(urlStr);
+        params.forEach(p => {
+            if (p.key) {
+                urlObj.searchParams.append(p.key, p.value);
+            }
+        });
+        return urlObj.toString();
+    } catch {
+        const queryString = params
+            .filter(p => p.key)
+            .map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`)
+            .join("&");
+        if (queryString) {
+            return urlStr + (urlStr.includes('?') ? '&' : '?') + queryString;
+        }
+        return urlStr;
+    }
 }
 
 export function parseCurl(curlCommand: string): Partial<RequestTemplate> | null {
@@ -125,26 +147,7 @@ export function parseCurl(curlCommand: string): Partial<RequestTemplate> | null 
 }
 
 export function generateCurl(template: RequestTemplate): string {
-    let urlStr = template.url;
-    if (template.params && template.params.length > 0) {
-        try {
-            const urlObj = new URL(urlStr);
-            template.params.forEach(p => {
-                if (p.key) {
-                    urlObj.searchParams.append(p.key, p.value);
-                }
-            });
-            urlStr = urlObj.toString();
-        } catch {
-            const queryString = template.params
-                .filter(p => p.key)
-                .map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`)
-                .join("&");
-            if (queryString) {
-                urlStr += (urlStr.includes('?') ? '&' : '?') + queryString;
-            }
-        }
-    }
+    const urlStr = buildUrlWithParams(template.url, template.params);
 
     let command = `curl --request ${template.method} \\\n  --url '${urlStr}'`;
 
@@ -164,35 +167,39 @@ export function generateCurl(template: RequestTemplate): string {
     return command;
 }
 
+function formatHeadersDict(
+    headers: Array<{ key: string; value: string }>,
+    isJs: boolean,
+    quote: "'" | '"'
+): string {
+    const validHeaders = headers.filter(h => h.key && h.value);
+    if (validHeaders.length === 0) return "";
+    
+    const prefix = isJs ? "  headers: {\n" : "\nheaders = {\n";
+    const suffix = isJs ? "  },\n" : "}\n";
+    const itemIndent = isJs ? "    " : "  ";
+    
+    let code = prefix;
+    validHeaders.forEach(h => {
+        const escapedValue = quote === "'" 
+            ? h.value.replace(/'/g, "\\'") 
+            : h.value.replace(/"/g, '\\"');
+        code += `${itemIndent}${quote}${h.key}${quote}: ${quote}${escapedValue}${quote},\n`;
+    });
+    code += suffix;
+    return code;
+}
+
 export function generateFetch(template: RequestTemplate): string {
-    let urlStr = template.url;
-    if (template.params && template.params.length > 0) {
-        try {
-            const urlObj = new URL(urlStr);
-            template.params.forEach(p => {
-                if (p.key) urlObj.searchParams.append(p.key, p.value);
-            });
-            urlStr = urlObj.toString();
-        } catch {
-            const queryString = template.params.filter(p => p.key).map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`).join("&");
-            if (queryString) urlStr += (urlStr.includes('?') ? '&' : '?') + queryString;
-        }
-    }
+    const urlStr = buildUrlWithParams(template.url, template.params);
 
     let code = `fetch("${urlStr}", {\n  method: "${template.method}",\n`;
     
-    const validHeaders = template.headers.filter(h => h.key && h.value);
-    if (validHeaders.length > 0) {
-        code += `  headers: {\n`;
-        validHeaders.forEach(h => {
-            code += `    "${h.key}": "${h.value.replace(/"/g, '\\"')}",\n`;
-        });
-        code += `  },\n`;
-    }
+    code += formatHeadersDict(template.headers, true, '"');
 
     const bodyString = getRawBodyString(template.body);
     if (bodyString && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
-        let bodyContent = stripJsonComments(bodyString).trim();
+        const bodyContent = stripJsonComments(bodyString).trim();
         const jsBody = bodyContent.replace(/\{\{(.+?)\}\}/g, (_, g) => `\${${g.trim()}}`);
         code += `  body: \`${jsBody.replace(/`/g, '\\`').replace(/\n/g, '\n  ')}\`,\n`;
     }
@@ -202,7 +209,7 @@ export function generateFetch(template: RequestTemplate): string {
 }
 
 export function generateAxios(template: RequestTemplate): string {
-    let urlStr = template.url;
+    const urlStr = template.url;
     let code = `import axios from 'axios';\n\n`;
     code += `let config = {\n`;
     code += `  method: '${template.method.toLowerCase()}',\n`;
@@ -218,18 +225,11 @@ export function generateAxios(template: RequestTemplate): string {
         code += `  },\n`;
     }
 
-    const validHeaders = template.headers.filter(h => h.key && h.value);
-    if (validHeaders.length > 0) {
-        code += `  headers: {\n`;
-        validHeaders.forEach(h => {
-            code += `    '${h.key}': '${h.value.replace(/'/g, "\\'")}',\n`;
-        });
-        code += `  },\n`;
-    }
+    code += formatHeadersDict(template.headers, true, "'");
 
     const bodyString = getRawBodyString(template.body);
     if (bodyString && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
-        let bodyContent = stripJsonComments(bodyString).trim();
+        const bodyContent = stripJsonComments(bodyString).trim();
         const jsBody = bodyContent.replace(/\{\{(.+?)\}\}/g, (_, g) => `\${${g.trim()}}`);
         code += `  data: \`${jsBody.replace(/`/g, '\\`').replace(/\n/g, '\n  ')}\`,\n`;
     }
@@ -240,41 +240,22 @@ export function generateAxios(template: RequestTemplate): string {
 }
 
 export function generatePython(template: RequestTemplate): string {
-    let urlStr = template.url;
-    if (template.params && template.params.length > 0) {
-        try {
-            const urlObj = new URL(urlStr);
-            template.params.forEach(p => {
-                if (p.key) urlObj.searchParams.append(p.key, p.value);
-            });
-            urlStr = urlObj.toString();
-        } catch {
-            const queryString = template.params.filter(p => p.key).map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`).join("&");
-            if (queryString) urlStr += (urlStr.includes('?') ? '&' : '?') + queryString;
-        }
-    }
+    const urlStr = buildUrlWithParams(template.url, template.params);
 
     let code = `import requests\n\nurl = "${urlStr}"\n`;
 
     let payloadStr = "None";
     const bodyString = getRawBodyString(template.body);
     if (bodyString && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
-        let bodyContent = stripJsonComments(bodyString).trim();
+        const bodyContent = stripJsonComments(bodyString).trim();
         code += `\npayload = """${bodyContent}"""\n`;
         payloadStr = "payload";
     }
 
-    const validHeaders = template.headers.filter(h => h.key && h.value);
-    if (validHeaders.length > 0) {
-        code += `\nheaders = {\n`;
-        validHeaders.forEach(h => {
-             code += `  '${h.key}': '${h.value.replace(/'/g, "\\'")}',\n`;
-        });
-        code += `}\n`;
-    }
+    code += formatHeadersDict(template.headers, false, "'");
 
     code += `\nresponse = requests.request("${template.method}", url`;
-    if (validHeaders.length > 0) code += `, headers=headers`;
+    if (template.headers.filter(h => h.key && h.value).length > 0) code += `, headers=headers`;
     if (payloadStr !== "None") code += `, data=payload`;
     code += `)\n\nprint(response.text)`;
     

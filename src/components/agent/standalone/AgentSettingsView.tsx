@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { Sliders, Eye, EyeOff, Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,9 +103,9 @@ export function AgentSettingsView({
     };
 
     const [selectedPreset, setSelectedPreset] = useState<string>("all");
-    const prevProfileIdRef = useRef<string | null>(null);
-    if (selectedProfile && selectedProfile.id !== prevProfileIdRef.current) {
-        prevProfileIdRef.current = selectedProfile.id;
+    const [prevProfileId, setPrevProfileId] = useState<string | null>(null);
+    if (selectedProfile && selectedProfile.id !== prevProfileId) {
+        setPrevProfileId(selectedProfile.id);
         setSelectedPreset(determinePresetType(selectedProfile.allowedTools));
     }
 
@@ -467,7 +467,7 @@ export function AgentSettingsView({
                                         try {
                                             const parsed = new URL(selectedProfile.endpoint);
                                             hostname = parsed.hostname;
-                                        } catch (e) {}
+                                        } catch {}
                                         return /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) || hostname === "localhost" || hostname.endsWith(".local");
                                     })()
                                 )}

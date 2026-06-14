@@ -51,7 +51,7 @@ export function resolveVariables(
     return resolved;
 }
 
-export function createExpect(actual: any) {
+function createExpect(actual: any) {
     return {
         to: {
             be: {

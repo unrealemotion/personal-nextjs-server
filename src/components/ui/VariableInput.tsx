@@ -8,14 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { store } from "@/lib/store";
 import { cn } from "@/lib/utils";
-
-const normalizeKey = (key: string): string => {
-    let k = key.trim();
-    if (k.startsWith("{{") && k.endsWith("}}")) {
-        k = k.slice(2, -2).trim();
-    }
-    return k;
-};
+import { normalizeKey } from "@/lib/executor-utils";
 
 interface VariableInputProps extends React.ComponentProps<"input"> {
     isBulk: boolean;
@@ -255,7 +248,7 @@ export function VariableInput({
                 };
             });
         }
-    }, [localValue, headers, environments, activeEnvironmentId, collections, activeRequestId, isBulk, envKeys, globalKeys, colVariables]);
+    }, [localValue, headers, environments, activeEnvironmentId, isBulk, envKeys, globalKeys, colVariables]);
 
     const missingVars = useMemo(() => allVars.filter(v => !v.isDefined), [allVars]);
     const hasVariables = allVars.length > 0;

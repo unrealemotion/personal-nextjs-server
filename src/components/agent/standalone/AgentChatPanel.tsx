@@ -86,7 +86,6 @@ export function AgentChatPanel({
         handleClearChat,
         handleRevert,
         confirmRevert,
-        isDirty,
         agentPanelPosition,
         setAgentPanelPosition,
         agentPanelSize,
@@ -162,24 +161,30 @@ export function AgentChatPanel({
         handle: string;
     } | null>(null);
 
+    const getClampedPosition = React.useCallback((x: number, y: number) => {
+        const width = agentPanelSize?.width ?? 450;
+        const height = agentPanelSize?.height ?? 650;
+        const panelWidth = width / zoom;
+        const panelHeight = height / zoom;
+        const minX = 12;
+        const maxX = window.innerWidth - panelWidth - 12;
+        const minY = 12;
+        const maxY = window.innerHeight - panelHeight - 12;
+
+        const clampedX = Math.max(minX, Math.min(maxX, x));
+        const clampedY = Math.max(minY, Math.min(maxY, y));
+
+        return { clampedX, clampedY };
+    }, [agentPanelSize, zoom]);
+
     // Handle window resize to clamp panel inside the screen
     useEffect(() => {
         const handleResize = () => {
             if (agentPanelPosition) {
-                const width = agentPanelSize?.width ?? 450;
-                const height = agentPanelSize?.height ?? 650;
-                const panelWidth = width / zoom;
-                const panelHeight = height / zoom;
-                const minX = 12;
-                const maxX = window.innerWidth - panelWidth - 12;
-                const minY = 12;
-                const maxY = window.innerHeight - panelHeight - 12;
-
                 const currentX = agentPanelPosition.x / zoom;
                 const currentY = agentPanelPosition.y / zoom;
 
-                const clampedX = Math.max(minX, Math.min(maxX, currentX));
-                const clampedY = Math.max(minY, Math.min(maxY, currentY));
+                const { clampedX, clampedY } = getClampedPosition(currentX, currentY);
 
                 if (clampedX !== currentX || clampedY !== currentY) {
                     setAgentPanelPosition({ x: clampedX * zoom, y: clampedY * zoom });
@@ -190,7 +195,7 @@ export function AgentChatPanel({
         window.addEventListener("resize", handleResize);
         handleResize();
         return () => window.removeEventListener("resize", handleResize);
-    }, [agentPanelPosition, agentPanelSize, zoom]);
+    }, [agentPanelPosition, agentPanelSize, zoom, getClampedPosition, setAgentPanelPosition]);
 
     const handleHeaderMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
         if (e.button !== 0) return; // Left click only
@@ -229,17 +234,7 @@ export function AgentChatPanel({
             const newX = dragStartRef.current.panelX + dx;
             const newY = dragStartRef.current.panelY + dy;
 
-            const width = agentPanelSize?.width ?? 450;
-            const height = agentPanelSize?.height ?? 650;
-            const panelWidth = width / zoom;
-            const panelHeight = height / zoom;
-            const minX = 12;
-            const maxX = window.innerWidth - panelWidth - 12;
-            const minY = 12;
-            const maxY = window.innerHeight - panelHeight - 12;
-
-            const clampedX = Math.max(minX, Math.min(maxX, newX));
-            const clampedY = Math.max(minY, Math.min(maxY, newY));
+            const { clampedX, clampedY } = getClampedPosition(newX, newY);
 
             const tx = clampedX - dragStartRef.current.panelX;
             const ty = clampedY - dragStartRef.current.panelY;
@@ -258,17 +253,7 @@ export function AgentChatPanel({
                 const newX = dragStartRef.current.panelX + dx;
                 const newY = dragStartRef.current.panelY + dy;
 
-                const width = agentPanelSize?.width ?? 450;
-                const height = agentPanelSize?.height ?? 650;
-                const panelWidth = width / zoom;
-                const panelHeight = height / zoom;
-                const minX = 12;
-                const maxX = window.innerWidth - panelWidth - 12;
-                const minY = 12;
-                const maxY = window.innerHeight - panelHeight - 12;
-
-                const clampedX = Math.max(minX, Math.min(maxX, newX));
-                const clampedY = Math.max(minY, Math.min(maxY, newY));
+                const { clampedX, clampedY } = getClampedPosition(newX, newY);
 
                 if (panelRef.current) {
                     panelRef.current.style.left = `${clampedX}px`;
@@ -368,7 +353,7 @@ export function AgentChatPanel({
             panelRef.current.style.right = 'auto';
         };
 
-        const handleMouseUp = (upEvent: MouseEvent) => {
+        const handleMouseUp = () => {
             document.removeEventListener("mousemove", handleMouseMove);
             document.removeEventListener("mouseup", handleMouseUp);
             document.body.style.cursor = '';

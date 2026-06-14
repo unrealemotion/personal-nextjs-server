@@ -13,13 +13,12 @@ const AgentChatPanel = dynamic(
     () => import("@/components/agent/AgentChatPanel").then((mod) => mod.AgentChatPanel),
     { ssr: false }
 );
-import { Layers, Download, Upload, Trash2, AlertTriangle, BookOpen } from "lucide-react";
+import { Download, Upload, Trash2, AlertTriangle } from "lucide-react";
 import { EtherealAiSymbol } from "@/components/agent/EtherealAiSymbol";
 import { exportState, importState, resetStore, hydrateStore, store, setCurrentView } from "@/lib/store";
 import { useLocalTransition } from "@/lib/transitions";
 import { LoadingTransition } from "@/components/layout/LoadingTransition";
 import { Button } from "@/components/ui/button";
-import Link from "next/link";
 import { sendToExtension } from "@/lib/extension";
 import {
     Dialog,

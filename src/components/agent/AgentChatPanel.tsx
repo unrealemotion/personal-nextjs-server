@@ -10,7 +10,8 @@ import {
     loadCheckpoint,
     deleteCheckpoint,
     setAgentPanelPosition,
-    setAgentPanelSize
+    setAgentPanelSize,
+    WELCOME_MESSAGE
 } from "@/lib/store";
 import { sendToExtension } from "@/lib/extension";
 import { toast as sonnerToast } from "sonner";
@@ -18,7 +19,7 @@ import { toast as sonnerToast } from "sonner";
 import { AgentProvider } from "./standalone/AgentContext";
 import { AgentChatPanel as StandaloneAgentChatPanel } from "./standalone/AgentChatPanel";
 import { useSurgeAgentTools } from "./useSurgeAgentTools";
-import { getAgentSystemPrompt, WELCOME_MESSAGE } from "./agent-prompts";
+import { getAgentSystemPrompt } from "./agent-prompts";
 import { type CheckpointProvider } from "./standalone/types";
 
 export function AgentChatPanel() {
@@ -265,7 +266,7 @@ function hasStateDiscrepancy(currentState: any, checkpoint: any): boolean {
         if (!a !== !b) return true;
         try {
             return JSON.stringify(a) !== JSON.stringify(b);
-        } catch (e) {
+        } catch {
             return true;
         }
     };

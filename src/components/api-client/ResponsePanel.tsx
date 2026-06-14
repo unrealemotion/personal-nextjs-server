@@ -45,14 +45,7 @@ export function ResponsePanel({
         return "bg-neutral-500/10 text-neutral-400 border-neutral-500/20";
     };
 
-    const getFormattedBody = () => {
-        try {
-            const parsed = JSON.parse(response.body);
-            return JSON.stringify(parsed, null, 2);
-        } catch (e) {
-            return response.body;
-        }
-    };
+
 
     const renderPrettyBody = () => {
         let isJson = false;
@@ -61,7 +54,7 @@ export function ResponsePanel({
             const parsed = JSON.parse(response.body);
             formatted = JSON.stringify(parsed, null, 2);
             isJson = true;
-        } catch (e) {}
+        } catch {}
 
         return (
             <div className="flex-1 min-h-0 w-full border border-white/5 rounded-xl overflow-hidden bg-[#1e1e1e]">

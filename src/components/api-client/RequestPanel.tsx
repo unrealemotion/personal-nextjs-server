@@ -26,13 +26,14 @@ import { Input } from "@/components/ui/input";
 import { VariableInput } from "@/components/ui/VariableInput";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Textarea } from "@/components/ui/textarea";
-import { Plus, X, Save, Play, Trash2, Send, Terminal, Code, Settings, ChevronDown, ChevronRight, Folder } from "lucide-react";
+import { Plus, X, Save, Trash2, Send, Terminal, Code, Settings, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { type ApiRequest, type KeyValuePair, type ApiCollection, type ApiFolder } from "@/lib/schema";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { stripJsonComments, cn, processTemplateForFormatting, addItemToCollectionTree } from "@/lib/utils";
+import { cn, processTemplateForFormatting, addItemToCollectionTree } from "@/lib/utils";
 import { sendToExtension } from "@/lib/extension";
+import { getHostname } from "@/lib/dns";
+import { stripJsonComments } from "@/lib/executor-utils";
 
 const abortControllers = new Map<string, AbortController>();
 
@@ -44,15 +45,6 @@ const RAW_LANGUAGES = [
     { label: "HTML", value: "html" },
     { label: "XML", value: "xml" }
 ];
-
-// Helper to normalize keys by removing curly braces and spaces
-const normalizeKey = (key: string): string => {
-    let k = key.trim();
-    if (k.startsWith("{{") && k.endsWith("}}")) {
-        k = k.slice(2, -2).trim();
-    }
-    return k;
-};
 
 // Helper to recursively find a request inside collections
 const findRequestLocation = (
@@ -167,7 +159,6 @@ export function RequestPanel() {
     const activeTab = apiTabs.find(t => t.id === activeTabId);
     const request = activeTab?.request as ApiRequest;
     const loading = activeTab?.loading;
-    const isDirty = activeTab?.isDirty;
     const requestId = activeTab?.requestId;
     const activeSubTab = activeTab?.activeSubTab || "params";
 
@@ -197,7 +188,7 @@ export function RequestPanel() {
     const pendingBodyUpdateRef = useRef<string | null>(null);
     const bodyUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const updateDecorations = () => {
+    const updateDecorations = React.useCallback(() => {
         const editor = editorRef.current;
         const monaco = monacoRef.current;
         if (!editor || !monaco) return;
@@ -255,7 +246,7 @@ export function RequestPanel() {
             });
         }
         decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
-    };
+    }, [environments, activeEnvironmentId, collections, request?.id]);
 
     const latestUpdateDecorationsRef = useRef(updateDecorations);
     latestUpdateDecorationsRef.current = updateDecorations;
@@ -309,7 +300,7 @@ export function RequestPanel() {
         if (request) {
             setSaveAsName(request.name || "");
         }
-    }, [request?.id, request?.name]);
+    }, [request?.id, request?.name, request]);
 
     useEffect(() => {
         if (requestId) {
@@ -343,7 +334,7 @@ export function RequestPanel() {
 
     useEffect(() => {
         updateDecorations();
-    }, [environments, activeEnvironmentId, collections, request?.id, activeTabId]);
+    }, [updateDecorations, activeTabId]);
 
     useEffect(() => {
         const monaco = monacoRef.current;
@@ -433,7 +424,7 @@ export function RequestPanel() {
                 return null;
             }
         });
-    }, [request?.body?.rawLanguage, request?.body?.mode, activeTabId]);
+    }, [request?.body?.rawLanguage, request?.body?.mode, activeTabId, request]);
 
     useEffect(() => {
         return () => {
@@ -479,7 +470,7 @@ export function RequestPanel() {
                     });
                 });
             }
-        } catch (e) {}
+        } catch {}
 
         // Merge with existing disabled params so they don't get deleted
         const existingDisabled = (request.params || []).filter(p => p.enabled === false);
@@ -871,7 +862,7 @@ export function RequestPanel() {
                     let variables = {};
                     try {
                         variables = JSON.parse(stripJsonComments(varsStr));
-                    } catch (e) {}
+                    } catch {}
                     fetchBody = JSON.stringify({ query, variables });
                     if (!headers.has("Content-Type")) {
                         headers.append("Content-Type", "application/json");
@@ -918,15 +909,7 @@ export function RequestPanel() {
             let extensionRuleId: number | null = null;
             if (isExtensionActive) {
                 try {
-                    let urlFilter = "*";
-                    try {
-                        let urlStr = interpolatedUrl.trim();
-                        if (!/^https?:\/\//i.test(urlStr)) {
-                            urlStr = "http://" + urlStr;
-                        }
-                        const parsed = new URL(urlStr);
-                        urlFilter = parsed.hostname;
-                    } catch (e) {}
+                    const urlFilter = getHostname(interpolatedUrl);
 
                     const extHeaders = Object.entries(rawHeadersMap).map(([key, value]) => ({
                         name: key,
@@ -1500,7 +1483,7 @@ export function RequestPanel() {
                                             try {
                                                 const beautified = processTemplateForFormatting(val);
                                                 handleBodyRawChange(beautified);
-                                            } catch (e) {
+                                            } catch {
                                                 toast.error("Invalid JSON format");
                                             }
                                         }}

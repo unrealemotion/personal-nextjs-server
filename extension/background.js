@@ -71,7 +71,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.source === "surge-content" && message.payload && message.payload.action === "fetchProxy") {
     const requestId = message.requestId;
     const tabId = sender.tab ? sender.tab.id : null;
-    let { url, options } = message.payload;
+    let { url } = message.payload;
+    const { options } = message.payload;
 
     // Resolve localhost to 127.0.0.1 to avoid DNS resolution hanging in MV3 Service Workers
     if (url) {
@@ -81,7 +82,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           urlObj.hostname = "127.0.0.1";
           url = urlObj.toString();
         }
-      } catch (e) {}
+      } catch {}
     }
 
     console.log("[fetchProxy] URL:", url, "options:", options);
@@ -130,7 +131,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Handle fetchProxy direct callback fallback (e.g. from old content script)
   if (message.action === "fetchProxy") {
-    let { url, options } = message;
+    let { url } = message;
+    const { options } = message;
 
     // Resolve localhost to 127.0.0.1 to avoid DNS resolution hanging in MV3 Service Workers
     if (url) {
@@ -140,7 +142,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           urlObj.hostname = "127.0.0.1";
           url = urlObj.toString();
         }
-      } catch (e) {}
+      } catch {}
     }
 
     console.log("[fetchProxy callback fallback] URL:", url, "options:", options);

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Editor, { DiffEditor } from "@monaco-editor/react";
 import { 
   ArrowRightLeft, 
@@ -8,7 +8,6 @@ import {
   CheckCircle2, 
   XCircle, 
   AlertCircle, 
-  Copy, 
   FileJson,
   Upload,
   Split,
@@ -64,7 +63,6 @@ function findLineForPath(jsonStr: string, path: string): number {
   for (let pIdx = 0; pIdx < parts.length; pIdx++) {
     const part = parts[pIdx];
     const isIndex = /^\d+$/.test(part);
-    let found = false;
 
     for (let i = currentLine; i < lines.length; i++) {
       const line = lines[i];
@@ -73,7 +71,6 @@ function findLineForPath(jsonStr: string, path: string): number {
 
       if (hasKey || hasIndex) {
         currentLine = i;
-        found = true;
         break;
       }
     }
@@ -232,7 +229,6 @@ export function JSONCompare() {
   };
 
   // Load Mock Data
-  const [sampleLoaded, setSampleLoaded] = useState<boolean>(false);
   const loadSampleData = () => {
     const originalFormatted = JSON.stringify(sampleLeft, null, 2);
     const modifiedFormatted = JSON.stringify(sampleRight, null, 2);
@@ -272,7 +268,7 @@ export function JSONCompare() {
   };
 
   // Compare Handler
-  const handleCompare = () => {
+  const handleCompare = useCallback(() => {
     if (!leftInput.trim() || !rightInput.trim()) {
       toast.warning("Please provide both left and right JSON inputs.");
       return;
@@ -300,10 +296,15 @@ export function JSONCompare() {
         const totalChanges = diff.added.length + diff.removed.length + diff.modified.length;
         toast.info(`Comparison complete! Found ${totalChanges} differences.`);
       }
-    } catch (err) {
+    } catch {
       toast.error("Both inputs must be valid JSON to execute comparison.");
     }
-  };
+  }, [leftInput, rightInput, ignoreArrayOrder]);
+
+  const stateRef = React.useRef({ isDiffActive, leftInput, rightInput });
+  useEffect(() => {
+    stateRef.current = { isDiffActive, leftInput, rightInput };
+  });
 
   const compareRef = React.useRef(handleCompare);
   useEffect(() => {
@@ -313,7 +314,8 @@ export function JSONCompare() {
   const diffEditorRef = React.useRef<any>(null);
 
   useEffect(() => {
-    if (isDiffActive && leftInput.trim() && rightInput.trim()) {
+    const { isDiffActive: active, leftInput: left, rightInput: right } = stateRef.current;
+    if (active && left.trim() && right.trim()) {
       compareRef.current();
     }
   }, [ignoreArrayOrder, diffMode]);
@@ -722,7 +724,7 @@ export function JSONCompare() {
                   language="json"
                   theme="vs-dark"
                   height="100%"
-                  onMount={(editor, monaco) => {
+                  onMount={(editor) => {
                     diffEditorRef.current = editor;
                   }}
                   options={{

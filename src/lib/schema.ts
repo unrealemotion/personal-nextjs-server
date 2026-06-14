@@ -83,7 +83,7 @@ export type TableFilterConfig = {
 
 // --- API Client Schemas ---
 
-export const envVariableSchema = z.object({
+const envVariableSchema = z.object({
   key: z.string(),
   value: z.string(),
   enabled: z.boolean(),
@@ -98,7 +98,7 @@ export const environmentSchema = z.object({
 });
 export type Environment = z.infer<typeof environmentSchema>;
 
-export const keyValuePairSchema = z.object({
+const keyValuePairSchema = z.object({
   key: z.string(),
   value: z.string(),
   enabled: z.boolean().optional(),
@@ -106,7 +106,7 @@ export const keyValuePairSchema = z.object({
 });
 export type KeyValuePair = z.infer<typeof keyValuePairSchema>;
 
-export const apiRequestSchema = z.object({
+const apiRequestSchema = z.object({
   id: z.string(),
   name: z.string(),
   method: z.string(),
@@ -135,7 +135,7 @@ export const apiRequestSchema = z.object({
 });
 export type ApiRequest = z.infer<typeof apiRequestSchema>;
 
-export const apiFolderSchema: z.ZodType<any> = z.lazy(() => z.object({
+const apiFolderSchema: z.ZodType<any> = z.lazy(() => z.object({
   id: z.string(),
   name: z.string(),
   items: z.array(z.union([apiFolderSchema, apiRequestSchema])),
@@ -154,14 +154,14 @@ export const apiCollectionSchema = z.object({
 });
 export type ApiCollection = z.infer<typeof apiCollectionSchema>;
 
-export const testResultSchema = z.object({
+const testResultSchema = z.object({
   name: z.string(),
   passed: z.boolean(),
   error: z.string().optional(),
 });
 export type TestResult = z.infer<typeof testResultSchema>;
 
-export const apiResponseSchema = z.object({
+const apiResponseSchema = z.object({
   status: z.number(),
   statusText: z.string(),
   timeMs: z.number(),
