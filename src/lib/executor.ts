@@ -1,6 +1,7 @@
 import { store, setResults, updateResultByRowId } from "./store";
 import { ExecutionResult } from "./schema";
 import { sendToExtension } from "./extension";
+import { extractEnvironmentVariables } from "./sandbox";
 
 let activeWorker: Worker | null = null;
 
@@ -79,22 +80,7 @@ export async function runBulkExecution(
         try {
             // Reconstruct first row context
             const firstRow = fileData[0] || {};
-            const activeEnv = state.environments?.find(e => e.id === state.activeEnvironmentId);
-            const envVars: Record<string, string> = {};
-            if (activeEnv) {
-                activeEnv.variables.forEach(v => {
-                    if (v.enabled) envVars[v.key] = v.value;
-                });
-            }
-            const globalsEnv = state.environments?.find(
-                e => e.name.toLowerCase() === "globals" || e.name.toLowerCase() === "global"
-            );
-            const globalVars: Record<string, string> = {};
-            if (globalsEnv) {
-                globalsEnv.variables.forEach(v => {
-                    if (v.enabled) globalVars[v.key] = v.value;
-                });
-            }
+            const { envVars, globalVars } = extractEnvironmentVariables(state.environments || [], state.activeEnvironmentId);
             const collectionVars: Record<string, string> = {};
             if (state.collections) {
                 state.collections.forEach(col => {

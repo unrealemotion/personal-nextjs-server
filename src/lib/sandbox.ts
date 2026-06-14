@@ -1,14 +1,12 @@
 import { type Environment, type TestResult, type KeyValuePair } from "./schema";
 
-export function resolveVariables(
-    text: string,
+export function extractEnvironmentVariables(
     environments: Environment[],
-    activeEnvironmentId: string | null,
-    collectionVariables: KeyValuePair[] = []
-): string {
-    if (!text) return text;
-
-    // Get active environment variables mapping
+    activeEnvironmentId: string | null
+): {
+    envVars: Record<string, string>;
+    globalVars: Record<string, string>;
+} {
     const activeEnv = environments.find(e => e.id === activeEnvironmentId);
     const envVars: Record<string, string> = {};
     if (activeEnv) {
@@ -17,7 +15,6 @@ export function resolveVariables(
         });
     }
 
-    // Globals variables mapping
     const globalsEnv = environments.find(
         e => e.name.toLowerCase() === "globals" || e.name.toLowerCase() === "global"
     );
@@ -27,6 +24,19 @@ export function resolveVariables(
             if (v.enabled) globalVars[v.key] = v.value;
         });
     }
+
+    return { envVars, globalVars };
+}
+
+export function resolveVariables(
+    text: string,
+    environments: Environment[],
+    activeEnvironmentId: string | null,
+    collectionVariables: KeyValuePair[] = []
+): string {
+    if (!text) return text;
+
+    const { envVars, globalVars } = extractEnvironmentVariables(environments, activeEnvironmentId);
 
     // Collection variables mapping
     const colVars: Record<string, string> = {};
@@ -133,16 +143,11 @@ function createExpect(actual: any) {
     };
 }
 
-export function runPreRequestScript(
-    script: string,
+function buildSandboxContext(
     environments: Environment[],
     activeEnvironmentId: string | null,
-    collectionVariables: KeyValuePair[] = []
-): {
-    updatedEnvironments: Environment[];
-    addedHeaders: { key: string; value: string }[];
-} {
-    const addedHeaders: { key: string; value: string }[] = [];
+    collectionVariables: KeyValuePair[]
+) {
     const localEnvs = JSON.parse(JSON.stringify(environments)) as Environment[];
     const activeEnv = localEnvs.find(e => e.id === activeEnvironmentId);
 
@@ -218,6 +223,40 @@ export function runPreRequestScript(
             return colVal?.value;
         }
     };
+
+    return {
+        localEnvs,
+        envGetterSetter,
+        globalsGetterSetter,
+        variablesGetter
+    };
+}
+
+function executeScript(script: string, pm: any) {
+    if (script && script.trim()) {
+        const shadowKeys = ["window", "document", "localStorage", "sessionStorage", "cookieStore", "indexedDB", "XMLHttpRequest", "fetch"];
+        const shadowValues = shadowKeys.map(() => undefined);
+        const runner = new Function("pm", ...shadowKeys, `"use strict";\n` + script);
+        runner(pm, ...shadowValues);
+    }
+}
+
+export function runPreRequestScript(
+    script: string,
+    environments: Environment[],
+    activeEnvironmentId: string | null,
+    collectionVariables: KeyValuePair[] = []
+): {
+    updatedEnvironments: Environment[];
+    addedHeaders: { key: string; value: string }[];
+} {
+    const addedHeaders: { key: string; value: string }[] = [];
+    const {
+        localEnvs,
+        envGetterSetter,
+        globalsGetterSetter,
+        variablesGetter
+    } = buildSandboxContext(environments, activeEnvironmentId, collectionVariables);
 
     const requestObj = {
         headers: {
@@ -242,16 +281,11 @@ export function runPreRequestScript(
         expect: createExpect,
     };
 
-    if (script && script.trim()) {
-        try {
-            const shadowKeys = ["window", "document", "localStorage", "sessionStorage", "cookieStore", "indexedDB", "XMLHttpRequest", "fetch"];
-            const shadowValues = shadowKeys.map(() => undefined);
-            const runner = new Function("pm", ...shadowKeys, `"use strict";\n` + script);
-            runner(pm, ...shadowValues);
-        } catch (e: any) {
-            console.error("Error executing pre-request script:", e);
-            throw new Error(`Pre-request script failed: ${e.message}`);
-        }
+    try {
+        executeScript(script, pm);
+    } catch (e: any) {
+        console.error("Error executing pre-request script:", e);
+        throw new Error(`Pre-request script failed: ${e.message}`);
     }
 
     return {
@@ -276,81 +310,12 @@ export function runTestScript(
     testResults: TestResult[];
 } {
     const testResults: TestResult[] = [];
-    const localEnvs = JSON.parse(JSON.stringify(environments)) as Environment[];
-    const activeEnv = localEnvs.find(e => e.id === activeEnvironmentId);
-
-    let globalsEnv = localEnvs.find(
-        e => e.name.toLowerCase() === "globals" || e.name.toLowerCase() === "global"
-    );
-    if (!globalsEnv) {
-        globalsEnv = {
-            id: "globals",
-            name: "Globals",
-            variables: []
-        };
-        localEnvs.push(globalsEnv);
-    }
-
-    const envGetterSetter = {
-        get: (key: string) => {
-            if (!activeEnv) return undefined;
-            const variable = activeEnv.variables.find(v => v.key === key);
-            return variable?.value;
-        },
-        set: (key: string, value: string) => {
-            if (!activeEnv) return;
-            const variable = activeEnv.variables.find(v => v.key === key);
-            if (variable) {
-                variable.value = value;
-            } else {
-                activeEnv.variables.push({ key, value, enabled: true });
-            }
-        },
-        has: (key: string) => {
-            if (!activeEnv) return false;
-            return activeEnv.variables.some(v => v.key === key);
-        },
-        unset: (key: string) => {
-            if (!activeEnv) return;
-            activeEnv.variables = activeEnv.variables.filter(v => v.key !== key);
-        }
-    };
-
-    const globalsGetterSetter = {
-        get: (key: string) => {
-            if (!globalsEnv) return undefined;
-            const variable = globalsEnv.variables.find(v => v.key === key);
-            return variable?.value;
-        },
-        set: (key: string, value: string) => {
-            if (!globalsEnv) return;
-            const variable = globalsEnv.variables.find(v => v.key === key);
-            if (variable) {
-                variable.value = value;
-            } else {
-                globalsEnv.variables.push({ key, value, enabled: true });
-            }
-        },
-        has: (key: string) => {
-            if (!globalsEnv) return false;
-            return globalsEnv.variables.some(v => v.key === key);
-        },
-        unset: (key: string) => {
-            if (!globalsEnv) return;
-            globalsEnv.variables = globalsEnv.variables.filter(v => v.key !== key);
-        }
-    };
-
-    const variablesGetter = {
-        get: (key: string) => {
-            const envVal = envGetterSetter.get(key);
-            if (envVal !== undefined) return envVal;
-            const globalVal = globalsGetterSetter.get(key);
-            if (globalVal !== undefined) return globalVal;
-            const colVal = collectionVariables.find(v => v.key === key);
-            return colVal?.value;
-        }
-    };
+    const {
+        localEnvs,
+        envGetterSetter,
+        globalsGetterSetter,
+        variablesGetter
+    } = buildSandboxContext(environments, activeEnvironmentId, collectionVariables);
 
     const responseObj = {
         code: response.status,
@@ -382,16 +347,11 @@ export function runTestScript(
         expect: (val: any) => createExpect(val),
     };
 
-    if (script && script.trim()) {
-        try {
-            const shadowKeys = ["window", "document", "localStorage", "sessionStorage", "cookieStore", "indexedDB", "XMLHttpRequest", "fetch"];
-            const shadowValues = shadowKeys.map(() => undefined);
-            const runner = new Function("pm", ...shadowKeys, `"use strict";\n` + script);
-            runner(pm, ...shadowValues);
-        } catch (e: any) {
-            console.error("Error executing test script:", e);
-            testResults.push({ name: "Script Execution Error", passed: false, error: e.message || String(e) });
-        }
+    try {
+        executeScript(script, pm);
+    } catch (e: any) {
+        console.error("Error executing test script:", e);
+        testResults.push({ name: "Script Execution Error", passed: false, error: e.message || String(e) });
     }
 
     return {

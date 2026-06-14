@@ -1,5 +1,5 @@
-import { RequestTemplate } from "./schema";
-import { stripJsonComments } from "./executor-utils";
+import { RequestTemplate, ApiRequest } from "./schema";
+import { stripJsonComments } from "./strip-comments";
 
 function getRawBodyString(bodyObj: any): string {
     if (!bodyObj) return "";
@@ -190,6 +190,16 @@ function formatHeadersDict(
     return code;
 }
 
+function getJsBodyProperty(keyName: "body" | "data", template: RequestTemplate): string {
+    const bodyString = getRawBodyString(template.body);
+    if (bodyString && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
+        const bodyContent = stripJsonComments(bodyString).trim();
+        const jsBody = bodyContent.replace(/\{\{(.+?)\}\}/g, (_, g) => `\${${g.trim()}}`);
+        return `  ${keyName}: \`${jsBody.replace(/`/g, '\\`').replace(/\n/g, '\n  ')}\`,\n`;
+    }
+    return "";
+}
+
 export function generateFetch(template: RequestTemplate): string {
     const urlStr = buildUrlWithParams(template.url, template.params);
 
@@ -197,12 +207,7 @@ export function generateFetch(template: RequestTemplate): string {
     
     code += formatHeadersDict(template.headers, true, '"');
 
-    const bodyString = getRawBodyString(template.body);
-    if (bodyString && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
-        const bodyContent = stripJsonComments(bodyString).trim();
-        const jsBody = bodyContent.replace(/\{\{(.+?)\}\}/g, (_, g) => `\${${g.trim()}}`);
-        code += `  body: \`${jsBody.replace(/`/g, '\\`').replace(/\n/g, '\n  ')}\`,\n`;
-    }
+    code += getJsBodyProperty("body", template);
 
     code += `})\n.then(response => response.text())\n.then(result => console.log(result))\n.catch(error => console.error('error', error));`;
     return code;
@@ -227,12 +232,7 @@ export function generateAxios(template: RequestTemplate): string {
 
     code += formatHeadersDict(template.headers, true, "'");
 
-    const bodyString = getRawBodyString(template.body);
-    if (bodyString && ["POST", "PUT", "PATCH", "QUERY"].includes(template.method)) {
-        const bodyContent = stripJsonComments(bodyString).trim();
-        const jsBody = bodyContent.replace(/\{\{(.+?)\}\}/g, (_, g) => `\${${g.trim()}}`);
-        code += `  data: \`${jsBody.replace(/`/g, '\\`').replace(/\n/g, '\n  ')}\`,\n`;
-    }
+    code += getJsBodyProperty("data", template);
 
     code += `};\n\n`;
     code += `axios.request(config)\n.then((response) => {\n  console.log(JSON.stringify(response.data));\n})\n.catch((error) => {\n  console.error(error);\n});`;
@@ -260,4 +260,42 @@ export function generatePython(template: RequestTemplate): string {
     code += `)\n\nprint(response.text)`;
     
     return code;
+}
+
+export function mapParsedCurlToRequest(parsed: any): Partial<ApiRequest> {
+    const mappedHeaders = (parsed.headers || []).map((h: any) => ({
+        key: h.key,
+        value: h.value,
+        enabled: true
+    }));
+    const mappedParams = (parsed.params || []).map((p: any) => ({
+        key: p.key,
+        value: p.value,
+        enabled: true
+    }));
+    
+    const mappedBody = {
+        mode: parsed.body?.mode || "none",
+        raw: parsed.body?.raw || "",
+        rawLanguage: parsed.body?.rawLanguage || "json",
+        formdata: (parsed.body?.formdata || []).map((f: any) => ({
+            key: f.key,
+            value: f.value,
+            enabled: true,
+            type: f.type || "text"
+        })),
+        urlencoded: (parsed.body?.urlencoded || []).map((u: any) => ({
+            key: u.key,
+            value: u.value,
+            enabled: true
+        }))
+    };
+
+    return {
+        method: parsed.method || "GET",
+        url: parsed.url || "",
+        headers: mappedHeaders,
+        params: mappedParams,
+        body: mappedBody
+    };
 }

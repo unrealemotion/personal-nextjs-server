@@ -17,6 +17,8 @@ import { Download, Upload, Trash2, AlertTriangle } from "lucide-react";
 import { EtherealAiSymbol } from "@/components/agent/EtherealAiSymbol";
 import { exportState, importState, resetStore, hydrateStore, store, setCurrentView } from "@/lib/store";
 import { useLocalTransition } from "@/lib/transitions";
+import { readFileAsText } from "@/lib/file-utils";
+import { useFileImporter } from "@/lib/hooks";
 import { LoadingTransition } from "@/components/layout/LoadingTransition";
 import { Button } from "@/components/ui/button";
 import { sendToExtension } from "@/lib/extension";
@@ -51,7 +53,6 @@ function isVersionOlderThan(current: string | null, target: string): boolean {
 }
 
 export default function SurgePage() {
-    const fileInputRef = useRef<HTMLInputElement>(null);
     const currentView = useStore(store, (state) => state.currentView || "api_client");
     const [isPending, startLocalTransition] = useLocalTransition();
 
@@ -152,23 +153,14 @@ export default function SurgePage() {
         };
     }, []);
 
-    const handleImportClick = () => {
-        fileInputRef.current?.click();
-    };
-
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            const content = event.target?.result;
-            if (typeof content === "string") {
-                importState(content);
-            }
-        };
-        reader.readAsText(file);
-        e.target.value = ""; // Reset for next time
-    };
+    const { fileInputRef, handleImportClick, handleFileChange } = useFileImporter(
+        (content) => {
+            importState(content);
+        },
+        (err) => {
+            console.error("Failed to read file:", err);
+        }
+    );
 
     return (
         <div className="min-h-screen flex flex-col relative bg-background text-foreground font-sans selection:bg-primary/20">

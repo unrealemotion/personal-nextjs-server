@@ -16,10 +16,11 @@ import {
     updateCollection,
     markActiveTabClean,
     generateId,
-    addCollection
+    addCollection,
+    linkTabToRequest
 } from "@/lib/store";
-import { runPreRequestScript, runTestScript, resolveVariables } from "@/lib/sandbox";
-import { parseCurl } from "@/lib/curl";
+import { executeFrontendRequest } from "@/lib/frontend-executor";
+import { parseCurl, mapParsedCurlToRequest } from "@/lib/curl";
 import { getMethodColor } from "./CollectionSidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -30,10 +31,19 @@ import { Plus, X, Save, Trash2, Send, Terminal, Code, Settings, ChevronDown, Che
 import { type ApiRequest, type KeyValuePair, type ApiCollection, type ApiFolder } from "@/lib/schema";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn, processTemplateForFormatting, addItemToCollectionTree } from "@/lib/utils";
-import { sendToExtension } from "@/lib/extension";
-import { getHostname } from "@/lib/dns";
-import { stripJsonComments } from "@/lib/executor-utils";
+import { 
+    cn, 
+    processTemplateForFormatting, 
+    addItemToCollectionTree, 
+    findParentCollection, 
+    parseQueryParams,
+    addMonacoDecoration,
+    setupMonacoJsonEditor,
+    getMonacoTextAndModel,
+    handleUrlPasteHelper
+} from "@/lib/utils";
+import { useCommonStoreState, useMonacoDecorations } from "@/lib/hooks";
+
 
 const abortControllers = new Map<string, AbortController>();
 
@@ -149,9 +159,7 @@ function FolderTreeRow({
 }
 
 export function RequestPanel() {
-    const collections = useStore(store, (state) => state.collections);
-    const environments = useStore(store, (state) => state.environments);
-    const activeEnvironmentId = useStore(store, (state) => state.activeEnvironmentId);
+    const { collections, environments, activeEnvironmentId } = useCommonStoreState();
     
     const apiTabs = useStore(store, (state) => state.apiTabs);
     const activeTabId = useStore(store, (state) => state.activeTabId);
@@ -189,17 +197,12 @@ export function RequestPanel() {
     const bodyUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const updateDecorations = React.useCallback(() => {
-        const editor = editorRef.current;
-        const monaco = monacoRef.current;
-        if (!editor || !monaco) return;
-        
-        const model = editor.getModel();
-        if (!model) return;
-        
-        const text = model.getValue();
+        const monacoInfo = getMonacoTextAndModel(editorRef.current, monacoRef.current);
+        if (!monacoInfo) return;
+        const { editor, model, text, monaco } = monacoInfo;
         const regex = /\{\{([^}]+)\}\}/g;
         let match;
-        const newDecorations = [];
+        const newDecorations: any[] = [];
         
         const activeEnv = environments.find(e => e.id === activeEnvironmentId);
         const envKeys = activeEnv 
@@ -215,16 +218,7 @@ export function RequestPanel() {
         
         let colKeys: string[] = [];
         if (request?.id) {
-            const parentCol = collections.find(c => {
-                const findInItems = (items: any[]): boolean => {
-                    return items.some(item => {
-                        if (item.id === request.id) return true;
-                        if (item.items) return findInItems(item.items);
-                        return false;
-                    });
-                };
-                return findInItems(c.items);
-            });
+            const parentCol = findParentCollection(collections, request.id);
             if (parentCol && parentCol.variables) {
                 colKeys = parentCol.variables.filter(v => v.enabled !== false).map(v => v.key);
             }
@@ -236,30 +230,12 @@ export function RequestPanel() {
             const varName = match[1].trim();
             const isAvailable = allKeys.includes(varName);
 
-            const startPos = model.getPositionAt(match.index);
-            const endPos = model.getPositionAt(match.index + match[0].length);
-            newDecorations.push({
-                range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
-                options: { 
-                    inlineClassName: isAvailable ? 'monaco-template-variable' : 'monaco-template-variable-invalid'
-                }
-            });
+            addMonacoDecoration(model, monaco, match, isAvailable, newDecorations);
         }
         decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
     }, [environments, activeEnvironmentId, collections, request?.id]);
 
-    const latestUpdateDecorationsRef = useRef(updateDecorations);
-    latestUpdateDecorationsRef.current = updateDecorations;
-
-    const debouncedUpdateDecorations = React.useMemo(() => {
-        let timeout: ReturnType<typeof setTimeout> | null = null;
-        return () => {
-            if (timeout) clearTimeout(timeout);
-            timeout = setTimeout(() => {
-                latestUpdateDecorationsRef.current();
-            }, 400);
-        };
-    }, []);
+    const debouncedUpdateDecorations = useMonacoDecorations(updateDecorations);
 
     const syncBodyUpdate = () => {
         if (bodyUpdateTimeoutRef.current) {
@@ -281,11 +257,7 @@ export function RequestPanel() {
         editorRef.current = editor;
         monacoRef.current = monaco;
 
-        monaco.languages.json?.jsonDefaults?.setDiagnosticsOptions({
-            validate: false,
-        });
-
-        editor.onDidChangeModelContent(() => {
+        setupMonacoJsonEditor(editor, monaco, () => {
             debouncedUpdateDecorations();
         });
 
@@ -383,16 +355,7 @@ export function RequestPanel() {
                             }
                         }
                         if (val === undefined && request?.id) {
-                            const parentCol = store.state.collections.find(c => {
-                                const findInItems = (items: any[]): boolean => {
-                                    return items.some(item => {
-                                        if (item.id === request.id) return true;
-                                        if (item.items) return findInItems(item.items);
-                                        return false;
-                                    });
-                                };
-                                return findInItems(c.items);
-                            });
+                            const parentCol = findParentCollection(store.state.collections, request.id);
                             if (parentCol && parentCol.variables) {
                                 const found = parentCol.variables.find(v => v.key === varName && v.enabled !== false);
                                 if (found) {
@@ -454,23 +417,7 @@ export function RequestPanel() {
 
     const handleUrlChange = (url: string) => {
         // Sync URL parameters with Params table
-        const parsedParams: KeyValuePair[] = [];
-        try {
-            const queryIdx = url.indexOf("?");
-            if (queryIdx !== -1) {
-                const search = url.slice(queryIdx + 1);
-                const pairs = search.split("&");
-                pairs.forEach(p => {
-                    if (!p) return;
-                    const [k, v] = p.split("=");
-                    parsedParams.push({
-                        key: decodeURIComponent(k || ""),
-                        value: decodeURIComponent(v || ""),
-                        enabled: true
-                    });
-                });
-            }
-        } catch {}
+        const parsedParams = parseQueryParams(url);
 
         // Merge with existing disabled params so they don't get deleted
         const existingDisabled = (request.params || []).filter(p => p.enabled === false);
@@ -481,49 +428,17 @@ export function RequestPanel() {
 
     const handleUrlPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
         const pastedText = e.clipboardData.getData("text");
-        if (pastedText.trim().startsWith("curl ")) {
-            e.preventDefault();
-            const parsed = parseCurl(pastedText);
-            if (parsed) {
-                const mappedHeaders = (parsed.headers || []).map(h => ({
-                    key: h.key,
-                    value: h.value,
-                    enabled: true
-                }));
-                const mappedParams = (parsed.params || []).map(p => ({
-                    key: p.key,
-                    value: p.value,
-                    enabled: true
-                }));
-                
-                const mappedBody = {
-                    mode: parsed.body?.mode || "none",
-                    raw: parsed.body?.raw || "",
-                    rawLanguage: parsed.body?.rawLanguage || "json",
-                    formdata: (parsed.body?.formdata || []).map((f: any) => ({
-                        key: f.key,
-                        value: f.value,
-                        enabled: true,
-                        type: f.type || "text"
-                    })),
-                    urlencoded: (parsed.body?.urlencoded || []).map((u: any) => ({
-                        key: u.key,
-                        value: u.value,
-                        enabled: true
-                    }))
-                };
-
-                updateActiveTabRequest({
-                    method: parsed.method || "GET",
-                    url: parsed.url || "",
-                    headers: mappedHeaders,
-                    params: mappedParams,
-                    body: mappedBody
-                });
+        const intercepted = handleUrlPasteHelper(
+            pastedText,
+            (parsed) => {
+                const mapped = mapParsedCurlToRequest(parsed);
+                updateActiveTabRequest(mapped);
                 toast.success("cURL command imported and parsed!");
-            } else {
-                toast.error("Invalid or unsupported cURL command");
-            }
+            },
+            (msg) => toast.error(msg)
+        );
+        if (intercepted) {
+            e.preventDefault();
         }
     };
 
@@ -694,15 +609,9 @@ export function RequestPanel() {
                 addCollection(newlyCreatedCol);
                 
                 // Link this tab to the saved request
-                store.setState((state) => {
-                    const newTabs = state.apiTabs.map(t => {
-                        if (t.id === activeTabId) {
-                            return { ...t, requestId: newReqId, name: requestName, isDirty: false };
-                        }
-                        return t;
-                    });
-                    return { ...state, apiTabs: newTabs };
-                });
+                if (activeTabId) {
+                    linkTabToRequest(activeTabId, newReqId, requestName);
+                }
 
                 toast.success(`Saved request "${requestName}" in new collection "Default Collection"!`);
                 return;
@@ -736,15 +645,9 @@ export function RequestPanel() {
         });
 
         // Link this tab to the saved request
-        store.setState((state) => {
-            const newTabs = state.apiTabs.map(t => {
-                if (t.id === activeTabId) {
-                    return { ...t, requestId: newReqId, name: requestName, isDirty: false };
-                }
-                return t;
-            });
-            return { ...state, apiTabs: newTabs };
-        });
+        if (activeTabId) {
+            linkTabToRequest(activeTabId, newReqId, requestName);
+        }
 
         toast.success(`Saved request "${requestName}"!`);
     };
@@ -772,254 +675,21 @@ export function RequestPanel() {
         const controller = new AbortController();
         abortControllers.set(targetTabId, controller);
 
-        try {
-            // 1. Gather variables from active environment & collection
-            // Find active collection variables if request is in a collection
-            let collectionVars: KeyValuePair[] = [];
-            if (requestId) {
-                const parentCol = collections.find(c => {
-                    const findInItems = (items: any[]): boolean => {
-                        return items.some(item => {
-                            if (item.id === requestId) return true;
-                            if (item.items) return findInItems(item.items);
-                            return false;
-                        });
-                    };
-                    return findInItems(c.items);
-                });
-                if (parentCol && parentCol.variables) {
-                    collectionVars = parentCol.variables;
-                }
-            }
+        const response = await executeFrontendRequest(
+            request,
+            requestId,
+            environments,
+            activeEnvironmentId,
+            collections,
+            controller.signal
+        );
 
-            // 2. Pre-request Script Execution
-            let finalEnvironments = environments;
-            let addedHeaders: { key: string; value: string }[] = [];
+        abortControllers.delete(targetTabId);
+        updateTabResponse(targetTabId, response);
 
-            if (request.preRequestScript) {
-                const scriptRes = runPreRequestScript(
-                    request.preRequestScript,
-                    environments,
-                    activeEnvironmentId,
-                    collectionVars
-                );
-                finalEnvironments = scriptRes.updatedEnvironments;
-                addedHeaders = scriptRes.addedHeaders;
-
-                // Sync environments state back to store
-                store.setState(s => ({ ...s, environments: finalEnvironments }));
-            }
-
-            // 3. Variable Interpolation
-            const interpolatedUrl = resolveVariables(request.url, finalEnvironments, activeEnvironmentId, collectionVars);
-            
-            // Build Headers
-            const headers = new Headers();
-            const rawHeadersMap: Record<string, string> = {};
-
-            // User-defined headers
-            (request.headers || []).forEach(h => {
-                if (h.enabled !== false && h.key) {
-                    const resolvedKey = resolveVariables(h.key, finalEnvironments, activeEnvironmentId, collectionVars);
-                    const resolvedVal = resolveVariables(h.value, finalEnvironments, activeEnvironmentId, collectionVars);
-                    headers.append(resolvedKey, resolvedVal);
-                    rawHeadersMap[resolvedKey] = resolvedVal;
-                }
-            });
-
-            // Headers added dynamically via pre-request scripts
-            addedHeaders.forEach(h => {
-                headers.append(h.key, h.value);
-                rawHeadersMap[h.key] = h.value;
-            });
-
-            // Build Body
-            let fetchBody: any = null;
-            const mode = request.body?.mode || "none";
-
-            if (request.method !== "GET" && request.method !== "HEAD") {
-                if (mode === "raw" && request.body?.raw) {
-                    const rawBodyResolved = resolveVariables(request.body.raw, finalEnvironments, activeEnvironmentId, collectionVars);
-                    const lang = request.body.rawLanguage || "json";
-                    if (lang === "json") {
-                        fetchBody = stripJsonComments(rawBodyResolved);
-                    } else {
-                        fetchBody = rawBodyResolved;
-                    }
-                    let contentType = "application/json";
-                    if (lang === "text") contentType = "text/plain";
-                    else if (lang === "javascript") contentType = "application/javascript";
-                    else if (lang === "html") contentType = "text/html";
-                    else if (lang === "xml") contentType = "application/xml";
-
-                    if (!headers.has("Content-Type")) {
-                        headers.append("Content-Type", contentType);
-                        rawHeadersMap["Content-Type"] = contentType;
-                    }
-                } else if (mode === "graphql" && request.body?.graphql) {
-                    const query = resolveVariables(request.body.graphql.query || "", finalEnvironments, activeEnvironmentId, collectionVars);
-                    const varsStr = resolveVariables(request.body.graphql.variables || "{}", finalEnvironments, activeEnvironmentId, collectionVars);
-                    let variables = {};
-                    try {
-                        variables = JSON.parse(stripJsonComments(varsStr));
-                    } catch {}
-                    fetchBody = JSON.stringify({ query, variables });
-                    if (!headers.has("Content-Type")) {
-                        headers.append("Content-Type", "application/json");
-                        rawHeadersMap["Content-Type"] = "application/json";
-                    }
-                } else if (mode === "urlencoded" && request.body?.urlencoded) {
-                    const formParams = new URLSearchParams();
-                    request.body.urlencoded.forEach(p => {
-                        if (p.enabled !== false && p.key) {
-                            const rKey = resolveVariables(p.key, finalEnvironments, activeEnvironmentId, collectionVars);
-                            const rVal = resolveVariables(p.value, finalEnvironments, activeEnvironmentId, collectionVars);
-                            formParams.append(rKey, rVal);
-                        }
-                    });
-                    fetchBody = formParams.toString();
-                    if (!headers.has("Content-Type")) {
-                        headers.append("Content-Type", "application/x-www-form-urlencoded");
-                        rawHeadersMap["Content-Type"] = "application/x-www-form-urlencoded";
-                    }
-                } else if (mode === "formdata" && request.body?.formdata) {
-                    const fd = new FormData();
-                    request.body.formdata.forEach(p => {
-                        if (p.enabled !== false && p.key) {
-                            const rKey = resolveVariables(p.key, finalEnvironments, activeEnvironmentId, collectionVars);
-                            const rVal = resolveVariables(p.value, finalEnvironments, activeEnvironmentId, collectionVars);
-                            fd.append(rKey, rVal);
-                        }
-                    });
-                    fetchBody = fd;
-                } else if (mode === "binary" && request.body?.binary) {
-                    fetchBody = resolveVariables(request.body.binary, finalEnvironments, activeEnvironmentId, collectionVars);
-                    if (!headers.has("Content-Type")) {
-                        headers.append("Content-Type", "application/octet-stream");
-                        rawHeadersMap["Content-Type"] = "application/octet-stream";
-                    }
-                }
-            }
-
-            // 4. Send network request
-            if (!interpolatedUrl) {
-                throw new Error("URL is empty.");
-            }
-
-            let extensionRuleId: number | null = null;
-            if (isExtensionActive) {
-                try {
-                    const urlFilter = getHostname(interpolatedUrl);
-
-                    const extHeaders = Object.entries(rawHeadersMap).map(([key, value]) => ({
-                        name: key,
-                        value: value
-                    }));
-
-                    const res = await sendToExtension({
-                        action: "setupRequestRules",
-                        urlFilter,
-                        headers: extHeaders,
-                        initiatorOrigin: window.location.origin
-                    });
-                    if (res && res.success) {
-                        extensionRuleId = res.ruleId;
-                    } else if (res && res.error) {
-                        toast.error(res.error);
-                    }
-                } catch (e) {
-                    console.warn("Failed to setup extension rules:", e);
-                }
-            }
-
-            const startTime = performance.now();
-            let fetchRes;
-            try {
-                fetchRes = await fetch(interpolatedUrl, {
-                    method: request.method,
-                    headers,
-                    body: fetchBody,
-                    mode: "cors", // browser request
-                    signal: controller.signal
-                });
-            } finally {
-                if (extensionRuleId !== null) {
-                    try {
-                        await sendToExtension({
-                            action: "clearRequestRules",
-                            ruleId: extensionRuleId
-                        });
-                    } catch (e) {
-                        console.warn("Failed to clear extension rules:", e);
-                    }
-                }
-            }
-            const endTime = performance.now();
-
-            const text = await fetchRes.text();
-            const resHeadersMap: Record<string, string> = {};
-            fetchRes.headers.forEach((val, key) => {
-                resHeadersMap[key] = val;
-            });
-
-            const initialResponse = {
-                status: fetchRes.status,
-                statusText: fetchRes.statusText,
-                timeMs: Math.round(endTime - startTime),
-                sizeBytes: text.length,
-                body: text,
-                headers: resHeadersMap,
-            };
-
-            // 5. Test Script Execution
-            let testResults: any[] = [];
-            if (request.testScript) {
-                const testRes = runTestScript(
-                    request.testScript,
-                    initialResponse,
-                    finalEnvironments,
-                    activeEnvironmentId,
-                    collectionVars
-                );
-                testResults = testRes.testResults;
-                // Sync environments state back to store (in case test scripts mutates environments)
-                store.setState(s => ({ ...s, environments: testRes.updatedEnvironments }));
-            }
-
-            abortControllers.delete(targetTabId);
-
-            updateTabResponse(targetTabId, {
-                ...initialResponse,
-                testResults
-            });
-
-        } catch (err: any) {
-            abortControllers.delete(targetTabId);
-
-            if (err.name === "AbortError") {
-                updateTabResponse(targetTabId, {
-                    status: 0,
-                    statusText: "Cancelled",
-                    timeMs: 0,
-                    sizeBytes: 0,
-                    body: "Request cancelled by user.",
-                    headers: {},
-                    testResults: []
-                });
-                toast.info("Request cancelled.");
-                return;
-            }
-
-            console.error(err);
-            updateTabResponse(targetTabId, {
-                status: 0,
-                statusText: "Error",
-                timeMs: 0,
-                sizeBytes: 0,
-                body: `Error: ${err.message || String(err)}\n\nThis could be caused by CORS block restrictions on the endpoint or an invalid domain name. Check developer tools console logs.`,
-                headers: {},
-                testResults: [{ name: "Request completed", passed: false, error: err.message }]
-            });
+        if (response.statusText === "Cancelled") {
+            toast.info("Request cancelled.");
+        } else if (response.status === 0) {
             toast.error("Request failed!");
         }
     };

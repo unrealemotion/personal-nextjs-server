@@ -1,4 +1,4 @@
-import { type Message, type AgentProfile, type ToolDefinition } from "./types";
+import { type Message, type AgentProfile, type ToolDefinition, type FetchProxyFn, type LLMCallParams } from "./types";
 
 
 
@@ -36,14 +36,70 @@ function mapOpenAiSchemaToGemini(schema: any): any {
     return geminiSchema;
 }
 
+function checkShouldProxy(config: AgentProfile, apiTargetUrl: string, fetchProxy?: FetchProxyFn): boolean {
+    if (!fetchProxy) return false;
+    const isExtensionActive = typeof document !== "undefined" && 
+        document.documentElement.getAttribute("data-surge-extension-active") === "true";
+    if (isExtensionActive) {
+        if (config.bypassCorsWithExtension !== undefined) {
+            return config.bypassCorsWithExtension;
+        } else {
+            let hostname = "";
+            try {
+                const parsed = new URL(apiTargetUrl);
+                hostname = parsed.hostname;
+            } catch {}
+            return /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) || hostname === "localhost" || hostname.endsWith(".local");
+        }
+    }
+    return false;
+}
+
+function parseAndAddToolCall(jsonStr: string, toolCalls: any[]): void {
+    try {
+        const parsed = JSON.parse(jsonStr);
+        if (parsed && typeof parsed === "object" && parsed.name) {
+            toolCalls.push({
+                id: `call_fb_${Math.random().toString(36).substring(2, 9)}`,
+                type: "function",
+                function: {
+                    name: parsed.name,
+                    arguments: JSON.stringify(parsed.arguments || parsed.args || {})
+                }
+            });
+        }
+    } catch {}
+}
+
+function handleProxyResponse(res: any, apiName: string): any {
+    if (res && res.success) {
+        return {
+            ok: res.status >= 200 && res.status < 300,
+            status: res.status,
+            text: async () => res.body,
+            json: async () => JSON.parse(res.body)
+        };
+    } else {
+        throw new Error(res?.error || `Failed to communicate with ${apiName} API via extension proxy.`);
+    }
+}
+
+function extractJsonFallbackToolCalls(text: string, toolCalls: any[]): void {
+    const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/g;
+    let match;
+    while ((match = jsonBlockRegex.exec(text)) !== null) {
+        parseAndAddToolCall(match[1].trim(), toolCalls);
+    }
+
+    if (toolCalls.length === 0 && text.trim().startsWith("{") && text.trim().endsWith("}")) {
+        parseAndAddToolCall(text.trim(), toolCalls);
+    }
+}
+
 async function callGemini(
-    chatMessages: Message[],
-    config: AgentProfile,
-    systemPrompt: string,
-    agentTools: ToolDefinition[],
-    fetchProxy?: (url: string, options: any, abortSignal?: AbortSignal) => Promise<{ success: boolean; status: number; body: string; error?: string }>,
-    abortSignal?: AbortSignal
+    params: LLMCallParams
 ): Promise<{ text: string; toolCalls: any[]; geminiParts?: any[]; reasoning?: string }> {
+    const { chatMessages, config, systemPrompt, agentTools, fetchProxy, abortSignal } = params;
     const { apiKey, endpoint, model } = config;
     const apiTargetUrl = `${endpoint.endsWith('/') ? endpoint : endpoint + '/'}${model}:generateContent?key=${apiKey}`;
 
@@ -95,23 +151,7 @@ async function callGemini(
         }
     ];
 
-    let shouldProxy = false;
-    if (fetchProxy) {
-        const isExtensionActive = typeof document !== "undefined" && 
-            document.documentElement.getAttribute("data-surge-extension-active") === "true";
-        if (isExtensionActive) {
-            if (config.bypassCorsWithExtension !== undefined) {
-                shouldProxy = config.bypassCorsWithExtension;
-            } else {
-                let hostname = "";
-                try {
-                    const parsed = new URL(apiTargetUrl);
-                    hostname = parsed.hostname;
-                } catch {}
-                shouldProxy = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) || hostname === "localhost" || hostname.endsWith(".local");
-            }
-        }
-    }
+    const shouldProxy = checkShouldProxy(config, apiTargetUrl, fetchProxy);
 
     let response;
     if (shouldProxy && fetchProxy) {
@@ -127,16 +167,7 @@ async function callGemini(
             headers: { "Content-Type": "application/json" },
             body: bodyStr
         }, abortSignal);
-        if (res && res.success) {
-            response = {
-                ok: res.status >= 200 && res.status < 300,
-                status: res.status,
-                text: async () => res.body,
-                json: async () => JSON.parse(res.body)
-            };
-        } else {
-            throw new Error(res?.error || "Failed to communicate with Gemini API via extension proxy.");
-        }
+        response = handleProxyResponse(res, "Gemini");
     } else {
         response = await fetch(apiTargetUrl, {
             method: "POST",
@@ -245,52 +276,16 @@ async function callGemini(
     }));
 
     if (config.enableJsonFallback && toolCalls.length === 0 && text) {
-        const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/g;
-        let match;
-        while ((match = jsonBlockRegex.exec(text)) !== null) {
-            try {
-                const parsed = JSON.parse(match[1].trim());
-                if (parsed && typeof parsed === "object" && parsed.name) {
-                    toolCalls.push({
-                        id: `call_fb_${Math.random().toString(36).substring(2, 9)}`,
-                        type: "function",
-                        function: {
-                            name: parsed.name,
-                            arguments: JSON.stringify(parsed.arguments || parsed.args || {})
-                        }
-                    });
-                }
-            } catch {}
-        }
-
-        if (toolCalls.length === 0 && text.trim().startsWith("{") && text.trim().endsWith("}")) {
-            try {
-                const parsed = JSON.parse(text.trim());
-                if (parsed && typeof parsed === "object" && parsed.name) {
-                    toolCalls.push({
-                        id: `call_fb_${Math.random().toString(36).substring(2, 9)}`,
-                        type: "function",
-                        function: {
-                            name: parsed.name,
-                            arguments: JSON.stringify(parsed.arguments || parsed.args || {})
-                        }
-                    });
-                }
-            } catch {}
-        }
+        extractJsonFallbackToolCalls(text, toolCalls);
     }
 
     return { text, toolCalls, geminiParts, reasoning };
 }
 
 async function callOpenAi(
-    chatMessages: Message[],
-    config: AgentProfile,
-    systemPrompt: string,
-    agentTools: ToolDefinition[],
-    fetchProxy?: (url: string, options: any, abortSignal?: AbortSignal) => Promise<{ success: boolean; status: number; body: string; error?: string }>,
-    abortSignal?: AbortSignal
+    params: LLMCallParams
 ): Promise<{ text: string; toolCalls: any[]; reasoning?: string }> {
+    const { chatMessages, config, systemPrompt, agentTools, fetchProxy, abortSignal } = params;
     const { provider, apiKey, endpoint, model } = config;
     // OpenAI and Custom OpenAI-compatible endpoints
     const apiTargetUrl = `${endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint}/chat/completions`;
@@ -321,23 +316,7 @@ async function callOpenAi(
         })
     ];
 
-    let shouldProxy = false;
-    if (fetchProxy) {
-        const isExtensionActive = typeof document !== "undefined" && 
-            document.documentElement.getAttribute("data-surge-extension-active") === "true";
-        if (isExtensionActive) {
-            if (config.bypassCorsWithExtension !== undefined) {
-                shouldProxy = config.bypassCorsWithExtension;
-            } else {
-                let hostname = "";
-                try {
-                    const parsed = new URL(apiTargetUrl);
-                    hostname = parsed.hostname;
-                } catch {}
-                shouldProxy = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(hostname) || hostname === "localhost" || hostname.endsWith(".local");
-            }
-        }
-    }
+    const shouldProxy = checkShouldProxy(config, apiTargetUrl, fetchProxy);
 
     const openAiTools = agentTools.map((t: any) => ({
         type: "function",
@@ -360,16 +339,7 @@ async function callOpenAi(
             headers: openaiHeaders,
             body: bodyStr
         }, abortSignal);
-        if (res && res.success) {
-            response = {
-                ok: res.status >= 200 && res.status < 300,
-                status: res.status,
-                text: async () => res.body,
-                json: async () => JSON.parse(res.body)
-            };
-        } else {
-            throw new Error(res?.error || `Failed to communicate with ${provider === "openai" ? "OpenAI" : "Custom"} API via extension proxy.`);
-        }
+        response = handleProxyResponse(res, provider === "openai" ? "OpenAI" : "Custom");
     } else {
         response = await fetch(apiTargetUrl, {
             method: "POST",
@@ -425,39 +395,7 @@ async function callOpenAi(
     const reasoning = choice?.message?.reasoning || choice?.message?.reason_content || choice?.message?.reason || "";
 
     if (config.enableJsonFallback && toolCalls.length === 0 && text) {
-        const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/g;
-        let match;
-        while ((match = jsonBlockRegex.exec(text)) !== null) {
-            try {
-                const parsed = JSON.parse(match[1].trim());
-                if (parsed && typeof parsed === "object" && parsed.name) {
-                    toolCalls.push({
-                        id: `call_fb_${Math.random().toString(36).substring(2, 9)}`,
-                        type: "function",
-                        function: {
-                            name: parsed.name,
-                            arguments: JSON.stringify(parsed.arguments || parsed.args || {})
-                        }
-                    });
-                }
-            } catch {}
-        }
-
-        if (toolCalls.length === 0 && text.trim().startsWith("{") && text.trim().endsWith("}")) {
-            try {
-                const parsed = JSON.parse(text.trim());
-                if (parsed && typeof parsed === "object" && parsed.name) {
-                    toolCalls.push({
-                        id: `call_fb_${Math.random().toString(36).substring(2, 9)}`,
-                        type: "function",
-                        function: {
-                            name: parsed.name,
-                            arguments: JSON.stringify(parsed.arguments || parsed.args || {})
-                        }
-                    });
-                }
-            } catch {}
-        }
+        extractJsonFallbackToolCalls(text, toolCalls);
     }
 
     return { text, toolCalls, reasoning };
@@ -468,7 +406,7 @@ export const callLLM = async (
     config: AgentProfile,
     systemPrompt: string,
     agentTools: ToolDefinition[],
-    fetchProxy?: (url: string, options: any, abortSignal?: AbortSignal) => Promise<{ success: boolean; status: number; body: string; error?: string }>,
+    fetchProxy?: FetchProxyFn,
     abortSignal?: AbortSignal
 ): Promise<{ text: string; toolCalls: any[]; geminiParts?: any[]; reasoning?: string }> => {
     const { provider } = config;
@@ -477,9 +415,18 @@ export const callLLM = async (
         throw new Error("API Key is required. Please check your settings.");
     }
 
+    const params: LLMCallParams = {
+        chatMessages,
+        config,
+        systemPrompt,
+        agentTools,
+        fetchProxy,
+        abortSignal
+    };
+
     if (provider === "gemini") {
-        return callGemini(chatMessages, config, systemPrompt, agentTools, fetchProxy, abortSignal);
+        return callGemini(params);
     } else {
-        return callOpenAi(chatMessages, config, systemPrompt, agentTools, fetchProxy, abortSignal);
+        return callOpenAi(params);
     }
 };

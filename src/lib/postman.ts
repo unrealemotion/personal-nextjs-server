@@ -1,5 +1,6 @@
 import { generateId } from "./store";
 import { type ApiCollection, type ApiFolder, type ApiRequest } from "./schema";
+import { parseQueryParams } from "./utils";
 
 function parseExecScript(events: any[], phase: "prerequest" | "test"): string {
     if (!events || !Array.isArray(events)) return "";
@@ -85,23 +86,7 @@ function parsePostmanItem(pmItem: any): ApiFolder | ApiRequest {
             description: q.description || "",
         }));
     } else if (url) {
-        // Fallback string split: safe for relative paths and placeholders
-        try {
-            const queryIdx = url.indexOf("?");
-            if (queryIdx !== -1) {
-                const search = url.slice(queryIdx + 1);
-                const pairs = search.split("&");
-                pairs.forEach(p => {
-                    if (!p) return;
-                    const [k, v] = p.split("=");
-                    params.push({
-                        key: decodeURIComponent(k || ""),
-                        value: decodeURIComponent(v || ""),
-                        enabled: true
-                    });
-                });
-            }
-        } catch {}
+        params = parseQueryParams(url);
     }
 
     // Body

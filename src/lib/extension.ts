@@ -1,3 +1,5 @@
+import { getHostname } from "./dns";
+
 export function sendToExtension(payload: any, timeoutMs: number = 0, abortSignal?: AbortSignal): Promise<any> {
     return new Promise((resolve) => {
         if (typeof window === "undefined") {
@@ -62,4 +64,44 @@ export function sendToExtension(payload: any, timeoutMs: number = 0, abortSignal
             payload
         }, "*");
     });
+}
+
+export async function setupExtensionRules(
+    url: string,
+    headers: Record<string, string>,
+    contextName: string = "request"
+): Promise<number | null> {
+    try {
+        const urlFilter = getHostname(url);
+        const extHeaders = Object.entries(headers).map(([key, value]) => ({
+            name: key,
+            value: value
+        }));
+
+        const res = await sendToExtension({
+            action: "setupRequestRules",
+            urlFilter,
+            headers: extHeaders,
+            initiatorOrigin: window.location.origin
+        });
+        if (res && res.success) {
+            return res.ruleId;
+        } else if (res && res.error) {
+            console.warn(`Extension rule setup failed for ${contextName}:`, res.error);
+        }
+    } catch (e) {
+        console.warn(`Failed to setup extension rules for ${contextName}:`, e);
+    }
+    return null;
+}
+
+export async function clearExtensionRules(ruleId: number, contextName: string = "request"): Promise<void> {
+    try {
+        await sendToExtension({
+            action: "clearRequestRules",
+            ruleId
+        });
+    } catch (e) {
+        console.warn(`Failed to clear extension rules for ${contextName}:`, e);
+    }
 }

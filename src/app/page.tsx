@@ -2,6 +2,40 @@ import React from "react";
 import Link from "next/link";
 import { Wrench, Zap, ChevronRight, BookOpen, Layers } from "lucide-react";
 
+interface ToolItem {
+  href: string;
+  icon: React.ReactNode;
+  iconColor: string;
+  chevronHover: string;
+  title: string;
+  description: string;
+  tags: string[];
+  docsHref: string;
+}
+
+const TOOLS_LIST: ToolItem[] = [
+  {
+    href: "/surge",
+    icon: <Zap className="w-7 h-7" />,
+    iconColor: "bg-indigo-500/10 text-indigo-400 ring-indigo-500/20 shadow-indigo-500/10",
+    chevronHover: "group-hover:bg-indigo-500",
+    title: "API Surge",
+    description: "High-performance API testing and orchestrator. Execute sequential chains across massive datasets with conditional logic.",
+    tags: ["Orchestration", "API Testing", "Active"],
+    docsHref: "/surge/docs",
+  },
+  {
+    href: "/json-nexus",
+    icon: <Layers className="w-7 h-7" />,
+    iconColor: "bg-fuchsia-500/10 text-fuchsia-400 ring-fuchsia-500/20 shadow-fuchsia-500/10",
+    chevronHover: "group-hover:bg-fuchsia-500",
+    title: "JSON Nexus",
+    description: "Recursive flattening & splitting JSON converter to visual grids, plus professional side-by-side Monaco diff comparison.",
+    tags: ["Data Converter", "JSON Diff", "Active"],
+    docsHref: "/json-nexus/docs",
+  }
+];
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans selection:bg-indigo-500/30 overflow-x-hidden relative">
@@ -39,85 +73,62 @@ export default function Home() {
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Tool Card: API Surge */}
-            <div className="group relative">
-              <div className="absolute -inset-0.5 bg-gradient-to-br from-indigo-500/20 to-fuchsia-500/20 rounded-[2rem] blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
-              <div className="relative h-full flex flex-col p-8 rounded-3xl bg-[#0a0a0a] border border-white/10 hover:border-white/20 transition-all duration-300">
-                <Link href="/surge" className="absolute inset-0 z-0">
-                  <span className="sr-only">Go to API Surge</span>
-                </Link>
-
-                <div className="flex items-start justify-between mb-8 pointer-events-none">
-                  <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform duration-500 shadow-xl shadow-indigo-500/10 ring-1 ring-indigo-500/20">
-                    <Zap className="w-7 h-7" />
-                  </div>
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 text-white/40 group-hover:bg-indigo-500 group-hover:text-white transition-colors duration-300">
-                    <ChevronRight className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-2xl font-bold text-white mb-3 group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-white group-hover:to-white/60 transition-all pointer-events-none">
-                  API Surge
-                </h3>
-
-                <p className="text-white/50 leading-relaxed font-medium mb-6 flex-grow pointer-events-none">
-                  High-performance API testing and orchestrator. Execute sequential chains across massive datasets with conditional logic.
-                </p>
-
-                <div className="flex flex-wrap gap-2 mt-auto relative z-10">
-                  <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs text-white/60 font-medium">Orchestration</span>
-                  <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs text-white/60 font-medium">API Testing</span>
-                  <span className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-400 font-medium">Active</span>
-                  <Link
-                    href="/surge/docs"
-                    className="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/60 hover:text-white transition-colors font-medium inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <BookOpen className="w-3 h-3" />
-                    Docs
+            {TOOLS_LIST.map((tool) => (
+              <div key={tool.href} className="group relative">
+                <div className="absolute -inset-0.5 bg-gradient-to-br from-indigo-500/20 to-fuchsia-500/20 rounded-[2rem] blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
+                <div className="relative h-full flex flex-col p-8 rounded-3xl bg-[#0a0a0a] border border-white/10 hover:border-white/20 transition-all duration-300">
+                  <Link href={tool.href} className="absolute inset-0 z-0">
+                    <span className="sr-only">Go to {tool.title}</span>
                   </Link>
+
+                  <div className="flex items-start justify-between mb-8 pointer-events-none">
+                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-500 shadow-xl ring-1 ${tool.iconColor}`}>
+                      {tool.icon}
+                    </div>
+                    <div className={`flex items-center justify-center w-8 h-8 rounded-full bg-white/5 text-white/40 group-hover:text-white transition-colors duration-300 ${tool.chevronHover}`}>
+                      <ChevronRight className="w-4 h-4" />
+                    </div>
+                  </div>
+
+                  <h3 className="text-2xl font-bold text-white mb-3 group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-white group-hover:to-white/60 transition-all pointer-events-none">
+                    {tool.title}
+                  </h3>
+
+                  <p className="text-white/50 leading-relaxed font-medium mb-6 flex-grow pointer-events-none">
+                    {tool.description}
+                  </p>
+
+                  <div className="flex flex-wrap gap-2 mt-auto relative z-10">
+                    {tool.tags.map((tag) => {
+                      const isActiveTag = tag === "Active";
+                      const activeTagClasses = tool.title === "API Surge" 
+                        ? "bg-indigo-500/10 border-indigo-500/20 text-indigo-400" 
+                        : "bg-fuchsia-500/10 border-fuchsia-500/20 text-fuchsia-400";
+                      
+                      return (
+                        <span 
+                          key={tag} 
+                          className={`px-3 py-1 rounded-full border text-xs font-medium ${
+                            isActiveTag 
+                              ? activeTagClasses 
+                              : "bg-white/5 border-white/5 text-white/60"
+                          }`}
+                        >
+                          {tag}
+                        </span>
+                      );
+                    })}
+                    <Link
+                      href={tool.docsHref}
+                      className="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/60 hover:text-white transition-colors font-medium inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <BookOpen className="w-3 h-3" />
+                      Docs
+                    </Link>
+                  </div>
                 </div>
               </div>
-            </div>
-
-            {/* Tool Card: JSON Nexus */}
-            <div className="group relative">
-              <div className="absolute -inset-0.5 bg-gradient-to-br from-indigo-500/20 to-fuchsia-500/20 rounded-[2rem] blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
-              <div className="relative h-full flex flex-col p-8 rounded-3xl bg-[#0a0a0a] border border-white/10 hover:border-white/20 transition-all duration-300">
-                <Link href="/json-nexus" className="absolute inset-0 z-0">
-                  <span className="sr-only">Go to JSON Nexus</span>
-                </Link>
-
-                <div className="flex items-start justify-between mb-8 pointer-events-none">
-                  <div className="w-14 h-14 rounded-2xl bg-fuchsia-500/10 flex items-center justify-center text-fuchsia-400 group-hover:scale-110 transition-transform duration-500 shadow-xl shadow-fuchsia-500/10 ring-1 ring-fuchsia-500/20">
-                    <Layers className="w-7 h-7" />
-                  </div>
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 text-white/40 group-hover:bg-fuchsia-500 group-hover:text-white transition-colors duration-300">
-                    <ChevronRight className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-2xl font-bold text-white mb-3 group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-white group-hover:to-white/60 transition-all pointer-events-none">
-                  JSON Nexus
-                </h3>
-
-                <p className="text-white/50 leading-relaxed font-medium mb-6 flex-grow pointer-events-none">
-                  Recursive flattening & splitting JSON converter to visual grids, plus professional side-by-side Monaco diff comparison.
-                </p>
-
-                <div className="flex flex-wrap gap-2 mt-auto relative z-10">
-                  <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs text-white/60 font-medium">Data Converter</span>
-                  <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs text-white/60 font-medium">JSON Diff</span>
-                  <span className="px-3 py-1 rounded-full bg-fuchsia-500/10 border border-fuchsia-500/20 text-xs text-fuchsia-400 font-medium">Active</span>
-                  <Link
-                    href="/json-nexus/docs"
-                    className="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/60 hover:text-white transition-colors font-medium inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <BookOpen className="w-3 h-3" />
-                    Docs
-                  </Link>
-                </div>
-              </div>
-            </div>
+            ))}
 
             {/* Placeholder for future tools */}
             <div className="h-full flex flex-col items-center justify-center p-8 rounded-3xl bg-[#0a0a0a]/50 border border-white/5 border-dashed text-center">

@@ -42,3 +42,18 @@ export interface CheckpointProvider {
     revertWorkspaceState?: (checkpointState: any) => Promise<void> | void;
 }
 
+export type FetchProxyFn = (
+    url: string,
+    options: any,
+    abortSignal?: AbortSignal
+) => Promise<{ success: boolean; status: number; body: string; error?: string }>;
+
+export interface LLMCallParams {
+    chatMessages: Message[];
+    config: AgentProfile;
+    systemPrompt: string;
+    agentTools: ToolDefinition[];
+    fetchProxy?: FetchProxyFn;
+    abortSignal?: AbortSignal;
+}
+

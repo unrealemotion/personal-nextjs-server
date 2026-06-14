@@ -194,6 +194,51 @@ const defaultState: AppState = {
     exportExcelTrigger: null,
 };
 
+function resolveTableFilterConfig(imported?: any): TableFilterConfig {
+    const importedFilterConfig = imported || {};
+    return {
+        ...defaultState.tableFilterConfig,
+        ...importedFilterConfig,
+        columnFilters: {
+            ...defaultState.tableFilterConfig.columnFilters,
+            ...(importedFilterConfig.columnFilters || {})
+        }
+    };
+}
+
+function resolveColumnMappings(columnMappings?: any[]): ColumnMapping[] {
+    const list = columnMappings || defaultState.columnMappings;
+    return list.map((col: any) => ({
+        ...col,
+        id: col.id || `col_${generateId()}`
+    }));
+}
+
+const getConfigStateSnapshot = (state: AppState, resetResponse = false) => ({
+    templates: state.templates,
+    activeTemplateId: state.activeTemplateId,
+    maxRetries: state.maxRetries,
+    retryStatusCodes: state.retryStatusCodes,
+    stopOnFailure: state.stopOnFailure,
+    throttleDelayMs: state.throttleDelayMs,
+    rowIterations: state.rowIterations,
+    concurrency: state.concurrency,
+    columnMappings: state.columnMappings,
+    tableFilterConfig: state.tableFilterConfig,
+    currentView: state.currentView,
+    collections: state.collections,
+    environments: state.environments,
+    activeEnvironmentId: state.activeEnvironmentId,
+    apiTabs: resetResponse
+        ? (state.apiTabs || []).map(tab => ({ ...tab, response: null }))
+        : state.apiTabs,
+    activeTabId: state.activeTabId,
+    agentProfiles: state.agentProfiles,
+    activeAgentProfileId: state.activeAgentProfileId,
+    agentChatMessages: state.agentChatMessages,
+    agentPanelPosition: state.agentPanelPosition,
+    agentPanelSize: state.agentPanelSize
+});
 
 // --- Hydration & Persistence ---
 const DB_NAME = "SurgeWorkspaceDB";
@@ -365,7 +410,6 @@ export const hydrateStore = async () => {
         const config = await loadBackupOrPersistedState("surge_backup_config", "workspaceConfig");
         const data = await loadBackupOrPersistedState("surge_backup_data", "workspaceData");
         const results = await loadBackupOrPersistedState("surge_backup_results", "workspaceResults");
-
         const parsed = await loadParsedState(config, data, results);
         const { profiles: migratedProfiles, activeId: migratedActiveId } = migrateLegacyAgentConfig();
 
@@ -379,21 +423,8 @@ export const hydrateStore = async () => {
                 active: r.active !== undefined ? r.active : true
             }));
 
-            const importedFilterConfig = parsed.tableFilterConfig || {};
-            const tableFilterConfig = {
-                ...defaultState.tableFilterConfig,
-                ...importedFilterConfig,
-                columnFilters: {
-                    ...defaultState.tableFilterConfig.columnFilters,
-                    ...(importedFilterConfig.columnFilters || {})
-                }
-            };
-
-            let columnMappings = parsed.columnMappings || defaultState.columnMappings;
-            columnMappings = columnMappings.map((col: any) => ({
-                ...col,
-                id: col.id || `col_${generateId()}`
-            }));
+            const tableFilterConfig = resolveTableFilterConfig(parsed.tableFilterConfig);
+            const columnMappings = resolveColumnMappings(parsed.columnMappings);
 
             let agentProfiles = parsed.agentProfiles || defaultState.agentProfiles;
             let activeAgentProfileId = parsed.activeAgentProfileId || defaultState.activeAgentProfileId;
@@ -476,31 +507,8 @@ export const hydrateStore = async () => {
         globalForStore.isHydrated = true;
     }
 };
-
 // --- Persistence ---
-const getSaveableConfigState = (state: AppState) => ({
-    templates: state.templates,
-    activeTemplateId: state.activeTemplateId,
-    maxRetries: state.maxRetries,
-    retryStatusCodes: state.retryStatusCodes,
-    stopOnFailure: state.stopOnFailure,
-    throttleDelayMs: state.throttleDelayMs,
-    rowIterations: state.rowIterations,
-    concurrency: state.concurrency,
-    columnMappings: state.columnMappings,
-    tableFilterConfig: state.tableFilterConfig,
-    currentView: state.currentView,
-    collections: state.collections,
-    environments: state.environments,
-    activeEnvironmentId: state.activeEnvironmentId,
-    apiTabs: (state.apiTabs || []).map(tab => ({ ...tab, response: null })),
-    activeTabId: state.activeTabId,
-    agentProfiles: state.agentProfiles,
-    activeAgentProfileId: state.activeAgentProfileId,
-    agentChatMessages: state.agentChatMessages,
-    agentPanelPosition: state.agentPanelPosition,
-    agentPanelSize: state.agentPanelSize
-});
+const getSaveableConfigState = (state: AppState) => getConfigStateSnapshot(state, true);
 
 let configTimeout: NodeJS.Timeout | null = null;
 const saveConfigDebounced = () => {
@@ -615,31 +623,8 @@ if (typeof window !== "undefined") {
         const hasResultsChanged =
             !prevResultsState ||
             state.results !== prevResultsState.results;
-
         if (hasConfigChanged) {
-            prevConfigState = {
-                templates: state.templates,
-                activeTemplateId: state.activeTemplateId,
-                maxRetries: state.maxRetries,
-                retryStatusCodes: state.retryStatusCodes,
-                stopOnFailure: state.stopOnFailure,
-                throttleDelayMs: state.throttleDelayMs,
-                rowIterations: state.rowIterations,
-                concurrency: state.concurrency,
-                columnMappings: state.columnMappings,
-                tableFilterConfig: state.tableFilterConfig,
-                currentView: state.currentView,
-                collections: state.collections,
-                environments: state.environments,
-                activeEnvironmentId: state.activeEnvironmentId,
-                apiTabs: state.apiTabs,
-                activeTabId: state.activeTabId,
-                agentProfiles: state.agentProfiles,
-                activeAgentProfileId: state.activeAgentProfileId,
-                agentChatMessages: state.agentChatMessages,
-                agentPanelPosition: state.agentPanelPosition,
-                agentPanelSize: state.agentPanelSize
-            };
+            prevConfigState = getConfigStateSnapshot(state, false);
             saveConfigDebounced();
         }
 
@@ -734,21 +719,8 @@ export const importState = (json: string) => {
         if (!parsed.templates || !Array.isArray(parsed.templates)) {
             throw new Error("Invalid workspace file");
         }
-        const importedFilterConfig = parsed.tableFilterConfig || {};
-        const tableFilterConfig = {
-            ...defaultState.tableFilterConfig,
-            ...importedFilterConfig,
-            columnFilters: {
-                ...defaultState.tableFilterConfig.columnFilters,
-                ...(importedFilterConfig.columnFilters || {})
-            }
-        };
-
-        let columnMappings = parsed.columnMappings || defaultState.columnMappings;
-        columnMappings = columnMappings.map((col: any) => ({
-            ...col,
-            id: col.id || `col_${generateId()}`
-        }));
+        const tableFilterConfig = resolveTableFilterConfig(parsed.tableFilterConfig);
+        const columnMappings = resolveColumnMappings(parsed.columnMappings);
 
         const currentView = store.state.currentView;
         
@@ -1171,6 +1143,18 @@ export const closeApiTab = (id: string) => {
 
 export const setActiveTabId = (id: string | null) => {
     store.setState((state) => ({ ...state, activeTabId: id }));
+};
+
+export const linkTabToRequest = (tabId: string, requestId: string, name: string) => {
+    store.setState((state) => {
+        const newTabs = state.apiTabs.map(t => {
+            if (t.id === tabId) {
+                return { ...t, requestId, name, isDirty: false };
+            }
+            return t;
+        });
+        return { ...state, apiTabs: newTabs };
+    });
 };
 
 export const setActiveSubTab = (tabId: string, subTab: "params" | "headers" | "body" | "prerequest" | "tests") => {

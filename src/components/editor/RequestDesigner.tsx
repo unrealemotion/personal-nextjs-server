@@ -4,7 +4,13 @@ import React, { useCallback, useRef, useEffect } from "react";
 import Editor from "@monaco-editor/react";
 import { useStore } from "@tanstack/react-store";
 import { store, updateTemplate, addTemplate, removeTemplate, setActiveTemplate, reorderTemplates } from "@/lib/store";
-import { processTemplateForFormatting } from "@/lib/utils";
+import { 
+    processTemplateForFormatting, 
+    setupMonacoJsonEditor, 
+    addMonacoDecoration,
+    getMonacoTextAndModel,
+    handleUrlPasteHelper
+} from "@/lib/utils";
 import { normalizeKey } from "@/lib/executor-utils";
 import { RequestTemplate } from "@/lib/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,10 +37,9 @@ import {
 import {
     SortableContext,
     sortableKeyboardCoordinates,
-    useSortable,
     verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { useSortableStyle, useMonacoDecorations } from "@/lib/hooks";
 
 const RAW_LANGUAGES = [
     { label: "Text", value: "text" },
@@ -46,27 +51,16 @@ const RAW_LANGUAGES = [
 
 
 
-function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove }: {
+interface SortableStepProps {
     tmpl: RequestTemplate;
     isActive: boolean;
     onSelect: () => void;
     onRemove: () => void;
     canRemove: boolean;
-}) {
-    const {
-        attributes,
-        listeners,
-        setNodeRef,
-        transform,
-        transition,
-        isDragging,
-    } = useSortable({ id: tmpl.id });
+}
 
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-        opacity: isDragging ? 0.5 : 1,
-    };
+function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove }: SortableStepProps) {
+    const { attributes, listeners, setNodeRef, style } = useSortableStyle(tmpl.id);
 
     return (
         <div
@@ -104,27 +98,8 @@ function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove }: {
     );
 }
 
-function SortableMobileStep({ tmpl, isActive, onSelect, onRemove, canRemove }: {
-    tmpl: RequestTemplate;
-    isActive: boolean;
-    onSelect: () => void;
-    onRemove: () => void;
-    canRemove: boolean;
-}) {
-    const {
-        attributes,
-        listeners,
-        setNodeRef,
-        transform,
-        transition,
-        isDragging,
-    } = useSortable({ id: tmpl.id });
-
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-        opacity: isDragging ? 0.5 : 1,
-    };
+function SortableMobileStep({ tmpl, isActive, onSelect, onRemove, canRemove }: SortableStepProps) {
+    const { attributes, listeners, setNodeRef, style } = useSortableStyle(tmpl.id);
 
     return (
         <div
@@ -162,6 +137,14 @@ export function RequestDesigner() {
     const activeTemplateId = useStore(store, (state) => state.activeTemplateId);
     const headers = useStore(store, (state) => state.headers);
     const template = templates.find(t => t.id === activeTemplateId) || templates[0];
+
+    const getStepProps = (tmpl: RequestTemplate) => ({
+        tmpl,
+        isActive: tmpl.id === activeTemplateId,
+        onSelect: () => setActiveTemplate(tmpl.id),
+        onRemove: () => removeTemplate(tmpl.id),
+        canRemove: templates.length > 1,
+    });
 
 
     const editorRef = useRef<any>(null);
@@ -214,14 +197,15 @@ export function RequestDesigner() {
 
     const handleUrlPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
         const pastedText = e.clipboardData.getData("text");
-        if (pastedText.trim().startsWith("curl ")) {
-            e.preventDefault();
-            const parsed = parseCurl(pastedText);
-            if (parsed) {
+        const intercepted = handleUrlPasteHelper(
+            pastedText,
+            (parsed) => {
                 updateTemplate(parsed);
-            } else {
-                alert("Invalid or unsupported cURL command");
-            }
+            },
+            (msg) => toast.error(msg)
+        );
+        if (intercepted) {
+            e.preventDefault();
         }
     };
 
@@ -259,57 +243,31 @@ export function RequestDesigner() {
     };
 
     const updateDecorations = useCallback(() => {
-        const editor = editorRef.current;
-        const monaco = monacoRef.current;
-        if (!editor || !monaco) return;
-
-        const model = editor.getModel();
-        if (!model) return;
-        const text = model.getValue();
-        const regex = /\{\{([^}]+)\}\}/g;
-        let match;
-        const newDecorations = [];
+        const monacoInfo = getMonacoTextAndModel(editorRef.current, monacoRef.current);
+        if (!monacoInfo) return;
+        const { editor, model, text, monaco } = monacoInfo;
+        const variableRegex = /\{\{([^}]+)\}\}/g;
+        let matchResult;
+        const newDecorations: any[] = [];
         
         const availableHeaders = (headers || []).map(h => normalizeKey(h));
 
-        while ((match = regex.exec(text)) !== null) {
-            const varName = normalizeKey(match[1]);
+        while ((matchResult = variableRegex.exec(text)) !== null) {
+            const varName = normalizeKey(matchResult[1]);
             const isAvailable = availableHeaders.includes(varName);
 
-            const startPos = model.getPositionAt(match.index);
-            const endPos = model.getPositionAt(match.index + match[0].length);
-            newDecorations.push({
-                range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
-                options: { 
-                    inlineClassName: isAvailable ? 'monaco-template-variable' : 'monaco-template-variable-invalid'
-                }
-            });
+            addMonacoDecoration(model, monaco, matchResult, isAvailable, newDecorations);
         }
         decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
     }, [headers]);
 
-    const latestUpdateDecorationsRef = useRef(updateDecorations);
-    latestUpdateDecorationsRef.current = updateDecorations;
-
-    const debouncedUpdateDecorations = React.useMemo(() => {
-        let timeout: ReturnType<typeof setTimeout> | null = null;
-        return () => {
-            if (timeout) clearTimeout(timeout);
-            timeout = setTimeout(() => {
-                latestUpdateDecorationsRef.current();
-            }, 400);
-        };
-    }, []);
+    const debouncedUpdateDecorations = useMonacoDecorations(updateDecorations);
 
     const handleEditorDidMount = (editor: any, monaco: any) => {
         editorRef.current = editor;
         monacoRef.current = monaco;
 
-        monaco.languages.json?.jsonDefaults?.setDiagnosticsOptions({
-            validate: false,
-        });
-
-        editor.onDidChangeModelContent(() => {
+        setupMonacoJsonEditor(editor, monaco, () => {
             debouncedUpdateDecorations();
         });
 
@@ -441,11 +399,7 @@ export function RequestDesigner() {
                                 {templates.map((tmpl) => (
                                     <SortableStepItem
                                         key={tmpl.id}
-                                        tmpl={tmpl}
-                                        isActive={tmpl.id === activeTemplateId}
-                                        onSelect={() => setActiveTemplate(tmpl.id)}
-                                        onRemove={() => removeTemplate(tmpl.id)}
-                                        canRemove={templates.length > 1}
+                                        {...getStepProps(tmpl)}
                                     />
                                 ))}
                             </div>
@@ -487,11 +441,7 @@ export function RequestDesigner() {
                                     {templates.map((tmpl) => (
                                         <SortableMobileStep
                                             key={tmpl.id}
-                                            tmpl={tmpl}
-                                            isActive={tmpl.id === activeTemplateId}
-                                            onSelect={() => setActiveTemplate(tmpl.id)}
-                                            onRemove={() => removeTemplate(tmpl.id)}
-                                            canRemove={templates.length > 1}
+                                            {...getStepProps(tmpl)}
                                         />
                                     ))}
                                 </div>

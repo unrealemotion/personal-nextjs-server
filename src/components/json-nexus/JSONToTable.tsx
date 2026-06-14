@@ -34,6 +34,7 @@ import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import Editor from "@monaco-editor/react";
 import { jsonToTableData, getColumnsFromRows } from "@/lib/flattener";
+import { readFileAsText } from "@/lib/file-utils";
 
 // Sample Data
 const sampleComplexJSON = [
@@ -490,21 +491,19 @@ export function JSONToTable() {
   };
 
   // Handle Drag & Drop / File Uploads
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result;
-      if (typeof text === "string") {
-        setJsonInput(text);
-        setIsConverted(false);
-        setConvertedRows([]);
-        toast.success(`Uploaded ${file.name} successfully.`);
-      }
-    };
-    reader.readAsText(file);
+    try {
+      const text = await readFileAsText(file);
+      setJsonInput(text);
+      setIsConverted(false);
+      setConvertedRows([]);
+      toast.success(`Uploaded ${file.name} successfully.`);
+    } catch (err) {
+      toast.error("Failed to read file.");
+    }
     e.target.value = "";
   };
 

@@ -2,6 +2,7 @@
 
 import React, { useState, useRef } from "react";
 import { useStore } from "@tanstack/react-store";
+import { useCommonStoreState, useFileImporter } from "@/lib/hooks";
 import {
     store,
     addCollection,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/store";
 import { importPostmanCollection } from "@/lib/postman";
 import { addItemToCollectionTree } from "@/lib/utils";
+import { readFileAsText } from "@/lib/file-utils";
 import { Button } from "@/components/ui/button";
 import { EnvironmentModal } from "./EnvironmentModal";
 import {
@@ -163,35 +165,22 @@ function CollectionNode({
 }
 
 export function CollectionSidebar() {
-    const collections = useStore(store, (state) => state.collections);
-    const environments = useStore(store, (state) => state.environments);
-    const activeEnvironmentId = useStore(store, (state) => state.activeEnvironmentId);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-
-    const handleImportClick = () => {
-        fileInputRef.current?.click();
-    };
-
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            const content = event.target?.result;
-            if (typeof content === "string") {
-                try {
-                    const collection = importPostmanCollection(content);
-                    addCollection(collection);
-                    toast.success(`Imported collection "${collection.name}"!`);
-                } catch {
-                    toast.error("Failed to parse Postman collection. Check file format.");
-                }
+    const { collections, environments, activeEnvironmentId } = useCommonStoreState();
+    
+    const { fileInputRef, handleImportClick, handleFileChange } = useFileImporter(
+        (content) => {
+            try {
+                const collection = importPostmanCollection(content);
+                addCollection(collection);
+                toast.success(`Imported collection "${collection.name}"!`);
+            } catch {
+                toast.error("Failed to parse Postman collection. Check file format.");
             }
-        };
-        reader.readAsText(file);
-        e.target.value = "";
-    };
+        },
+        () => {
+            toast.error("Failed to read Postman collection file.");
+        }
+    );
 
     const handleAddCollection = () => {
         const name = prompt("Collection Name:");
@@ -228,12 +217,18 @@ export function CollectionSidebar() {
         });
     };
 
-    const handleAddItemToCollection = (collectionId: string, type: "request" | "folder") => {
+    const getCollectionAndName = (collectionId: string, type: "request" | "folder") => {
         const col = collections.find(c => c.id === collectionId);
-        if (!col) return;
-
+        if (!col) return null;
         const name = prompt(type === "request" ? "Request Name:" : "Folder Name:");
-        if (!name) return;
+        if (!name) return null;
+        return { col, name };
+    };
+
+    const handleAddItemToCollection = (collectionId: string, type: "request" | "folder") => {
+        const res = getCollectionAndName(collectionId, type);
+        if (!res) return;
+        const { col, name } = res;
 
         if (type === "request") {
             const newReq = createDefaultApiRequest(name);
@@ -254,11 +249,9 @@ export function CollectionSidebar() {
     };
 
     const handleAddItemToFolder = (collectionId: string, folderId: string, type: "request" | "folder") => {
-        const col = collections.find(c => c.id === collectionId);
-        if (!col) return;
-
-        const name = prompt(type === "request" ? "Request Name:" : "Folder Name:");
-        if (!name) return;
+        const res = getCollectionAndName(collectionId, type);
+        if (!res) return;
+        const { col, name } = res;
 
         const newItem = type === "request"
             ? createDefaultApiRequest(name)

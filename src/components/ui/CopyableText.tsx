@@ -24,6 +24,33 @@ export function CopyableText({
 }: CopyableTextProps) {
     const [copied, setCopied] = useState(false);
 
+    const executeFallbackCopy = () => {
+        const textArea = document.createElement("textarea");
+        textArea.value = value;
+        textArea.style.top = "0";
+        textArea.style.left = "0";
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+
+        try {
+            const successful = document.execCommand("copy");
+            if (successful) {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+            } else {
+                toast.error("Copy failed");
+            }
+        } catch {
+            toast.error("Copy failed");
+        } finally {
+            document.body.removeChild(textArea);
+        }
+    };
+
     const handleCopy = async (e: React.MouseEvent) => {
         e.stopPropagation();
         e.preventDefault();
@@ -35,57 +62,11 @@ export function CopyableText({
                 setTimeout(() => setCopied(false), 1500);
             } else {
                 // Fallback for iframes or browsers without Clipboard API
-                const textArea = document.createElement("textarea");
-                textArea.value = value;
-                textArea.style.top = "0";
-                textArea.style.left = "0";
-                textArea.style.position = "fixed";
-                textArea.style.opacity = "0";
-
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-
-                try {
-                    const successful = document.execCommand("copy");
-                    if (successful) {
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 1500);
-                    } else {
-                        toast.error("Copy failed");
-                    }
-                } catch {
-                    toast.error("Copy failed");
-                } finally {
-                    document.body.removeChild(textArea);
-                }
+                executeFallbackCopy();
             }
         } catch {
             // If Clipboard API fails (e.g., in iframe), try fallback
-            const textArea = document.createElement("textarea");
-            textArea.value = value;
-            textArea.style.top = "0";
-            textArea.style.left = "0";
-            textArea.style.position = "fixed";
-            textArea.style.opacity = "0";
-
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-
-            try {
-                const successful = document.execCommand("copy");
-                if (successful) {
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                } else {
-                    toast.error("Copy failed");
-                }
-            } catch {
-                toast.error("Copy failed");
-            } finally {
-                document.body.removeChild(textArea);
-            }
+            executeFallbackCopy();
         }
     };
 

@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 import { computeSemanticDiff, getJSONStructure, normalizeJSONOrder, getSharedValueStructure, type SemanticDiff } from "@/lib/flattener";
+import { readFileAsText } from "@/lib/file-utils";
 
 // Mock Sample Data
 const sampleLeft = {
@@ -78,6 +79,17 @@ function findLineForPath(jsonStr: string, path: string): number {
 
   return currentLine + 1;
 }
+
+const MONACO_COMPARE_OPTIONS = {
+  minimap: { enabled: false },
+  fontSize: 12,
+  fontFamily: "var(--font-geist-mono), monospace",
+  lineNumbersMinChars: 3,
+  wordWrap: "on" as const,
+  formatOnPaste: true,
+  automaticLayout: true,
+  scrollBeyondLastLine: false,
+};
 
 export function JSONCompare() {
   const [leftInput, setLeftInput] = useState<string>("");
@@ -179,17 +191,7 @@ export function JSONCompare() {
     // Auto-compare on mount if both are valid!
     if (savedLeft && savedRight) {
       try {
-        const leftParsedRaw = JSON.parse(savedLeft);
-        const rightParsedRaw = JSON.parse(savedRight);
-        const leftParsed = normalizeJSONOrder(leftParsedRaw, ignoreOrder);
-        const rightParsed = normalizeJSONOrder(rightParsedRaw, ignoreOrder);
-        
-        const diff = computeSemanticDiff(leftParsed, rightParsed);
-        setSemanticDiff(diff);
-        
-        setLeftCompareVal(JSON.stringify(leftParsed, null, 2));
-        setRightCompareVal(JSON.stringify(rightParsed, null, 2));
-        setIsDiffActive(true);
+        performComparison(savedLeft, savedRight, ignoreOrder);
       } catch {
         // Silent catch for invalid saved JSON
       }
@@ -267,6 +269,22 @@ export function JSONCompare() {
     toast.success("Cleared editors");
   };
 
+  // Perform Comparison
+  const performComparison = useCallback((leftStr: string, rightStr: string, ignoreOrder: boolean) => {
+    const leftParsedRaw = JSON.parse(leftStr);
+    const rightParsedRaw = JSON.parse(rightStr);
+    const leftParsed = normalizeJSONOrder(leftParsedRaw, ignoreOrder);
+    const rightParsed = normalizeJSONOrder(rightParsedRaw, ignoreOrder);
+    
+    const diff = computeSemanticDiff(leftParsed, rightParsed);
+    setSemanticDiff(diff);
+    
+    setLeftCompareVal(JSON.stringify(leftParsed, null, 2));
+    setRightCompareVal(JSON.stringify(rightParsed, null, 2));
+    setIsDiffActive(true);
+    return diff;
+  }, []);
+
   // Compare Handler
   const handleCompare = useCallback(() => {
     if (!leftInput.trim() || !rightInput.trim()) {
@@ -275,21 +293,7 @@ export function JSONCompare() {
     }
 
     try {
-      const leftParsedRaw = JSON.parse(leftInput);
-      const rightParsedRaw = JSON.parse(rightInput);
-
-      const leftParsed = normalizeJSONOrder(leftParsedRaw, ignoreArrayOrder);
-      const rightParsed = normalizeJSONOrder(rightParsedRaw, ignoreArrayOrder);
-      
-      const diff = computeSemanticDiff(leftParsed, rightParsed);
-      setSemanticDiff(diff);
-      
-      // Cache valid parsed strings for Monaco DiffEditor consumption to prevent crash on subsequent typing
-      setLeftCompareVal(JSON.stringify(leftParsed, null, 2));
-      setRightCompareVal(JSON.stringify(rightParsed, null, 2));
-      
-      setIsDiffActive(true);
-      
+      const diff = performComparison(leftInput, rightInput, ignoreArrayOrder);
       if (diff.type === "identical") {
         toast.success("Success! The two JSONs are completely identical.", { duration: 5000 });
       } else {
@@ -299,7 +303,7 @@ export function JSONCompare() {
     } catch {
       toast.error("Both inputs must be valid JSON to execute comparison.");
     }
-  }, [leftInput, rightInput, ignoreArrayOrder]);
+  }, [leftInput, rightInput, ignoreArrayOrder, performComparison]);
 
   const stateRef = React.useRef({ isDiffActive, leftInput, rightInput });
   useEffect(() => {
@@ -310,6 +314,12 @@ export function JSONCompare() {
   useEffect(() => {
     compareRef.current = handleCompare;
   }, [handleCompare]);
+
+  const handleEditorMount = useCallback((editor: any, monaco: any) => {
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      compareRef.current();
+    });
+  }, []);
 
   const diffEditorRef = React.useRef<any>(null);
 
@@ -343,20 +353,18 @@ export function JSONCompare() {
   };
 
   // Handle file uploads
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, side: "left" | "right") => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, side: "left" | "right") => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result;
-      if (typeof text === "string") {
-        if (side === "left") setLeftInput(text);
-        else setRightInput(text);
-        toast.success(`Uploaded ${file.name} to ${side} panel.`);
-      }
-    };
-    reader.readAsText(file);
+    try {
+      const text = await readFileAsText(file);
+      if (side === "left") setLeftInput(text);
+      else setRightInput(text);
+      toast.success(`Uploaded ${file.name} to ${side} panel.`);
+    } catch (err) {
+      toast.error("Failed to read file.");
+    }
     e.target.value = "";
   };
 
@@ -467,21 +475,8 @@ export function JSONCompare() {
               theme="vs-dark"
               value={leftInput}
               onChange={(value) => setLeftInput(value ?? "")}
-              onMount={(editor, monaco) => {
-                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-                  compareRef.current();
-                });
-              }}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 12,
-                fontFamily: "var(--font-geist-mono), monospace",
-                lineNumbersMinChars: 3,
-                wordWrap: "on",
-                formatOnPaste: true,
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-              }}
+              onMount={handleEditorMount}
+              options={MONACO_COMPARE_OPTIONS}
             />
           </div>
           {leftError && (
@@ -537,21 +532,8 @@ export function JSONCompare() {
               theme="vs-dark"
               value={rightInput}
               onChange={(value) => setRightInput(value ?? "")}
-              onMount={(editor, monaco) => {
-                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-                  compareRef.current();
-                });
-              }}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 12,
-                fontFamily: "var(--font-geist-mono), monospace",
-                lineNumbersMinChars: 3,
-                wordWrap: "on",
-                formatOnPaste: true,
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-              }}
+              onMount={handleEditorMount}
+              options={MONACO_COMPARE_OPTIONS}
             />
           </div>
           {rightError && (

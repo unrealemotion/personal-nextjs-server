@@ -29,7 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { stripJsonComments } from "@/lib/executor-utils";
 import { CopyableText } from "@/components/ui/CopyableText";
-import { sendToExtension } from "@/lib/extension";
+import { sendToExtension, setupExtensionRules, clearExtensionRules } from "@/lib/extension";
 import { toast } from "sonner";
 import { resolveHostnameIp, getHostname } from "@/lib/dns";
 
@@ -191,6 +191,20 @@ function mapColumnValue(col: ColumnMapping, idx: number, res: ExecutionResult, r
     return "";
 }
 
+function tryParseJson(body: any): any | undefined {
+    if (typeof body === "string") {
+        const trimmed = body.trim();
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+            try {
+                return JSON.parse(trimmed);
+            } catch {
+                // ignore
+            }
+        }
+    }
+    return undefined;
+}
+
 function getJsonBodiesForMapping(col: ColumnMapping, results: ExecutionResult[]): any[] {
     const bodies: any[] = [];
     for (const res of results) {
@@ -211,13 +225,9 @@ function getJsonBodiesForMapping(col: ColumnMapping, results: ExecutionResult[])
 
         if (body !== undefined && body !== null) {
             if (typeof body === "string") {
-                const trimmed = body.trim();
-                if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
-                    try {
-                        bodies.push(JSON.parse(trimmed));
-                    } catch {
-                        // ignore
-                    }
+                const parsed = tryParseJson(body);
+                if (parsed !== undefined) {
+                    bodies.push(parsed);
                 }
             } else {
                 bodies.push(body);
@@ -436,13 +446,9 @@ function formatBody(body: any): string {
         return JSON.stringify(body, null, 2);
     }
     if (typeof body === "string") {
-        const trimmed = body.trim();
-        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
-            try {
-                return JSON.stringify(JSON.parse(trimmed), null, 2);
-            } catch {
-                // Fall through to plain text
-            }
+        const parsed = tryParseJson(body);
+        if (parsed !== undefined) {
+            return JSON.stringify(parsed, null, 2);
         }
         return body;
     }
@@ -752,6 +758,21 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
     onUpdate: (index: number, updates: Partial<ColumnMapping>) => void;
     onRemove: (index: number) => void;
 }) {
+    const stepSelectOptions = React.useMemo(() => [
+        { label: "All (Last)", value: "" },
+        ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))
+    ], [templates]);
+
+    const renderStepSelect = () => (
+        <SearchableSelect
+            value={col.stepId || ""}
+            onChange={(val) => onUpdate(idx, { stepId: val || undefined })}
+            options={stepSelectOptions}
+            placeholder="All / Last"
+            className="w-full sm:w-[140px] bg-neutral-950 border-white/10 text-white"
+        />
+    );
+
     return (
         <div className="flex flex-col sm:flex-row sm:space-x-2 items-stretch sm:items-center flex-wrap gap-2 sm:gap-y-2 bg-neutral-900/30 p-2.5 rounded-lg border border-white/5">
             <Input
@@ -811,15 +832,7 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
             })()}
             {(col.source === "request_body" || col.source === "response") && (
                 <>
-                    {templates.length > 1 && (
-                        <SearchableSelect
-                            value={col.stepId || ""}
-                            onChange={(val) => onUpdate(idx, { stepId: val || undefined })}
-                            options={[{ label: "All (Last)", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
-                            placeholder="All / Last"
-                            className="w-full sm:w-[140px] bg-neutral-950 border-white/10 text-white"
-                        />
-                    )}
+                    {templates.length > 1 && renderStepSelect()}
                     <PathAutocompleteInput
                         value={col.path || ""}
                         onChange={(val) => onUpdate(idx, { path: val })}
@@ -831,15 +844,7 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
             )}
             {col.source === "response_time" && (
                 <>
-                    {templates.length > 1 ? (
-                        <SearchableSelect
-                            value={col.stepId || ""}
-                            onChange={(val) => onUpdate(idx, { stepId: val || undefined })}
-                            options={[{ label: "All (Last)", value: "" }, ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))]}
-                            placeholder="All / Last"
-                            className="w-full sm:w-[140px] bg-neutral-950 border-white/10 text-white"
-                        />
-                    ) : null}
+                    {templates.length > 1 ? renderStepSelect() : null}
                     <div className="flex-1 text-xs text-muted-foreground flex items-center px-3 border border-transparent">
                         Automatic Value (Response Time)
                     </div>
@@ -1449,26 +1454,7 @@ export function ResultsTable() {
 
             let extensionRuleId: number | null = null;
             if (isExtensionActive) {
-                try {
-                    const urlFilter = getHostname(url);
-
-                    const extHeaders = Object.entries(reqHeaders).map(([key, value]) => ({
-                        name: key,
-                        value: value
-                    }));
-
-                    const res = await sendToExtension({
-                        action: "setupRequestRules",
-                        urlFilter,
-                        headers: extHeaders,
-                        initiatorOrigin: window.location.origin
-                    });
-                    if (res && res.success) {
-                        extensionRuleId = res.ruleId;
-                    }
-                } catch (e) {
-                    console.warn("Failed to setup extension rules for rerun:", e);
-                }
+                extensionRuleId = await setupExtensionRules(url, reqHeaders, "rerun");
             }
 
             try {
@@ -1504,14 +1490,7 @@ export function ResultsTable() {
                     }
                 } finally {
                     if (extensionRuleId !== null) {
-                        try {
-                            await sendToExtension({
-                                action: "clearRequestRules",
-                                ruleId: extensionRuleId
-                            });
-                        } catch (e) {
-                            console.warn("Failed to clear extension rules for rerun:", e);
-                        }
+                        await clearExtensionRules(extensionRuleId, "rerun");
                     }
                 }
             } catch (err: any) {

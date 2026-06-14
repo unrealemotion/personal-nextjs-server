@@ -22,9 +22,7 @@ export const requestTemplateSchema = z.object({
 
 export type RequestTemplate = z.infer<typeof requestTemplateSchema>;
 
-export type StepResult = {
-  stepId: string;
-  stepName: string;
+export type BaseExecutionFields = {
   statusCode: number;
   responseTimeMs: number;
   requestUrl?: string;
@@ -41,25 +39,16 @@ export type StepResult = {
   error?: string;
 };
 
-export type ExecutionResult = {
+export type StepResult = BaseExecutionFields & {
+  stepId: string;
+  stepName: string;
+};
+
+export type ExecutionResult = BaseExecutionFields & {
   rowId: number;
   iteration?: number;
   status: "pending" | "success" | "error";
-  statusCode: number;
-  responseTimeMs: number;
-  requestUrl?: string;
-  requestMethod?: string;
-  requestHeaders?: Record<string, string>;
-  requestParams?: Record<string, string>;
-  requestBody: Record<string, any> | string | null;
-  responseBody: any;
-  responseHeaders?: Record<string, string>;
-  responseType?: string;
-  responseRedirected?: boolean;
-  responseStatusText?: string;
-  ipAddress?: string | null;
   steps: StepResult[];
-  error?: string;
   timestamp?: string;
   active?: boolean;
 };

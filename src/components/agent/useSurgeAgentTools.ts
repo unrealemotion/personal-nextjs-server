@@ -18,15 +18,15 @@ import {
     deleteCollection,
     closeApiTab,
     updateTabResponse,
-    updateTabLoading
+    updateTabLoading,
+    linkTabToRequest
 } from "@/lib/store";
-import { addItemToCollectionTree } from "@/lib/utils";
+import { addItemToCollectionTree, findItemInCollections } from "@/lib/utils";
 import { stripJsonComments } from "@/lib/executor-utils";
 import { simulateRowExecutionChain } from "@/lib/agent-executor";
 import { runBulkExecution } from "@/lib/executor";
-import { resolveVariables, runPreRequestScript, runTestScript } from "@/lib/sandbox";
-import { sendToExtension } from "@/lib/extension";
-import { getHostname } from "@/lib/dns";
+import { executeFrontendRequest } from "@/lib/frontend-executor";
+import { resolveVariables } from "@/lib/sandbox";
 
 import { GLOBAL_TOOLS } from "./tools/global";
 import { BULK_RUNNER_TOOLS } from "./tools/bulk-runner";
@@ -92,12 +92,9 @@ export function useSurgeAgentTools() {
                         return { matchesCount: matches.length, totalRows: fileData.length, matches };
                     }
                     case "read_row_data": {
-                        const rowId = Number(args.rowId);
-                        if (isNaN(rowId)) return { error: "rowId must be a valid integer." };
+                        const { rowId, error } = getRowIdOrError(args.rowId);
+                        if (error) return { error };
                         const fileData = store.state.fileData || [];
-                        if (rowId < 0 || rowId >= fileData.length) {
-                            return { error: `Row ID ${rowId} is out of bounds (0 to ${fileData.length - 1}).` };
-                        }
                         return { rowId, data: fileData[rowId] };
                     }
                     case "inspect_input_data": {
@@ -181,12 +178,9 @@ export function useSurgeAgentTools() {
                         };
                     }
                     case "simulate_row_execution": {
-                        const rowId = Number(args.rowId);
-                        if (isNaN(rowId)) return { error: "rowId must be a valid integer." };
+                        const { rowId, error } = getRowIdOrError(args.rowId);
+                        if (error) return { error };
                         const fileData = store.state.fileData || [];
-                        if (rowId < 0 || rowId >= fileData.length) {
-                            return { error: `Row ID ${rowId} is out of bounds.` };
-                        }
                         const row = fileData[rowId];
                         const state = store.state;
                         const templates = state.templates;
@@ -280,21 +274,7 @@ export function useSurgeAgentTools() {
                             results.push(`Active tab switched to '${args.tabId}' (${tab.name}).`);
                         }
                         if (args.requestId !== undefined && args.requestId !== null) {
-                            let foundRequest: any = null;
-                            for (const col of store.state.collections) {
-                                const search = (items: any[]): any => {
-                                    for (const item of items) {
-                                        if (item.id === args.requestId) return item;
-                                        if (item.items) {
-                                            const found = search(item.items);
-                                            if (found) return found;
-                                        }
-                                    }
-                                    return null;
-                                };
-                                foundRequest = search(col.items);
-                                if (foundRequest) break;
-                            }
+                            const foundRequest = findItemInCollections(store.state.collections, args.requestId);
                             if (!foundRequest) {
                                 return { error: `Request '${args.requestId}' not found in collections.` };
                             }
@@ -624,21 +604,7 @@ export function useSurgeAgentTools() {
                                     
                                     let targetTab = store.state.apiTabs.find(t => t.requestId === reqArgs.requestId || t.id === reqArgs.requestId);
                                     if (!targetTab && (reqArgs.activateTab || reqArgs.activeSubTab !== undefined)) {
-                                        let foundRequest: any = null;
-                                        for (const col of store.state.collections) {
-                                            const search = (items: any[]): any => {
-                                                for (const item of items) {
-                                                    if (item.id === reqArgs.requestId) return item;
-                                                    if (item.items) {
-                                                        const found = search(item.items);
-                                                        if (found) return found;
-                                                    }
-                                                }
-                                                return null;
-                                            };
-                                            foundRequest = search(col.items);
-                                            if (foundRequest) break;
-                                        }
+                                        const foundRequest = findItemInCollections(store.state.collections, reqArgs.requestId);
                                         if (foundRequest) {
                                             openRequestInTab(foundRequest, foundRequest.id);
                                             targetTab = store.state.apiTabs.find(t => t.requestId === reqArgs.requestId);
@@ -655,13 +621,9 @@ export function useSurgeAgentTools() {
                                     }
                                     saveResults.push({ index: i, success: true, message: `Request '${reqArgs.requestId}' updated in collection.` });
                                 } else if (reqArgs.action === "save_tab") {
-                                    if (!reqArgs.tabId) {
-                                        saveResults.push({ index: i, success: false, error: "tabId is required for save_tab action." });
-                                        continue;
-                                    }
-                                    const tab = store.state.apiTabs.find(t => t.id === reqArgs.tabId);
-                                    if (!tab) {
-                                        saveResults.push({ index: i, success: false, error: `Tab '${reqArgs.tabId}' not found.` });
+                                    const { tab, error } = validateTabId(reqArgs.tabId, "save_tab");
+                                    if (error) {
+                                        saveResults.push({ index: i, success: false, error });
                                         continue;
                                     }
 
@@ -713,15 +675,7 @@ export function useSurgeAgentTools() {
                                             };
                                             addCollection(newlyCreatedCol);
                                             
-                                            store.setState(s => {
-                                                const newTabs = s.apiTabs.map(t => {
-                                                    if (t.id === reqArgs.tabId) {
-                                                        return { ...t, requestId: newReqId, name: requestName, isDirty: false };
-                                                    }
-                                                    return t;
-                                                });
-                                                return { ...s, apiTabs: newTabs };
-                                            });
+                                            linkTabToRequest(reqArgs.tabId, newReqId, requestName);
 
                                             saveResults.push({ index: i, success: true, message: `Request saved as '${requestName}' in new collection '${reqArgs.newCollectionName}'.` });
                                         } else {
@@ -738,15 +692,7 @@ export function useSurgeAgentTools() {
                                                     };
                                                     addCollection(newlyCreatedCol);
                                                     
-                                                    store.setState(s => {
-                                                        const newTabs = s.apiTabs.map(t => {
-                                                            if (t.id === reqArgs.tabId) {
-                                                                return { ...t, requestId: newReqId, name: requestName, isDirty: false };
-                                                            }
-                                                            return t;
-                                                        });
-                                                        return { ...s, apiTabs: newTabs };
-                                                    });
+                                                    linkTabToRequest(reqArgs.tabId, newReqId, requestName);
 
                                                     saveResults.push({ index: i, success: true, message: `Request saved as '${requestName}' in new collection 'Default Collection'.` });
                                                     continue;
@@ -775,15 +721,7 @@ export function useSurgeAgentTools() {
 
                                             updateCollection(targetColId, { items: updatedItems });
 
-                                            store.setState(s => {
-                                                const newTabs = s.apiTabs.map(t => {
-                                                    if (t.id === reqArgs.tabId) {
-                                                        return { ...t, requestId: newReqId, name: requestName, isDirty: false };
-                                                    }
-                                                    return t;
-                                                });
-                                                return { ...s, apiTabs: newTabs };
-                                            });
+                                            linkTabToRequest(reqArgs.tabId, newReqId, requestName);
 
                                             saveResults.push({ index: i, success: true, message: `Request saved as '${requestName}' in collection '${col.name}'.` });
                                         }
@@ -825,235 +763,21 @@ export function useSurgeAgentTools() {
                         
                         updateTabLoading(tabId, true);
                         
-                        try {
-                            let collectionVars: KeyValuePair[] = [];
-                            if (requestId) {
-                                const parentCol = store.state.collections.find(c => {
-                                    const findInItems = (items: any[]): boolean => {
-                                        return items.some(item => {
-                                            if (item.id === requestId) return true;
-                                            if (item.items) return findInItems(item.items);
-                                            return false;
-                                        });
-                                    };
-                                    return findInItems(c.items);
-                                });
-                                if (parentCol && parentCol.variables) {
-                                    collectionVars = parentCol.variables;
-                                }
-                            }
-                            
-                            let finalEnvironments = store.state.environments;
-                            let addedHeaders: { key: string; value: string }[] = [];
-                            
-                            if (request.preRequestScript) {
-                                const scriptRes = runPreRequestScript(
-                                    request.preRequestScript,
-                                    store.state.environments,
-                                    store.state.activeEnvironmentId,
-                                    collectionVars
-                                );
-                                finalEnvironments = scriptRes.updatedEnvironments;
-                                addedHeaders = scriptRes.addedHeaders;
-                                store.setState(s => ({ ...s, environments: finalEnvironments }));
-                            }
-                            
-                            const interpolatedUrl = resolveVariables(
-                                request.url,
-                                finalEnvironments,
-                                store.state.activeEnvironmentId,
-                                collectionVars
-                            );
-                            
-                            const headers = new Headers();
-                            const rawHeadersMap: Record<string, string> = {};
-                            
-                            (request.headers || []).forEach(h => {
-                                if (h.enabled !== false && h.key) {
-                                    const resolvedKey = resolveVariables(h.key, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
-                                    const resolvedVal = resolveVariables(h.value, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
-                                    headers.append(resolvedKey, resolvedVal);
-                                    rawHeadersMap[resolvedKey] = resolvedVal;
-                                }
-                            });
-                            
-                            addedHeaders.forEach(h => {
-                                headers.append(h.key, h.value);
-                                rawHeadersMap[h.key] = h.value;
-                            });
-                            
-                            let fetchBody: any = null;
-                            const mode = request.body?.mode || "none";
-                            
-                            if (request.method !== "GET" && request.method !== "HEAD") {
-                                if (mode === "raw" && request.body?.raw) {
-                                    const rawBodyResolved = resolveVariables(request.body.raw, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
-                                    const lang = request.body.rawLanguage || "json";
-                                    if (lang === "json") {
-                                        fetchBody = stripJsonComments(rawBodyResolved);
-                                    } else {
-                                        fetchBody = rawBodyResolved;
-                                    }
-                                    let contentType = "application/json";
-                                    if (lang === "text") contentType = "text/plain";
-                                    else if (lang === "javascript") contentType = "application/javascript";
-                                    else if (lang === "html") contentType = "text/html";
-                                    else if (lang === "xml") contentType = "application/xml";
-                                    
-                                    if (!headers.has("Content-Type")) {
-                                        headers.append("Content-Type", contentType);
-                                        rawHeadersMap["Content-Type"] = contentType;
-                                    }
-                                } else if (mode === "graphql" && request.body?.graphql) {
-                                    const query = resolveVariables(request.body.graphql.query || "", finalEnvironments, store.state.activeEnvironmentId, collectionVars);
-                                    const varsStr = resolveVariables(request.body.graphql.variables || "{}", finalEnvironments, store.state.activeEnvironmentId, collectionVars);
-                                    let variables = {};
-                                    try {
-                                        variables = JSON.parse(stripJsonComments(varsStr));
-                                    } catch {}
-                                    fetchBody = JSON.stringify({ query, variables });
-                                    if (!headers.has("Content-Type")) {
-                                        headers.append("Content-Type", "application/json");
-                                        rawHeadersMap["Content-Type"] = "application/json";
-                                    }
-                                } else if (mode === "urlencoded" && request.body?.urlencoded) {
-                                    const formParams = new URLSearchParams();
-                                    request.body.urlencoded.forEach(p => {
-                                        if (p.enabled !== false && p.key) {
-                                            const rKey = resolveVariables(p.key, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
-                                            const rVal = resolveVariables(p.value, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
-                                            formParams.append(rKey, rVal);
-                                        }
-                                    });
-                                    fetchBody = formParams.toString();
-                                    if (!headers.has("Content-Type")) {
-                                        headers.append("Content-Type", "application/x-www-form-urlencoded");
-                                        rawHeadersMap["Content-Type"] = "application/x-www-form-urlencoded";
-                                    }
-                                } else if (mode === "formdata" && request.body?.formdata) {
-                                    const fd = new FormData();
-                                    request.body.formdata.forEach(p => {
-                                        if (p.enabled !== false && p.key) {
-                                            const rKey = resolveVariables(p.key, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
-                                            const rVal = resolveVariables(p.value, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
-                                            fd.append(rKey, rVal);
-                                        }
-                                    });
-                                    fetchBody = fd;
-                                } else if (mode === "binary" && request.body?.binary) {
-                                    fetchBody = resolveVariables(request.body.binary, finalEnvironments, store.state.activeEnvironmentId, collectionVars);
-                                    if (!headers.has("Content-Type")) {
-                                        headers.append("Content-Type", "application/octet-stream");
-                                        rawHeadersMap["Content-Type"] = "application/octet-stream";
-                                    }
-                                }
-                            }
-                            
-                            if (!interpolatedUrl) {
-                                throw new Error("URL is empty.");
-                            }
-                            
-                            const isExtensionActive = typeof document !== "undefined" &&
-                                document.documentElement.getAttribute("data-surge-extension-active") === "true";
-                            
-                            let extensionRuleId: number | null = null;
-                            if (isExtensionActive) {
-                                try {
-                                    const urlFilter = getHostname(interpolatedUrl);
-                                    
-                                    const extHeaders = Object.entries(rawHeadersMap).map(([key, value]) => ({
-                                        name: key,
-                                        value: value
-                                    }));
-                                    
-                                    const res = await sendToExtension({
-                                        action: "setupRequestRules",
-                                        urlFilter,
-                                        headers: extHeaders,
-                                        initiatorOrigin: window.location.origin
-                                    });
-                                    if (res && res.success) {
-                                        extensionRuleId = res.ruleId;
-                                    }
-                                } catch (e) {
-                                    console.warn("Failed to setup extension rules in agent:", e);
-                                }
-                            }
-                            
-                            const controller = new AbortController();
-                            const startTime = performance.now();
-                            let fetchRes;
-                            try {
-                                fetchRes = await fetch(interpolatedUrl, {
-                                    method: request.method,
-                                    headers,
-                                    body: fetchBody,
-                                    mode: "cors",
-                                    signal: controller.signal
-                                });
-                            } finally {
-                                if (extensionRuleId !== null) {
-                                    try {
-                                        await sendToExtension({
-                                            action: "clearRequestRules",
-                                            ruleId: extensionRuleId
-                                        });
-                                    } catch (e) {
-                                        console.warn("Failed to clear extension rules in agent:", e);
-                                    }
-                                }
-                            }
-                            
-                            const endTime = performance.now();
-                            const text = await fetchRes.text();
-                            const resHeadersMap: Record<string, string> = {};
-                            fetchRes.headers.forEach((val, key) => {
-                                resHeadersMap[key] = val;
-                            });
-                            
-                            const initialResponse = {
-                                status: fetchRes.status,
-                                statusText: fetchRes.statusText,
-                                timeMs: Math.round(endTime - startTime),
-                                sizeBytes: text.length,
-                                body: text,
-                                headers: resHeadersMap,
-                            };
-                            
-                            let testResults: any[] = [];
-                            if (request.testScript) {
-                                const testRes = runTestScript(
-                                    request.testScript,
-                                    initialResponse,
-                                    finalEnvironments,
-                                    store.state.activeEnvironmentId,
-                                    collectionVars
-                                );
-                                testResults = testRes.testResults;
-                                store.setState(s => ({ ...s, environments: testRes.updatedEnvironments }));
-                            }
-                            
-                            const finalResponse = {
-                                ...initialResponse,
-                                testResults
-                            };
-                            
-                            updateTabResponse(tabId, finalResponse);
-                            return { success: true, response: finalResponse };
-                            
-                        } catch (err: any) {
-                            const errorResponse = {
-                                status: 0,
-                                statusText: "Error",
-                                timeMs: 0,
-                                sizeBytes: 0,
-                                body: `Error: ${err.message || String(err)}`,
-                                headers: {},
-                                testResults: [{ name: "Request completed", passed: false, error: err.message }]
-                            };
-                            updateTabResponse(tabId, errorResponse);
-                            return { error: err.message || String(err), response: errorResponse };
+                        const response = await executeFrontendRequest(
+                            request,
+                            requestId,
+                            store.state.environments,
+                            store.state.activeEnvironmentId,
+                            store.state.collections
+                        );
+                        
+                        updateTabResponse(tabId, response);
+                        
+                        if (response.status === 0 && response.statusText === "Error") {
+                            return { error: response.body, response };
                         }
+                        
+                        return { success: true, response };
                     }
                     case "get_environments": {
                         return {
@@ -1327,20 +1051,12 @@ function getTemplateVariables(t: any): string[] {
 
 function validateTemplateVariables(templates: any[], state: any) {
     const activeEnv = state.environments?.find((e: any) => e.id === state.activeEnvironmentId);
-    const activeEnvVars = new Set(
-        (activeEnv?.variables || [])
-            .filter((v: any) => v.enabled)
-            .map((v: any) => v.key.trim().toLowerCase())
-    );
+    const activeEnvVars = new Set(getLowercasedEnabledKeys(activeEnv?.variables));
     
     const globalsEnv = state.environments?.find(
         (e: any) => e.name.toLowerCase() === "globals" || e.name.toLowerCase() === "global"
     );
-    const globalVars = new Set(
-        (globalsEnv?.variables || [])
-            .filter((v: any) => v.enabled)
-            .map((v: any) => v.key.trim().toLowerCase())
-    );
+    const globalVars = new Set(getLowercasedEnabledKeys(globalsEnv?.variables));
 
     const excelHeaders = new Set((state.headers || []).map((h: string) => h.trim().toLowerCase()));
 
@@ -1383,4 +1099,31 @@ function validateTemplateVariables(templates: any[], state: any) {
             invalidVariables: invalidVariables.length > 0 ? invalidVariables : undefined
         };
     });
+}
+
+function getRowIdOrError(rowIdVal: any): { rowId: number; error?: string } {
+    const rowId = Number(rowIdVal);
+    if (isNaN(rowId)) return { rowId: -1, error: "rowId must be a valid integer." };
+    const fileData = store.state.fileData || [];
+    if (rowId < 0 || rowId >= fileData.length) {
+        return { rowId: -1, error: `Row ID ${rowId} is out of bounds (0 to ${fileData.length - 1}).` };
+    }
+    return { rowId };
+}
+
+function validateTabId(tabId: any, actionName: string): { tab?: any; error?: string } {
+    if (!tabId) {
+        return { error: `tabId is required for ${actionName} action.` };
+    }
+    const tab = store.state.apiTabs.find(t => t.id === tabId);
+    if (!tab) {
+        return { error: `Tab '${tabId}' not found.` };
+    }
+    return { tab };
+}
+
+function getLowercasedEnabledKeys(variables?: any[]): string[] {
+    return (variables || [])
+        .filter((v: any) => v.enabled)
+        .map((v: any) => v.key.trim().toLowerCase());
 }

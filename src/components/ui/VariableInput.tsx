@@ -96,14 +96,13 @@ export function VariableInput({
         }, 300);
     };
 
-    const handleInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const triggerImmediateChange = (e: React.SyntheticEvent<HTMLInputElement>) => {
         if (debounceTimeoutRef.current) {
             clearTimeout(debounceTimeoutRef.current);
             debounceTimeoutRef.current = null;
         }
 
         if (onChange && localValue !== stringValue) {
-            // Immediately dispatch the final value on blur
             const syntheticEvent = {
                 ...e,
                 target: {
@@ -113,6 +112,10 @@ export function VariableInput({
             } as unknown as React.ChangeEvent<HTMLInputElement>;
             onChange(syntheticEvent);
         }
+    };
+
+    const handleInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+        triggerImmediateChange(e);
 
         if (onBlur) {
             onBlur(e);
@@ -121,22 +124,7 @@ export function VariableInput({
 
     const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === "Enter") {
-            if (debounceTimeoutRef.current) {
-                clearTimeout(debounceTimeoutRef.current);
-                debounceTimeoutRef.current = null;
-            }
-
-            if (onChange && localValue !== stringValue) {
-                // Immediately dispatch the final value on Enter key press
-                const syntheticEvent = {
-                    ...e,
-                    target: {
-                        ...e.target,
-                        value: localValue
-                    }
-                } as unknown as React.ChangeEvent<HTMLInputElement>;
-                onChange(syntheticEvent);
-            }
+            triggerImmediateChange(e);
         }
 
         if (onKeyDown) {

@@ -1,3 +1,38 @@
+function resolveLocalhost(url) {
+  if (url) {
+    try {
+      const urlObj = new URL(url);
+      if (urlObj.hostname.toLowerCase() === "localhost") {
+        urlObj.hostname = "127.0.0.1";
+        return urlObj.toString();
+      }
+    } catch {}
+  }
+  return url;
+}
+
+async function performProxyFetch(url, options, contextLabel) {
+  try {
+    if (!url) {
+      throw new Error("URL is empty or undefined.");
+    }
+    const res = await fetch(url, options);
+    const text = await res.text();
+    return {
+      success: true,
+      status: res.status,
+      statusText: res.statusText,
+      body: text
+    };
+  } catch (err) {
+    console.error(`[${contextLabel}] fetch failed:`, err);
+    return {
+      success: false,
+      error: err.message || String(err)
+    };
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "setupRequestRules") {
     const { urlFilter, headers, initiatorOrigin } = message;
@@ -71,45 +106,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.source === "surge-content" && message.payload && message.payload.action === "fetchProxy") {
     const requestId = message.requestId;
     const tabId = sender.tab ? sender.tab.id : null;
-    let { url } = message.payload;
+    const url = resolveLocalhost(message.payload.url);
     const { options } = message.payload;
-
-    // Resolve localhost to 127.0.0.1 to avoid DNS resolution hanging in MV3 Service Workers
-    if (url) {
-      try {
-        const urlObj = new URL(url);
-        if (urlObj.hostname.toLowerCase() === "localhost") {
-          urlObj.hostname = "127.0.0.1";
-          url = urlObj.toString();
-        }
-      } catch {}
-    }
 
     console.log("[fetchProxy] URL:", url, "options:", options);
 
     const runFetch = async () => {
-      let responsePayload;
-      try {
-        if (!url) {
-          throw new Error("URL is empty or undefined.");
-        }
-
-        const res = await fetch(url, options);
-        const text = await res.text();
-        responsePayload = {
-          success: true,
-          status: res.status,
-          statusText: res.statusText,
-          body: text
-        };
-
-      } catch (err) {
-        console.error("[fetchProxy] fetch failed:", err);
-        responsePayload = {
-          success: false,
-          error: err.message || String(err)
-        };
-      }
+      const responsePayload = await performProxyFetch(url, options, "fetchProxy");
 
       // Send the response back to the specific tab that initiated the request
       if (tabId !== null) {
@@ -131,44 +134,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Handle fetchProxy direct callback fallback (e.g. from old content script)
   if (message.action === "fetchProxy") {
-    let { url } = message;
+    const url = resolveLocalhost(message.url);
     const { options } = message;
-
-    // Resolve localhost to 127.0.0.1 to avoid DNS resolution hanging in MV3 Service Workers
-    if (url) {
-      try {
-        const urlObj = new URL(url);
-        if (urlObj.hostname.toLowerCase() === "localhost") {
-          urlObj.hostname = "127.0.0.1";
-          url = urlObj.toString();
-        }
-      } catch {}
-    }
 
     console.log("[fetchProxy callback fallback] URL:", url, "options:", options);
 
     const runFetchFallback = async () => {
-      let responsePayload;
-      try {
-        if (!url) {
-          throw new Error("URL is empty or undefined.");
-        }
-
-        const res = await fetch(url, options);
-        const text = await res.text();
-        responsePayload = {
-          success: true,
-          status: res.status,
-          statusText: res.statusText,
-          body: text
-        };
-      } catch (err) {
-        console.error("[fetchProxy callback fallback] fetch failed:", err);
-        responsePayload = {
-          success: false,
-          error: err.message || String(err)
-        };
-      }
+      const responsePayload = await performProxyFetch(url, options, "fetchProxy callback fallback");
       sendResponse(responsePayload);
     };
 
