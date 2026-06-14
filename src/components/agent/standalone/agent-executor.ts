@@ -48,9 +48,9 @@ export const callLLM = async (
     config: AgentProfile,
     systemPrompt: string,
     agentTools: ToolDefinition[],
-    fetchProxy?: (url: string, options: any) => Promise<{ success: boolean; status: number; body: string; error?: string }>,
+    fetchProxy?: (url: string, options: any, abortSignal?: AbortSignal) => Promise<{ success: boolean; status: number; body: string; error?: string }>,
     abortSignal?: AbortSignal
-): Promise<{ text: string; toolCalls: any[]; geminiParts?: any[] }> => {
+): Promise<{ text: string; toolCalls: any[]; geminiParts?: any[]; reasoning?: string }> => {
     const { provider, apiKey, endpoint, model } = config;
 
     if (!apiKey && provider !== "custom") {
@@ -139,7 +139,7 @@ export const callLLM = async (
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: bodyStr
-            });
+            }, abortSignal);
             if (res && res.success) {
                 response = {
                     ok: res.status >= 200 && res.status < 300,
@@ -246,7 +246,8 @@ export const callLLM = async (
         const text = candidate?.content?.parts?.find((p: any) => p.text)?.text || "";
         const rawCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall) || [];
         const geminiParts = candidate?.content?.parts || [];
-
+        const reasoning = candidate?.content?.parts?.find((p: any) => p.thought || p.reasoning)?.text || "";
+        
         let toolCalls = rawCalls.map((rc: any) => ({
             id: `call_${Math.random().toString(36).substring(2, 9)}`,
             type: "function",
@@ -292,7 +293,7 @@ export const callLLM = async (
             }
         }
 
-        return { text, toolCalls, geminiParts };
+        return { text, toolCalls, geminiParts, reasoning };
     } else {
         // OpenAI and Custom OpenAI-compatible endpoints
         const apiTargetUrl = `${endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint}/chat/completions`;
@@ -361,7 +362,7 @@ export const callLLM = async (
                 method: "POST",
                 headers: openaiHeaders,
                 body: bodyStr
-            });
+            }, abortSignal);
             if (res && res.success) {
                 response = {
                     ok: res.status >= 200 && res.status < 300,
@@ -424,6 +425,7 @@ export const callLLM = async (
         const choice = data.choices?.[0];
         const text = choice?.message?.content || "";
         let toolCalls = choice?.message?.tool_calls || [];
+        const reasoning = choice?.message?.reasoning || choice?.message?.reason_content || choice?.message?.reason || "";
 
         if (config.enableJsonFallback && toolCalls.length === 0 && text) {
             const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/g;
@@ -461,6 +463,6 @@ export const callLLM = async (
             }
         }
 
-        return { text, toolCalls };
+        return { text, toolCalls, reasoning };
     }
 };

@@ -205,6 +205,7 @@ export interface Message {
   tool_call_id?: string;
   tool_calls?: any[];
   geminiParts?: any[];
+  reasoning?: string;
 }
 
 

@@ -36,12 +36,12 @@ export function AgentChatPanel() {
 
     // Map fetchProxy to send LLM requests through Surge extension
     const fetchProxy = React.useMemo(() => {
-        return async (url: string, options: any) => {
+        return async (url: string, options: any, abortSignal?: AbortSignal) => {
             const res = await sendToExtension({
                 action: "fetchProxy",
                 url,
                 options
-            }, 90000);
+            }, 0, abortSignal);
             if (res && res.success) {
                 return {
                     success: true,

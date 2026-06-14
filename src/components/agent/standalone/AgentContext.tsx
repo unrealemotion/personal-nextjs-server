@@ -351,7 +351,8 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
                         role: "assistant",
                         content: response.text || "Executing tools...",
                         tool_calls: response.toolCalls,
-                        geminiParts: response.geminiParts
+                        geminiParts: response.geminiParts,
+                        reasoning: response.reasoning
                     };
 
                     activeHistory.push(assistantMessage);
@@ -391,7 +392,8 @@ export const AgentProvider: React.FC<AgentProviderProps> = ({
                         id: `msg_${Date.now()}_assistant`,
                         role: "assistant",
                         content: response.text,
-                        geminiParts: response.geminiParts
+                        geminiParts: response.geminiParts,
+                        reasoning: response.reasoning
                     };
                     activeHistory.push(assistantMessage);
                     setMessages([...activeHistory]);

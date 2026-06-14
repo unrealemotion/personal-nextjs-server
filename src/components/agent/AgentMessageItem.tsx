@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Wrench, Loader2, Undo, User, Check, X, Copy } from "lucide-react";
+import { Wrench, Loader2, Undo, User, Check, X, Copy, Brain, ChevronDown } from "lucide-react";
 import { type Message } from "@/lib/schema";
 import { renderMarkdown } from "./render-markdown";
 import { EtherealAiSymbol } from "./EtherealAiSymbol";
@@ -13,6 +13,7 @@ interface AgentMessageItemProps {
 
 export function AgentMessageItem({ message, allMessages = [], onRevert }: AgentMessageItemProps) {
     const [copied, setCopied] = useState(false);
+    const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
 
     const handleCopy = () => {
         navigator.clipboard.writeText(message.content);
@@ -111,6 +112,24 @@ export function AgentMessageItem({ message, allMessages = [], onRevert }: AgentM
                         : "bg-indigo-600 text-white shadow-lg shadow-indigo-500/10"
                 }`}
             >
+                {isBot && message.reasoning && (
+                    <div className="mb-2 border-b border-white/5 pb-2">
+                        <button
+                            type="button"
+                            onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
+                            className="flex items-center space-x-1.5 px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[10px] text-white/50 hover:text-white/80 transition-all font-semibold select-none cursor-pointer focus:outline-none"
+                        >
+                            <Brain className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                            <span>{isThinkingExpanded ? "Hide thinking process" : "Show thinking process"}</span>
+                            <ChevronDown className={`w-3 h-3 transition-transform duration-200 shrink-0 ${isThinkingExpanded ? "rotate-180" : ""}`} />
+                        </button>
+                        {isThinkingExpanded && (
+                            <div className="mt-2 text-[10.5px] leading-relaxed text-white/60 bg-neutral-950/40 border border-white/5 rounded-lg p-2 font-mono whitespace-pre-wrap select-text animate-fade-in max-h-[150px] overflow-y-auto custom-scrollbar">
+                                {message.reasoning}
+                            </div>
+                        )}
+                    </div>
+                )}
                 {renderMarkdown(message.content)}
 
                 <div className="mt-0.5 flex justify-end space-x-1 opacity-50 group-hover:opacity-100 transition-opacity duration-200">

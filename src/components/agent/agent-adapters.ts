@@ -51,7 +51,7 @@ export const callLLM = async (
     chatMessages: Message[],
     config: AgentConfig,
     abortSignal?: AbortSignal
-): Promise<{ text: string; toolCalls: any[]; geminiParts?: any[] }> => {
+): Promise<{ text: string; toolCalls: any[]; geminiParts?: any[]; reasoning?: string }> => {
     const { provider, apiKey, endpoint, model } = config;
     
     const currentView = store.state.currentView || "bulk";
@@ -147,7 +147,7 @@ export const callLLM = async (
                     headers: { "Content-Type": "application/json" },
                     body: bodyStr
                 }
-            }, 90000);
+            }, 0, abortSignal);
             if (res && res.success) {
                 response = {
                     ok: res.status >= 200 && res.status < 300,
@@ -300,7 +300,8 @@ export const callLLM = async (
             }
         }
 
-        return { text, toolCalls, geminiParts };
+        const reasoning = candidate?.content?.parts?.find((p: any) => p.thought || p.reasoning)?.text || "";
+        return { text, toolCalls, geminiParts, reasoning };
     } else {
         // OpenAI and Custom OpenAI-compatible endpoints
         const apiTargetUrl = `${endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint}/chat/completions`;
@@ -363,7 +364,7 @@ export const callLLM = async (
                     headers: openaiHeaders,
                     body: bodyStr
                 }
-            }, 90000);
+            }, 0, abortSignal);
             if (res && res.success) {
                 response = {
                     ok: res.status >= 200 && res.status < 300,
@@ -463,6 +464,7 @@ export const callLLM = async (
             }
         }
 
-        return { text, toolCalls };
+        const reasoning = choice?.message?.reasoning || choice?.message?.reason_content || choice?.message?.reason || "";
+        return { text, toolCalls, reasoning };
     }
 };
