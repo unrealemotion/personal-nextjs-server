@@ -97,11 +97,13 @@ const createParserWorker = () => {
                 return next;
               });
             }
+            const limitValue = options.maxArraySplitLimit ?? 5;
+            const slicedVal = val.slice(0, limitValue);
             const nextRows = [];
             for (let i = 0; i < rows.length; i++) {
               const r = rows[i];
-              for (let j = 0; j < val.length; j++) {
-                const el = val[j];
+              for (let j = 0; j < slicedVal.length; j++) {
+                const el = slicedVal[j];
                 const subRows = expandValue(el, path);
                 for (let k = 0; k < subRows.length; k++) {
                   const subRow = subRows[k];
@@ -166,9 +168,11 @@ const createParserWorker = () => {
             if (val.length === 0) {
               return [{ [path]: null }];
             }
+            const limitValue = options.maxArraySplitLimit ?? 5;
+            const slicedVal = val.slice(0, limitValue);
             const nextRows = [];
-            for (let i = 0; i < val.length; i++) {
-              nextRows.push(...expandValue(val[i], path));
+            for (let i = 0; i < slicedVal.length; i++) {
+              nextRows.push(...expandValue(slicedVal[i], path));
             }
             return nextRows;
           } else {
@@ -217,11 +221,11 @@ const createParserWorker = () => {
     }
 
     self.onmessage = function(e) {
-      const { jsonInput, flattenObjects, splitArrays } = e.data;
+      const { jsonInput, flattenObjects, splitArrays, maxArraySplitLimit } = e.data;
       try {
         const parsed = JSON.parse(jsonInput);
         const originalItemCount = Array.isArray(parsed) ? parsed.length : 1;
-        const flatRows = jsonToTableData(parsed, { flattenObjects, splitArrays });
+        const flatRows = jsonToTableData(parsed, { flattenObjects, splitArrays, maxArraySplitLimit });
         const columns = getColumnsFromRows(flatRows);
         self.postMessage({
           success: true,
@@ -287,6 +291,7 @@ export function JSONToTable() {
   const [jsonInput, setJsonInput] = useState<string>("");
   const [flattenObjects, setFlattenObjects] = useState<boolean>(true);
   const [splitArrays, setSplitArrays] = useState<boolean>(true);
+  const [maxArraySplitLimit, setMaxArraySplitLimit] = useState<number>(5);
   const [globalFilter, setGlobalFilter] = useState<string>("");
   const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>({});
 
@@ -322,14 +327,17 @@ export function JSONToTable() {
     const savedInput = localStorage.getItem("json_nexus_table_input");
     const savedFlatten = localStorage.getItem("json_nexus_table_flatten");
     const savedSplit = localStorage.getItem("json_nexus_table_split");
+    const savedLimit = localStorage.getItem("json_nexus_table_split_limit");
 
     const optFlatten = savedFlatten !== null ? savedFlatten === "true" : true;
     const optSplit = savedSplit !== null ? savedSplit === "true" : true;
+    const optLimit = savedLimit !== null ? Number(savedLimit) : 5;
 
     if (savedInput) {
       setJsonInput(savedInput);
       setFlattenObjects(optFlatten);
       setSplitArrays(optSplit);
+      setMaxArraySplitLimit(optLimit);
       
       // Auto-convert on mount if JSON is valid!
       try {
@@ -337,7 +345,7 @@ export function JSONToTable() {
         const originalItemCount = Array.isArray(parsed) ? parsed.length : 1;
         setOriginalCount(originalItemCount);
         
-        const flatRows = jsonToTableData(parsed, { flattenObjects: optFlatten, splitArrays: optSplit });
+        const flatRows = jsonToTableData(parsed, { flattenObjects: optFlatten, splitArrays: optSplit, maxArraySplitLimit: optLimit });
         const columns = getColumnsFromRows(flatRows);
         
         setConvertedRows(flatRows);
@@ -365,6 +373,10 @@ export function JSONToTable() {
   useEffect(() => {
     localStorage.setItem("json_nexus_table_split", String(splitArrays));
   }, [splitArrays]);
+
+  useEffect(() => {
+    localStorage.setItem("json_nexus_table_split_limit", String(maxArraySplitLimit));
+  }, [maxArraySplitLimit]);
 
   // Load Mock Data
   const loadSample = () => {
@@ -432,7 +444,8 @@ export function JSONToTable() {
     worker.postMessage({
       jsonInput,
       flattenObjects,
-      splitArrays
+      splitArrays,
+      maxArraySplitLimit
     });
   }, [jsonInput, flattenObjects, splitArrays]);
 
@@ -451,7 +464,7 @@ export function JSONToTable() {
     if (converted && input.trim()) {
       convertRef.current();
     }
-  }, [flattenObjects, splitArrays]);
+  }, [flattenObjects, splitArrays, maxArraySplitLimit]);
 
   // Export to CSV
   const handleExportCSV = () => {
@@ -690,13 +703,33 @@ export function JSONToTable() {
                   }}
                   className="border-white/20 mt-0.5 data-[state=checked]:bg-fuchsia-500 data-[state=checked]:border-fuchsia-500"
                 />
-                <div className="grid gap-1 leading-none">
+                <div className="grid gap-1 leading-none w-full">
                   <Label htmlFor="split" className="text-xs font-bold text-white/85 cursor-pointer">
                     Split Arrays to Rows
                   </Label>
                   <p className="text-[10px] text-white/40 leading-relaxed">
                     Creates separate lines for array records.
                   </p>
+                  
+                  {splitArrays && (
+                    <div className="flex items-center space-x-2 mt-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <Label htmlFor="splitLimit" className="text-[10px] font-bold text-white/60">
+                        Max Split Elements:
+                      </Label>
+                      <Input
+                        id="splitLimit"
+                        type="number"
+                        min={1}
+                        max={1000}
+                        value={maxArraySplitLimit}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          setMaxArraySplitLimit(isNaN(val) || val <= 0 ? 5 : val);
+                        }}
+                        className="w-16 h-6 bg-neutral-950 border-white/10 text-white rounded-md text-[10px] px-1.5 focus:border-indigo-500/50"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

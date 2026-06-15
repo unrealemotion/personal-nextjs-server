@@ -1,6 +1,6 @@
 import { store, setResults, updateResultByRowId } from "./store";
 import { ExecutionResult } from "./schema";
-import { sendToExtension } from "./extension";
+import { sendToExtension, setupExtensionRules, clearExtensionRules } from "./extension";
 import { extractEnvironmentVariables } from "./sandbox";
 
 let activeWorker: Worker | null = null;
@@ -256,6 +256,47 @@ export async function runBulkExecution(
                 } else if (type === "STEP_PROGRESS") {
                     const { stepResult, stepIndex, iteration } = e.data;
                     queueUpdate("STEP_PROGRESS", index, { stepResult, stepIndex, iteration });
+                } else if (type === "REQUEST_MAIN_THREAD") {
+                    const { reqId, payload } = e.data;
+                    if (payload.action === "setupRequestRules") {
+                        const isExtensionActive = typeof document !== "undefined" &&
+                            document.documentElement.getAttribute("data-surge-extension-active") === "true";
+                        if (isExtensionActive) {
+                            setupExtensionRules(payload.url, payload.headers, "worker-bulk").then(ruleId => {
+                                worker.postMessage({
+                                    type: "RESPONSE_MAIN_THREAD",
+                                    reqId,
+                                    response: { success: true, ruleId }
+                                });
+                            }).catch(err => {
+                                worker.postMessage({
+                                    type: "RESPONSE_MAIN_THREAD",
+                                    reqId,
+                                    response: { success: false, error: err.message }
+                                });
+                            });
+                        } else {
+                            worker.postMessage({
+                                type: "RESPONSE_MAIN_THREAD",
+                                reqId,
+                                response: { success: false, error: "Extension not active" }
+                            });
+                        }
+                    } else if (payload.action === "clearRequestRules") {
+                        clearExtensionRules(payload.ruleId, "worker-bulk").then(() => {
+                            worker.postMessage({
+                                type: "RESPONSE_MAIN_THREAD",
+                                reqId,
+                                response: { success: true }
+                            });
+                        }).catch(err => {
+                            worker.postMessage({
+                                type: "RESPONSE_MAIN_THREAD",
+                                reqId,
+                                response: { success: false, error: err.message }
+                            });
+                        });
+                    }
                 } else if (type === "COMPLETE") {
                     if (throttleTimeout) {
                         clearTimeout(throttleTimeout);

@@ -255,7 +255,9 @@ export async function executeStep(
     row: Record<string, any>,
     maxRetries: number,
     retryStatusCodes: string,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    setupExtensionRulesCallback?: (url: string, headers: Record<string, string>) => Promise<number | null>,
+    clearExtensionRulesCallback?: (ruleId: number) => Promise<void>
 ): Promise<StepResult> {
     let url = interpolate(template.url, row);
 
@@ -344,39 +346,47 @@ export async function executeStep(
         responseBody: null,
     };
 
-    // If extension is active, we setup extension rules for CORS bypass and headers injection
-    const isExtensionActive = typeof document !== "undefined" &&
-        document.documentElement.getAttribute("data-surge-extension-active") === "true";
     let extensionRuleId: number | null = null;
 
-    if (isExtensionActive) {
+    if (setupExtensionRulesCallback) {
         try {
-            let hostname = "*";
-            try {
-                let urlStr = url.trim();
-                if (!/^https?:\/\//i.test(urlStr)) {
-                    urlStr = "http://" + urlStr;
-                }
-                const parsed = new URL(urlStr);
-                hostname = parsed.hostname;
-            } catch {}
-
-            const headersToRegister: Array<{ name: string; value: string }> = [];
-            Object.entries(requestHeaders).forEach(([name, value]) => {
-                headersToRegister.push({ name, value });
-            });
-
-            const res = await sendToExtension({
-                action: "setupRequestRules",
-                urlFilter: hostname,
-                headers: headersToRegister,
-                initiatorOrigin: window.location.origin
-            });
-            if (res && res.success) {
-                extensionRuleId = res.ruleId;
-            }
+            extensionRuleId = await setupExtensionRulesCallback(url, requestHeaders);
         } catch (e) {
-            console.warn("Agent simulation failed to setup extension rules:", e);
+            console.warn("Worker failed to setup extension rules via callback:", e);
+        }
+    } else {
+        const isExtensionActive = typeof document !== "undefined" &&
+            document.documentElement.getAttribute("data-surge-extension-active") === "true";
+
+        if (isExtensionActive) {
+            try {
+                let hostname = "*";
+                try {
+                    let urlStr = url.trim();
+                    if (!/^https?:\/\//i.test(urlStr)) {
+                        urlStr = "http://" + urlStr;
+                    }
+                    const parsed = new URL(urlStr);
+                    hostname = parsed.hostname;
+                } catch {}
+
+                const headersToRegister: Array<{ name: string; value: string }> = [];
+                Object.entries(requestHeaders).forEach(([name, value]) => {
+                    headersToRegister.push({ name, value });
+                });
+
+                const res = await sendToExtension({
+                    action: "setupRequestRules",
+                    urlFilter: hostname,
+                    headers: headersToRegister,
+                    initiatorOrigin: window.location.origin
+                });
+                if (res && res.success) {
+                    extensionRuleId = res.ruleId;
+                }
+            } catch (e) {
+                console.warn("Agent simulation failed to setup extension rules:", e);
+            }
         }
     }
 
@@ -449,13 +459,21 @@ export async function executeStep(
         }
     } finally {
         if (extensionRuleId !== null) {
-            try {
-                await sendToExtension({
-                    action: "clearRequestRules",
-                    ruleId: extensionRuleId
-                });
-            } catch (e) {
-                console.warn("Agent simulation failed to clear extension rules:", e);
+            if (clearExtensionRulesCallback) {
+                try {
+                    await clearExtensionRulesCallback(extensionRuleId);
+                } catch (e) {
+                    console.warn("Worker failed to clear extension rules via callback:", e);
+                }
+            } else {
+                try {
+                    await sendToExtension({
+                        action: "clearRequestRules",
+                        ruleId: extensionRuleId
+                    });
+                } catch (e) {
+                    console.warn("Agent simulation failed to clear extension rules:", e);
+                }
             }
         }
     }

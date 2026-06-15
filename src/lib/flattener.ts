@@ -1,6 +1,7 @@
 export interface ConvertOptions {
   flattenObjects: boolean;
   splitArrays: boolean;
+  maxArraySplitLimit?: number;
 }
 
 /**
@@ -31,9 +32,12 @@ function processArrayField(rows: any[], val: any[], path: string, options: Conve
       return rows.map((r) => ({ ...r, [path]: null }));
     }
 
+    const limitValue = options.maxArraySplitLimit ?? 5;
+    const slicedVal = val.slice(0, limitValue);
+
     const nextRows: any[] = [];
     for (const r of rows) {
-      for (const el of val) {
+      for (const el of slicedVal) {
         const subRows = expandValue(el, path, options);
         for (const subRow of subRows) {
           nextRows.push({ ...r, ...subRow });
@@ -96,8 +100,10 @@ function expandValue(val: any, path: string, options: ConvertOptions): any[] {
       if (val.length === 0) {
         return [{ [path]: null }];
       }
+      const limitValue = options.maxArraySplitLimit ?? 5;
+      const slicedVal = val.slice(0, limitValue);
       const nextRows: any[] = [];
-      for (const el of val) {
+      for (const el of slicedVal) {
         nextRows.push(...expandValue(el, path, options));
       }
       return nextRows;

@@ -46,6 +46,38 @@ function pLimit(concurrency: number) {
 
 let abortController: AbortController | null = null;
 
+// RPC message passing helpers
+let nextRequestId = 0;
+const pendingRequests = new Map<number, (val: any) => void>();
+
+function requestFromMainThread(payload: any): Promise<any> {
+    return new Promise((resolve) => {
+        const reqId = nextRequestId++;
+        pendingRequests.set(reqId, resolve);
+        self.postMessage({
+            type: "REQUEST_MAIN_THREAD",
+            reqId,
+            payload
+        });
+    });
+}
+
+const setupExtensionRulesCallback = async (url: string, headers: Record<string, string>): Promise<number | null> => {
+    const res = await requestFromMainThread({
+        action: "setupRequestRules",
+        url,
+        headers
+    });
+    return res && res.success ? res.ruleId : null;
+};
+
+const clearExtensionRulesCallback = async (ruleId: number): Promise<void> => {
+    await requestFromMainThread({
+        action: "clearRequestRules",
+        ruleId
+    });
+};
+
 async function executeRowSteps(
     row: any,
     templates: RequestTemplate[],
@@ -54,7 +86,9 @@ async function executeRowSteps(
     stopOnFailure: boolean,
     index: number,
     iter: number,
-    signal: AbortSignal
+    signal: AbortSignal,
+    setupExtensionRulesCallback?: (url: string, headers: Record<string, string>) => Promise<number | null>,
+    clearExtensionRulesCallback?: (ruleId: number) => Promise<void>
 ): Promise<{ steps: StepResult[]; chainFailed: boolean; totalTime: number }> {
     const steps: StepResult[] = [];
     let chainFailed = false;
@@ -82,7 +116,15 @@ async function executeRowSteps(
             continue;
         }
 
-        const stepResult = await executeStep(tmpl, executionContext, maxRetries, retryStatusCodes, signal);
+        const stepResult = await executeStep(
+            tmpl,
+            executionContext,
+            maxRetries,
+            retryStatusCodes,
+            signal,
+            setupExtensionRulesCallback,
+            clearExtensionRulesCallback
+        );
         steps.push(stepResult);
 
         self.postMessage({
@@ -149,59 +191,109 @@ self.onmessage = async (e: MessageEvent) => {
             return;
         }
 
-        const limit = pLimit(concurrencyLimit);
-
-        const tasks: Array<Promise<void>> = [];
+        // Flatten the task items to queue them dynamically
+        const taskItems: Array<{ row: any; index: number; iter: number; flatIdx: number }> = [];
         rowsToProcess.forEach(({ row, index }: any) => {
             for (let iter = 1; iter <= rowIterations; iter++) {
                 const flatIdx = index * rowIterations + iter - 1;
-                const runTask = async () => {
-                    if (signal.aborted) {
-                        return;
-                    }
-                    if (throttleDelayMs > 0 && singleRowIndex === undefined) {
-                        await new Promise(resolve => setTimeout(resolve, flatIdx * throttleDelayMs));
-                    }
-                    if (signal.aborted) {
-                        return;
-                    }
-                    await limit(async () => {
-                        if (signal.aborted) {
-                            return;
-                        }
-
-                        const { steps, chainFailed, totalTime } = await executeRowSteps(
-                            row,
-                            templates,
-                            maxRetries,
-                            retryStatusCodes,
-                            stopOnFailure,
-                            index,
-                            iter,
-                            signal
-                        );
-
-                        const resultPayload = buildChainResultPayload(steps, totalTime, chainFailed);
-
-                        completed++;
-                        self.postMessage({
-                            type: "PROGRESS",
-                            index,
-                            iteration: iter,
-                            resultPayload,
-                            completed,
-                            total
-                        });
-                    });
-                };
-                tasks.push(runTask());
+                taskItems.push({ row, index, iter, flatIdx });
             }
         });
 
+        let nextTaskIndex = 0;
+        let nextAvailableStartTime = Date.now();
+
+        const runWorker = async () => {
+            while (nextTaskIndex < taskItems.length) {
+                if (signal.aborted) {
+                    break;
+                }
+
+                const task = taskItems[nextTaskIndex++];
+                if (!task) break;
+
+                const { row, index, iter, flatIdx } = task;
+
+                // Throttling / Rate Limiting (Token Bucket)
+                if (throttleDelayMs > 0 && singleRowIndex === undefined) {
+                    const now = Date.now();
+                    const startTime = Math.max(now, nextAvailableStartTime);
+                    nextAvailableStartTime = startTime + throttleDelayMs;
+
+                    const delay = startTime - now;
+                    if (delay > 0) {
+                        let timerResolve: () => void;
+                        const timerPromise = new Promise<void>(resolve => {
+                            timerResolve = resolve;
+                        });
+                        const timeoutId = setTimeout(timerResolve!, delay);
+
+                        const onAbort = () => {
+                            clearTimeout(timeoutId);
+                            timerResolve!();
+                        };
+                        signal.addEventListener("abort", onAbort);
+
+                        await timerPromise;
+
+                        signal.removeEventListener("abort", onAbort);
+                        if (signal.aborted) {
+                            break;
+                        }
+                    }
+                }
+
+                // Check paused state
+                if (isPaused) {
+                    await new Promise<void>(resolveResume => {
+                        const onResume = () => {
+                            resolveResume();
+                        };
+                        resumeListeners.push(onResume);
+                    });
+                }
+
+                if (signal.aborted) {
+                    break;
+                }
+
+                const { steps, chainFailed, totalTime } = await executeRowSteps(
+                    row,
+                    templates,
+                    maxRetries,
+                    retryStatusCodes,
+                    stopOnFailure,
+                    index,
+                    iter,
+                    signal,
+                    setupExtensionRulesCallback,
+                    clearExtensionRulesCallback
+                );
+
+                const resultPayload = buildChainResultPayload(steps, totalTime, chainFailed);
+
+                completed++;
+                self.postMessage({
+                    type: "PROGRESS",
+                    index,
+                    iteration: iter,
+                    resultPayload,
+                    completed,
+                    total
+                });
+            }
+        };
+
+        const workerPromises: Array<Promise<void>> = [];
+        const actualConcurrency = Math.min(concurrencyLimit, taskItems.length);
+        for (let c = 0; c < actualConcurrency; c++) {
+            workerPromises.push(runWorker());
+        }
+
         try {
-            await Promise.all(tasks);
+            await Promise.all(workerPromises);
         } catch {
-            // Silence aborted errors in concurrent execution promise
+            // Silence errors
         }
 
         self.postMessage({ type: "COMPLETE" });
@@ -217,6 +309,13 @@ self.onmessage = async (e: MessageEvent) => {
             const listeners = [...resumeListeners];
             resumeListeners.length = 0;
             listeners.forEach(listener => listener());
+        }
+    } else if (type === "RESPONSE_MAIN_THREAD") {
+        const { reqId, response } = e.data;
+        const resolve = pendingRequests.get(reqId);
+        if (resolve) {
+            pendingRequests.delete(reqId);
+            resolve(response);
         }
     }
 };
