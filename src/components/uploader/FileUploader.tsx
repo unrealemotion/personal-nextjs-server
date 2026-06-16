@@ -3,7 +3,7 @@
 import React, { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import * as xlsx from "xlsx";
-import { UploadCloud, FileSpreadsheet, AlertCircle, Table as TableIcon } from "lucide-react";
+import { UploadCloud, FileSpreadsheet, AlertCircle, Table as TableIcon, Loader2 } from "lucide-react";
 import { setFileData, setHeaderType, store, VariableType } from "@/lib/store";
 import { useStore } from "@tanstack/react-store";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,9 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { LoadingTransition } from "@/components/layout/LoadingTransition";
 
 export function FileUploader() {
     const [error, setError] = useState<string | null>(null);
+    const [isProcessing, setIsProcessing] = useState(false);
     const fileData = useStore(store, (state) => state.fileData);
     const headers = useStore(store, (state) => state.headers);
     const headerTypes = useStore(store, (state) => state.headerTypes);
@@ -24,29 +26,88 @@ export function FileUploader() {
         const file = acceptedFiles[0];
         if (!file) return;
 
+        setIsProcessing(true);
+
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
-                const data = new Uint8Array(e.target?.result as ArrayBuffer);
-                const workbook = xlsx.read(data, { type: "array" });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-
-                // Parse data forcing raw off to preserve pre-formatted strings (like '0' padded phones) natively
-                const jsonData = xlsx.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: "", raw: false });
-
-                if (jsonData.length === 0) {
-                    setError("File is empty or could not be parsed.");
-                    return;
+                const arrayBuffer = e.target?.result as ArrayBuffer;
+                if (!arrayBuffer) {
+                    throw new Error("Failed to read file contents");
                 }
+                const fileBytes = new Uint8Array(arrayBuffer);
 
-                // Extract headers from the first row
-                const extractedHeaders = Object.keys(jsonData[0]);
-                setFileData(jsonData, extractedHeaders, file.name);
+                const runJsFallback = () => {
+                    try {
+                        console.warn("WASM parser failed; falling back to JS SheetJS parser.");
+                        const workbook = xlsx.read(fileBytes, { type: "array" });
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+
+                        // Parse data forcing raw on to get raw values as is without converting
+                        const jsonData = xlsx.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: "", raw: true });
+
+                        if (jsonData.length === 0) {
+                            setError("File is empty or could not be parsed.");
+                            setIsProcessing(false);
+                            return;
+                        }
+
+                        // Extract headers from the first row
+                        const extractedHeaders = Object.keys(jsonData[0]);
+                        setFileData(jsonData, extractedHeaders, file.name);
+                        setIsProcessing(false);
+                    } catch (fallbackErr) {
+                        console.error("JS Fallback parsing failed:", fallbackErr);
+                        setError("Error parsing the file. Please ensure it is a valid .xlsx or .csv file.");
+                        setIsProcessing(false);
+                    }
+                };
+
+                // Instantiate the Web Worker
+                const worker = new Worker(new URL("../../lib/parser.worker.ts", import.meta.url));
+
+                worker.onmessage = (event) => {
+                    const { type, data, error: parseError } = event.data;
+                    if (type === "SUCCESS") {
+                        const jsonData = data as Record<string, any>[];
+                        if (jsonData.length === 0) {
+                            setError("File is empty or could not be parsed.");
+                            setIsProcessing(false);
+                            worker.terminate();
+                            return;
+                        }
+
+                        // Extract headers from the first row
+                        const extractedHeaders = Object.keys(jsonData[0]);
+                        setFileData(jsonData, extractedHeaders, file.name);
+                        setIsProcessing(false);
+                        worker.terminate();
+                    } else {
+                        console.warn("WASM worker parsing error:", parseError);
+                        worker.terminate();
+                        runJsFallback();
+                    }
+                };
+
+                worker.onerror = (err) => {
+                    console.error("Worker error:", err);
+                    worker.terminate();
+                    runJsFallback();
+                };
+
+                const ext = file.name.substring(file.name.lastIndexOf("."));
+                // Do not transfer fileBytes buffer to keep it readable by the fallback parser
+                worker.postMessage({ fileBytes, extension: ext });
             } catch (err) {
                 console.error(err);
-                setError("Error parsing the file. Please ensure it is a valid .xlsx or .csv file.");
+                setError("Error reading the file. Please ensure it is a valid .xlsx or .csv file.");
+                setIsProcessing(false);
             }
+        };
+        reader.onerror = () => {
+            setError("Error reading the file.");
+            setIsProcessing(false);
         };
         reader.readAsArrayBuffer(file);
     }, []);
@@ -55,6 +116,7 @@ export function FileUploader() {
         onDrop,
         accept: {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+            "application/vnd.ms-excel.sheet.macroEnabled.12": [".xlsm"],
             "text/csv": [".csv"],
             "application/vnd.ms-excel": [".xls"]
         },
@@ -62,7 +124,8 @@ export function FileUploader() {
     });
 
     return (
-        <Card className="w-full h-full shadow-lg shadow-black/5 rounded-xl bg-card/60 backdrop-blur-sm border-muted-foreground/20 flex flex-col min-h-0">
+        <Card className="relative w-full h-full shadow-lg shadow-black/5 rounded-xl bg-card/60 backdrop-blur-sm border-muted-foreground/20 flex flex-col min-h-0 overflow-hidden">
+            <LoadingTransition local isLoading={isProcessing} />
             <CardHeader className="shrink-0">
                 <CardTitle>Data Source</CardTitle>
                 <CardDescription>Upload an Excel or CSV file to use as variables for your requests.</CardDescription>
@@ -86,7 +149,7 @@ export function FileUploader() {
                                     {fileData.length > 0 ? "Replace file" : "Drag & drop or click to upload"}
                                 </p>
                                 <p className="text-[10px] text-muted-foreground">
-                                    .xlsx, .xls, .csv
+                                    .xlsx, .xlsm, .xls, .csv
                                 </p>
                             </div>
                         )}

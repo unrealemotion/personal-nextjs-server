@@ -1,4 +1,31 @@
 import { type Environment, type TestResult, type KeyValuePair } from "./schema";
+import initWasm, { resolve_variables } from "../../public/wasm/surge_wasm.js";
+
+let wasmInitialized = false;
+let wasmInitPromise: Promise<boolean> | null = null;
+
+async function ensureWasmInitialized(): Promise<boolean> {
+    if (wasmInitialized) return true;
+    if (wasmInitPromise) return wasmInitPromise;
+
+    wasmInitPromise = (async () => {
+        try {
+            if (typeof window === "undefined" && typeof self !== "undefined" && typeof self.location !== "undefined" && "postMessage" in self) {
+                // In Web Worker
+                await initWasm(`${self.location.origin}/wasm/surge_wasm_bg.wasm`);
+            } else if (typeof window !== "undefined") {
+                // Main thread
+                await initWasm("/wasm/surge_wasm_bg.wasm");
+            }
+            wasmInitialized = true;
+            return true;
+        } catch (e) {
+            console.warn("WASM failed to initialize inside sandbox:", e);
+            return false;
+        }
+    })();
+    return wasmInitPromise;
+}
 
 export function extractEnvironmentVariables(
     environments: Environment[],
@@ -46,6 +73,16 @@ export function resolveVariables(
 
     // Merge: collection variables < globals < active environment variables
     const mergedVars = { ...colVars, ...globalVars, ...envVars };
+
+    ensureWasmInitialized();
+
+    if (wasmInitialized) {
+        try {
+            return resolve_variables(text, mergedVars, 3);
+        } catch (e) {
+            console.warn("WASM resolve_variables failed, falling back to JS:", e);
+        }
+    }
 
     // Resolve recursively up to 3 times to allow nested resolutions
     let resolved = text;
@@ -359,3 +396,5 @@ export function runTestScript(
         testResults,
     };
 }
+
+ensureWasmInitialized();

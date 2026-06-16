@@ -2,8 +2,53 @@ import { type RequestTemplate, type StepResult } from "./schema";
 import { sendToExtension } from "./extension";
 import { resolveHostnameIp } from "./dns";
 import { getRawLanguageContentType } from "./utils";
-import { stripJsonComments } from "./strip-comments";
-export { stripJsonComments };
+import { stripJsonComments as jsStripJsonComments } from "./strip-comments";
+
+import initWasm, { RustExecutionContext, strip_json_comments as wasm_strip_json_comments, flatten_object } from "../../public/wasm/surge_wasm.js";
+export { RustExecutionContext };
+
+let wasmInitialized = false;
+let wasmInitPromise: Promise<boolean> | null = null;
+
+export async function ensureWasmInitialized(): Promise<boolean> {
+    if (wasmInitialized) return true;
+    if (wasmInitPromise) return wasmInitPromise;
+
+    wasmInitPromise = (async () => {
+        try {
+            if (typeof window === "undefined" && typeof self !== "undefined" && typeof self.location !== "undefined" && "postMessage" in self) {
+                // In Web Worker
+                await initWasm(`${self.location.origin}/wasm/surge_wasm_bg.wasm`);
+            } else if (typeof window !== "undefined") {
+                // Main thread
+                await initWasm("/wasm/surge_wasm_bg.wasm");
+            }
+            wasmInitialized = true;
+            return true;
+        } catch (e) {
+            console.warn("WASM failed to initialize inside executor-utils:", e);
+            return false;
+        }
+    })();
+    return wasmInitPromise;
+}
+
+export interface ExecutionCtx {
+    jsCtx: Record<string, any>;
+    rustCtx?: RustExecutionContext;
+}
+
+export function stripJsonComments(str: string): string {
+    if (wasmInitialized) {
+        try {
+            return wasm_strip_json_comments(str);
+        } catch (e) {
+            console.warn("WASM strip_json_comments failed, falling back to JS:", e);
+        }
+    }
+    return jsStripJsonComments(str);
+}
+export { jsStripJsonComments };
 
 export function createCancelledOrSkippedStep(stepId: string, stepName: string, error: string): StepResult {
     return {
@@ -25,20 +70,39 @@ export function normalizeKey(key: string): string {
     return k;
 }
 
-function interpolate(str: string, data: Record<string, any>): string {
+export function interpolate(str: string, ctx: Record<string, any> | ExecutionCtx): string {
     if (!str) return str;
+
+    let rustCtx: RustExecutionContext | undefined;
+    let jsCtx: Record<string, any>;
+
+    if (ctx && "jsCtx" in ctx) {
+        rustCtx = ctx.rustCtx;
+        jsCtx = ctx.jsCtx;
+    } else {
+        jsCtx = ctx as Record<string, any>;
+    }
+
+    if (rustCtx) {
+        try {
+            return rustCtx.interpolate(str);
+        } catch (e) {
+            console.warn("WASM interpolate failed, falling back to JS:", e);
+        }
+    }
+
     return str.replace(/\{\{(.+?)\}\}/g, (_, key) => {
         const targetNorm = normalizeKey(key);
-        const matchedKey = Object.keys(data).find(k => normalizeKey(k) === targetNorm);
+        const matchedKey = Object.keys(jsCtx).find(k => normalizeKey(k) === targetNorm);
         if (matchedKey !== undefined) {
-            const value = data[matchedKey];
+            const value = jsCtx[matchedKey];
             return value !== undefined ? String(value) : "";
         }
         return "";
     });
 }
 
-function processBodyInterpolation(bodyString: string, data: Record<string, any>) {
+function processBodyInterpolation(bodyString: string, data: Record<string, any> | ExecutionCtx) {
     if (!bodyString || typeof bodyString !== 'string') return null;
     const strippedString = stripJsonComments(bodyString);
     const interpolatedString = interpolate(strippedString, data);
@@ -73,6 +137,15 @@ function isStatusInRanges(status: number, rangesStr: string): boolean {
 }
 
 function flattenObject(obj: any, prefix: string, res: Record<string, any> = {}): Record<string, any> {
+    if (wasmInitialized) {
+        try {
+            const flattened = flatten_object(obj, prefix);
+            return Object.assign(res, flattened);
+        } catch (e) {
+            console.warn("WASM flatten_object failed, falling back to JS:", e);
+        }
+    }
+
     if (obj === null || obj === undefined) {
         res[prefix] = "";
         return res;
@@ -100,7 +173,7 @@ function flattenObject(obj: any, prefix: string, res: Record<string, any> = {}):
 
 function prepareFetchBody(
     template: RequestTemplate,
-    row: Record<string, any>,
+    row: Record<string, any> | ExecutionCtx,
     headers: Headers,
     requestHeaders: Record<string, string>,
     hasContentType: boolean
@@ -211,36 +284,79 @@ export function populateExecutionContext(
     tmpl: RequestTemplate,
     stepResult: StepResult,
     idx: number,
-    executionContext: Record<string, any>
+    executionContext: Record<string, any> | ExecutionCtx
 ) {
+    let rustCtx: RustExecutionContext | undefined;
+    let jsCtx: Record<string, any>;
+
+    if (executionContext && "jsCtx" in executionContext) {
+        rustCtx = executionContext.rustCtx;
+        jsCtx = executionContext.jsCtx;
+    } else {
+        jsCtx = executionContext as Record<string, any>;
+    }
+
     const cleanName = tmpl.name.trim();
 
     const storeFields = (prefix: string) => {
-        executionContext[`${prefix}.status`] = stepResult.statusCode;
-        executionContext[`${prefix}.response_time`] = stepResult.responseTimeMs;
+        jsCtx[`${prefix}.status`] = stepResult.statusCode;
+        jsCtx[`${prefix}.response_time`] = stepResult.responseTimeMs;
         if (stepResult.error) {
-            executionContext[`${prefix}.error`] = stepResult.error;
+            jsCtx[`${prefix}.error`] = stepResult.error;
         }
         if (stepResult.responseBody !== undefined && stepResult.responseBody !== null) {
-            flattenObject(stepResult.responseBody, `${prefix}.response`, executionContext);
+            flattenObject(stepResult.responseBody, `${prefix}.response`, jsCtx);
         }
         if (stepResult.requestBody !== undefined && stepResult.requestBody !== null) {
-            flattenObject(stepResult.requestBody, `${prefix}.request.body`, executionContext);
+            flattenObject(stepResult.requestBody, `${prefix}.request.body`, jsCtx);
         }
         if (stepResult.requestParams) {
             Object.entries(stepResult.requestParams).forEach(([k, v]) => {
-                executionContext[`${prefix}.request.params.${k}`] = v;
+                jsCtx[`${prefix}.request.params.${k}`] = v;
             });
         }
         if (stepResult.requestHeaders) {
             Object.entries(stepResult.requestHeaders).forEach(([k, v]) => {
-                executionContext[`${prefix}.request.headers.${k}`] = v;
+                jsCtx[`${prefix}.request.headers.${k}`] = v;
             });
         }
         if (stepResult.responseHeaders) {
             Object.entries(stepResult.responseHeaders).forEach(([k, v]) => {
-                executionContext[`${prefix}.response.headers.${k}`] = v;
+                jsCtx[`${prefix}.response.headers.${k}`] = v;
             });
+        }
+
+        if (rustCtx) {
+            try {
+                rustCtx.insert(`${prefix}.status`, String(stepResult.statusCode));
+                rustCtx.insert(`${prefix}.response_time`, String(stepResult.responseTimeMs));
+                if (stepResult.error) {
+                    rustCtx.insert(`${prefix}.error`, stepResult.error);
+                }
+                if (stepResult.responseBody !== undefined && stepResult.responseBody !== null) {
+                    rustCtx.insert_val_flat(`${prefix}.response`, stepResult.responseBody);
+                }
+                if (stepResult.requestBody !== undefined && stepResult.requestBody !== null) {
+                    rustCtx.insert_val_flat(`${prefix}.request.body`, stepResult.requestBody);
+                }
+                if (stepResult.requestParams) {
+                    Object.entries(stepResult.requestParams).forEach(([k, v]) => {
+                        rustCtx!.insert(`${prefix}.request.params.${k}`, v);
+                    });
+                }
+                if (stepResult.requestHeaders) {
+                    Object.entries(stepResult.requestHeaders).forEach(([k, v]) => {
+                        rustCtx!.insert(`${prefix}.request.headers.${k}`, v);
+                    });
+                }
+                if (stepResult.responseHeaders) {
+                    Object.entries(stepResult.responseHeaders).forEach(([k, v]) => {
+                        rustCtx!.insert(`${prefix}.response.headers.${k}`, v);
+                    });
+                }
+            } catch (e) {
+                console.warn("WASM populateExecutionContext failed:", e);
+            }
         }
     };
 
@@ -252,7 +368,7 @@ export function populateExecutionContext(
 
 export async function executeStep(
     template: RequestTemplate,
-    row: Record<string, any>,
+    row: Record<string, any> | ExecutionCtx,
     maxRetries: number,
     retryStatusCodes: string,
     abortSignal?: AbortSignal,

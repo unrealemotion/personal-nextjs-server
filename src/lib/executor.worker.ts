@@ -1,6 +1,6 @@
 import { type RequestTemplate, type StepResult } from "./schema";
 import { resolveHostnameIp } from "./dns";
-import { executeStep, populateExecutionContext, createCancelledOrSkippedStep } from "./executor-utils";
+import { executeStep, populateExecutionContext, createCancelledOrSkippedStep, ensureWasmInitialized, RustExecutionContext, type ExecutionCtx } from "./executor-utils";
 
 let isPaused = false;
 const resumeListeners: (() => void)[] = [];
@@ -79,7 +79,7 @@ const clearExtensionRulesCallback = async (ruleId: number): Promise<void> => {
 };
 
 async function executeRowSteps(
-    row: any,
+    rowCtx: ExecutionCtx,
     templates: RequestTemplate[],
     maxRetries: number,
     retryStatusCodes: string,
@@ -94,53 +94,64 @@ async function executeRowSteps(
     let chainFailed = false;
     const chainStartTime = performance.now();
     
-    const executionContext = { ...row };
+    const executionContext = rowCtx;
 
-    for (const tmpl of templates) {
-        if (isPaused) {
-            await new Promise<void>(resolveResume => {
-                const onResume = () => {
-                    resolveResume();
-                };
-                resumeListeners.push(onResume);
+    try {
+        for (const tmpl of templates) {
+            if (isPaused) {
+                await new Promise<void>(resolveResume => {
+                    const onResume = () => {
+                        resolveResume();
+                    };
+                    resumeListeners.push(onResume);
+                });
+            }
+            if (signal.aborted) {
+                steps.push(createCancelledOrSkippedStep(tmpl.id, tmpl.name, "Cancelled"));
+                chainFailed = true;
+                continue;
+            }
+
+            if (chainFailed && stopOnFailure) {
+                steps.push(createCancelledOrSkippedStep(tmpl.id, tmpl.name, "Skipped (Previous Step Failed)"));
+                continue;
+            }
+
+            const stepResult = await executeStep(
+                tmpl,
+                executionContext,
+                maxRetries,
+                retryStatusCodes,
+                signal,
+                setupExtensionRulesCallback,
+                clearExtensionRulesCallback
+            );
+            steps.push(stepResult);
+
+            self.postMessage({
+                type: "STEP_PROGRESS",
+                index,
+                iteration: iter,
+                stepResult,
+                stepIndex: steps.length - 1
             });
+
+            if (stepResult.error) {
+                chainFailed = true;
+            }
+
+            const idx = steps.length;
+            populateExecutionContext(tmpl, stepResult, idx, executionContext);
         }
-        if (signal.aborted) {
-            steps.push(createCancelledOrSkippedStep(tmpl.id, tmpl.name, "Cancelled"));
-            chainFailed = true;
-            continue;
+    } finally {
+        // Free Rust WASM memory if instantiated to prevent memory leaks
+        if (executionContext.rustCtx) {
+            try {
+                executionContext.rustCtx.free();
+            } catch (e) {
+                console.warn("Error freeing RustExecutionContext:", e);
+            }
         }
-
-        if (chainFailed && stopOnFailure) {
-            steps.push(createCancelledOrSkippedStep(tmpl.id, tmpl.name, "Skipped (Previous Step Failed)"));
-            continue;
-        }
-
-        const stepResult = await executeStep(
-            tmpl,
-            executionContext,
-            maxRetries,
-            retryStatusCodes,
-            signal,
-            setupExtensionRulesCallback,
-            clearExtensionRulesCallback
-        );
-        steps.push(stepResult);
-
-        self.postMessage({
-            type: "STEP_PROGRESS",
-            index,
-            iteration: iter,
-            stepResult,
-            stepIndex: steps.length - 1
-        });
-
-        if (stepResult.error) {
-            chainFailed = true;
-        }
-
-        const idx = steps.length;
-        populateExecutionContext(tmpl, stepResult, idx, executionContext);
     }
 
     const totalTime = Math.round(performance.now() - chainStartTime);
@@ -178,6 +189,8 @@ self.onmessage = async (e: MessageEvent) => {
         resumeListeners.length = 0;
         abortController = new AbortController();
         const signal = abortController.signal;
+
+        const hasWasm = await ensureWasmInitialized();
 
         const rowsToProcess = singleRowIndex !== undefined
             ? (fileData[singleRowIndex] ? [{ row: fileData[singleRowIndex], index: singleRowIndex }] : [])
@@ -257,8 +270,21 @@ self.onmessage = async (e: MessageEvent) => {
                     break;
                 }
 
+                const executionContext: ExecutionCtx = {
+                    jsCtx: { ...row }
+                };
+                if (hasWasm) {
+                    try {
+                        const rustCtx = new RustExecutionContext();
+                        rustCtx.insert_val_flat("", row);
+                        executionContext.rustCtx = rustCtx;
+                    } catch (e) {
+                        console.warn("Failed to create RustExecutionContext inside worker:", e);
+                    }
+                }
+
                 const { steps, chainFailed, totalTime } = await executeRowSteps(
-                    row,
+                    executionContext,
                     templates,
                     maxRetries,
                     retryStatusCodes,

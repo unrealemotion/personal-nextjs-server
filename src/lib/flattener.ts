@@ -1,3 +1,31 @@
+import initWasm, {
+  json_to_table_data,
+  compute_semantic_diff,
+  get_json_structure,
+  normalize_json_order,
+  get_shared_value_structure
+} from "../../public/wasm/surge_wasm.js";
+
+let wasmInitialized = false;
+let wasmInitPromise: Promise<void> | null = null;
+
+function ensureWasmInitialized() {
+  if (wasmInitialized) return;
+  if (wasmInitPromise) return;
+
+  if (typeof window === "undefined") return;
+
+  wasmInitPromise = (async () => {
+    try {
+      await initWasm("/wasm/surge_wasm_bg.wasm");
+      wasmInitialized = true;
+      console.log("Surge WASM module successfully initialized on main thread.");
+    } catch (err) {
+      console.warn("Failed to initialize WASM on main thread. Falling back to JS:", err);
+    }
+  })();
+}
+
 export interface ConvertOptions {
   flattenObjects: boolean;
   splitArrays: boolean;
@@ -9,6 +37,16 @@ export interface ConvertOptions {
  * following the recursive flattening and splitting options.
  */
 export function jsonToTableData(jsonVal: any, options: ConvertOptions): any[] {
+  ensureWasmInitialized();
+
+  if (wasmInitialized) {
+    try {
+      return json_to_table_data(jsonVal, options);
+    } catch (e) {
+      console.warn("WASM json_to_table_data failed, falling back to JS:", e);
+    }
+  }
+
   if (jsonVal === null || jsonVal === undefined) {
     return [];
   }
@@ -184,6 +222,15 @@ export interface SemanticDiff {
  * Recursively compares two parsed objects/arrays to compute a semantic diff.
  */
 export function computeSemanticDiff(left: any, right: any): SemanticDiff {
+  ensureWasmInitialized();
+  if (wasmInitialized) {
+    try {
+      return compute_semantic_diff(left, right);
+    } catch (e) {
+      console.warn("WASM compute_semantic_diff failed, falling back to JS:", e);
+    }
+  }
+
   const added: string[] = [];
   const removed: string[] = [];
   const modified: Array<{ path: string; oldValue: any; newValue: any }> = [];
@@ -194,8 +241,13 @@ export function computeSemanticDiff(left: any, right: any): SemanticDiff {
     const typeL = typeof l;
     const typeR = typeof r;
 
-    // If type mismatches or one is null (since typeof null === 'object')
-    if (typeL !== typeR || l === null || r === null) {
+    // If type mismatches, one is null, or one is an array and the other is not (since typeof null === 'object' and typeof [] === 'object')
+    if (
+      typeL !== typeR ||
+      l === null ||
+      r === null ||
+      Array.isArray(l) !== Array.isArray(r)
+    ) {
       modified.push({ path, oldValue: l, newValue: r });
       return;
     }
@@ -257,6 +309,15 @@ export function computeSemanticDiff(left: any, right: any): SemanticDiff {
  * sorted alphabetically by object key, isolating structure and schema types.
  */
 export function getJSONStructure(val: any): any {
+  ensureWasmInitialized();
+  if (wasmInitialized) {
+    try {
+      return get_json_structure(val);
+    } catch (e) {
+      console.warn("WASM get_json_structure failed, falling back to JS:", e);
+    }
+  }
+
   if (val === null) return "<null>";
   if (val === undefined) return "<undefined>";
 
@@ -284,6 +345,15 @@ export function getJSONStructure(val: any): any {
  * 2. Sorts all array items alphabetically by their stringified representations.
  */
 export function normalizeJSONOrder(val: any, ignoreOrder = false): any {
+  ensureWasmInitialized();
+  if (wasmInitialized) {
+    try {
+      return normalize_json_order(val, ignoreOrder);
+    } catch (e) {
+      console.warn("WASM normalize_json_order failed, falling back to JS:", e);
+    }
+  }
+
   if (val === null || val === undefined) return val;
 
   if (Array.isArray(val)) {
@@ -315,6 +385,15 @@ export function normalizeJSONOrder(val: any, ignoreOrder = false): any {
  * ignoring unique structural properties (additions/removals).
  */
 export function getSharedValueStructure(l: any, r: any): { leftIsolated: any; rightIsolated: any } {
+  ensureWasmInitialized();
+  if (wasmInitialized) {
+    try {
+      return get_shared_value_structure(l, r);
+    } catch (e) {
+      console.warn("WASM get_shared_value_structure failed, falling back to JS:", e);
+    }
+  }
+
   if (
     l === null ||
     r === null ||
@@ -346,3 +425,6 @@ export function getSharedValueStructure(l: any, r: any): { leftIsolated: any; ri
   
   return { leftIsolated: leftRes, rightIsolated: rightRes };
 }
+
+ensureWasmInitialized();
+
