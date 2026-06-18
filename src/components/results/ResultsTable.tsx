@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Download, Plus, Trash2, Eye, EyeOff, Copy, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play, Settings, Database, ArrowUpRight, ArrowDownLeft, Activity, AlertCircle, Clock, GripVertical } from "lucide-react";
+import { Download, Plus, Trash2, Eye, EyeOff, Copy, Undo2, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play, Settings, Database, ArrowUpRight, ArrowDownLeft, Activity, AlertCircle, Clock, GripVertical } from "lucide-react";
 import { EtherealAiSymbol } from "@/components/agent/EtherealAiSymbol";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as xlsx from "xlsx";
@@ -809,6 +809,9 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
     onUpdate,
     onRemove,
     onClone,
+    onVisibilityMouseDown,
+    onDeleteMouseDown,
+    isPendingDelete,
 }: {
     col: ColumnMapping;
     idx: number;
@@ -816,8 +819,11 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
     templates: any[];
     results: any[];
     onUpdate: (index: number, updates: Partial<ColumnMapping>) => void;
-    onRemove: (index: number) => void;
+    onRemove: (id: string) => void;
     onClone: (index: number) => void;
+    onVisibilityMouseDown: (index: number, currentVisible: boolean) => void;
+    onDeleteMouseDown: (id: string) => void;
+    isPendingDelete: boolean;
 }) {
     const { attributes, listeners, setNodeRef, style } = useSortableStyle(col.id || `col_${idx}`);
 
@@ -840,7 +846,11 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
         <div
             ref={setNodeRef}
             style={style}
-            className="flex flex-col sm:flex-row sm:space-x-2 items-stretch sm:items-center flex-wrap gap-2 sm:gap-y-2 bg-neutral-900/30 p-2.5 rounded-lg border border-white/5"
+            data-mapping-id={col.id}
+            className={cn(
+                "flex flex-col sm:flex-row sm:space-x-2 items-stretch sm:items-center flex-wrap gap-2 sm:gap-y-2 bg-neutral-900/30 p-2.5 rounded-lg border border-white/5 transition-all duration-200",
+                isPendingDelete && "opacity-35 line-through filter grayscale border-rose-500/30 bg-rose-950/10"
+            )}
         >
             <div
                 {...attributes}
@@ -942,7 +952,17 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
                 <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => onUpdate(idx, { visible: col.visible !== false ? false : true })}
+                    onMouseDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.preventDefault();
+                        onVisibilityMouseDown(idx, col.visible !== false);
+                    }}
+                    onKeyDown={(e) => {
+                        if (e.key === " " || e.key === "Enter") {
+                            e.preventDefault();
+                            onVisibilityMouseDown(idx, col.visible !== false);
+                        }
+                    }}
                     className={cn(
                         "shrink-0",
                         col.visible !== false 
@@ -953,8 +973,29 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
                 >
                     {col.visible !== false ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                 </Button>
-                <Button variant="ghost" size="icon" onClick={() => onRemove(idx)} className="text-muted-foreground hover:text-destructive shrink-0">
-                    <Trash2 className="w-4 h-4" />
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onMouseDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.preventDefault();
+                        onDeleteMouseDown(col.id!);
+                    }}
+                    onKeyDown={(e) => {
+                        if (e.key === " " || e.key === "Enter") {
+                            e.preventDefault();
+                            onRemove(col.id!);
+                        }
+                    }}
+                    className={cn(
+                        "shrink-0",
+                        isPendingDelete 
+                            ? "text-rose-500 bg-rose-500/20 hover:bg-rose-500/30" 
+                            : "text-muted-foreground hover:text-destructive"
+                    )}
+                    title="Delete column"
+                >
+                    <Trash2 className={cn("w-4 h-4", isPendingDelete && "text-rose-500")} />
                 </Button>
             </div>
         </div>
@@ -1218,6 +1259,39 @@ function ColumnMappingsDialogInner({
         }))
     );
     const [isReady, setIsReady] = useState(false);
+    
+    const dragVisibilityRef = useRef<{ active: boolean; value: boolean } | null>(null);
+    const mouseUpCleanupRef = useRef<(() => void) | null>(null);
+    const dragDeleteActiveRef = useRef<boolean>(false);
+    const mouseUpDeleteCleanupRef = useRef<(() => void) | null>(null);
+
+    const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
+    const [isDraggingDelete, setIsDraggingDelete] = useState(false);
+    const pendingDeleteIdsRef = useRef<Set<string>>(new Set());
+
+    const preventDefaultDrag = useCallback((e: DragEvent) => {
+        e.preventDefault();
+    }, []);
+
+    const disableSelectionAndDrag = useCallback(() => {
+        document.body.style.userSelect = "none";
+        document.body.style.webkitUserSelect = "none";
+        window.addEventListener("dragstart", preventDefaultDrag);
+    }, [preventDefaultDrag]);
+
+    const restoreSelectionAndDrag = useCallback(() => {
+        document.body.style.userSelect = "";
+        document.body.style.webkitUserSelect = "";
+        window.removeEventListener("dragstart", preventDefaultDrag);
+    }, [preventDefaultDrag]);
+
+    useEffect(() => {
+        return () => {
+            if (mouseUpCleanupRef.current) mouseUpCleanupRef.current();
+            if (mouseUpDeleteCleanupRef.current) mouseUpDeleteCleanupRef.current();
+            restoreSelectionAndDrag();
+        };
+    }, [restoreSelectionAndDrag]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -1271,9 +1345,123 @@ function ColumnMappingsDialogInner({
         });
     }, []);
 
-    const removeDraftColumnMapping = useCallback((index: number) => {
-        setDraftMappings((prev) => prev.filter((_, i) => i !== index));
+    const removeDraftColumnMapping = useCallback((id: string) => {
+        setDraftMappings((prev) => prev.filter((m) => m.id !== id));
     }, []);
+
+    const handleVisibilityMouseDown = useCallback((idx: number, currentVisible: boolean) => {
+        const targetValue = !currentVisible;
+        dragVisibilityRef.current = { active: true, value: targetValue };
+        disableSelectionAndDrag();
+        
+        updateDraftColumnMapping(idx, { visible: targetValue });
+
+        const handlePointerMove = (e: PointerEvent) => {
+            if (!dragVisibilityRef.current?.active) return;
+            const elem = document.elementFromPoint(e.clientX, e.clientY);
+            const rowEl = elem?.closest("[data-mapping-id]");
+            if (rowEl) {
+                const mappingId = rowEl.getAttribute("data-mapping-id");
+                if (mappingId) {
+                    setDraftMappings((prev) => {
+                        const index = prev.findIndex((m) => m.id === mappingId);
+                        if (index !== -1 && prev[index].visible !== targetValue) {
+                            const newMappings = [...prev];
+                            newMappings[index] = { ...newMappings[index], visible: targetValue };
+                            return newMappings;
+                        }
+                        return prev;
+                    });
+                }
+            }
+        };
+
+        const handlePointerUp = () => {
+            dragVisibilityRef.current = null;
+            restoreSelectionAndDrag();
+            window.removeEventListener("pointermove", handlePointerMove, true);
+            window.removeEventListener("pointerup", handlePointerUp, true);
+            mouseUpCleanupRef.current = null;
+        };
+        
+        // Remove previous if any
+        if (mouseUpCleanupRef.current) {
+            mouseUpCleanupRef.current();
+        }
+        
+        window.addEventListener("pointermove", handlePointerMove, true);
+        window.addEventListener("pointerup", handlePointerUp, true);
+        mouseUpCleanupRef.current = handlePointerUp;
+    }, [updateDraftColumnMapping, disableSelectionAndDrag, restoreSelectionAndDrag]);
+
+    const handleDeleteMouseDown = useCallback((id: string) => {
+        dragDeleteActiveRef.current = true;
+        setIsDraggingDelete(true);
+        disableSelectionAndDrag();
+        pendingDeleteIdsRef.current.clear();
+        pendingDeleteIdsRef.current.add(id);
+        setPendingDeleteIds(new Set(pendingDeleteIdsRef.current));
+
+        const handlePointerMove = (e: PointerEvent) => {
+            if (!dragDeleteActiveRef.current) return;
+            const elem = document.elementFromPoint(e.clientX, e.clientY);
+            const rowEl = elem?.closest("[data-mapping-id]");
+            if (rowEl) {
+                const mappingId = rowEl.getAttribute("data-mapping-id");
+                if (mappingId && !pendingDeleteIdsRef.current.has(mappingId)) {
+                    pendingDeleteIdsRef.current.add(mappingId);
+                    setPendingDeleteIds(new Set(pendingDeleteIdsRef.current));
+                }
+            }
+        };
+
+        const handlePointerUp = (e: PointerEvent) => {
+            restoreSelectionAndDrag();
+            window.removeEventListener("pointermove", handlePointerMove, true);
+            window.removeEventListener("pointerup", handlePointerUp, true);
+            mouseUpDeleteCleanupRef.current = null;
+            
+            let isOverCancelBubble = false;
+            const bubbleEl = document.getElementById("cancel-deletion-bubble");
+            if (bubbleEl) {
+                const rect = bubbleEl.getBoundingClientRect();
+                isOverCancelBubble = (
+                    e.clientX >= rect.left &&
+                    e.clientX <= rect.right &&
+                    e.clientY >= rect.top &&
+                    e.clientY <= rect.bottom
+                );
+            }
+            
+            if (!isOverCancelBubble) {
+                // Snapshot the current list of pending delete IDs synchronously
+                const idsToDelete = new Set(pendingDeleteIdsRef.current);
+                // Commit the deletion: filter out pending IDs
+                setDraftMappings((prev) => prev.filter((m) => !idsToDelete.has(m.id!)));
+            }
+            
+            dragDeleteActiveRef.current = false;
+            setIsDraggingDelete(false);
+            pendingDeleteIdsRef.current.clear();
+            setPendingDeleteIds(new Set());
+        };
+        
+        if (mouseUpDeleteCleanupRef.current) {
+            mouseUpDeleteCleanupRef.current();
+        }
+        
+        window.addEventListener("pointermove", handlePointerMove, true);
+        window.addEventListener("pointerup", handlePointerUp, true);
+        
+        mouseUpDeleteCleanupRef.current = () => {
+            window.removeEventListener("pointermove", handlePointerMove, true);
+            window.removeEventListener("pointerup", handlePointerUp, true);
+            dragDeleteActiveRef.current = false;
+            setIsDraggingDelete(false);
+            pendingDeleteIdsRef.current.clear();
+            setPendingDeleteIds(new Set());
+        };
+    }, [disableSelectionAndDrag, restoreSelectionAndDrag]);
 
     const cloneDraftColumnMapping = useCallback((index: number) => {
         setDraftMappings((prev) => {
@@ -1302,7 +1490,18 @@ function ColumnMappingsDialogInner({
     }, []);
 
     return (
-        <>
+        <div className="relative flex flex-col h-full w-full overflow-hidden">
+            {isDraggingDelete && (
+                <div
+                    id="cancel-deletion-bubble"
+                    className="absolute top-2 left-1/2 -translate-x-1/2 z-50 bg-rose-950/95 hover:bg-rose-900 border border-rose-500/50 text-rose-100 px-6 py-2.5 rounded-full flex items-center gap-2.5 shadow-xl shadow-rose-950/80 cursor-pointer select-none transition-all animate-bounce"
+                >
+                    <Undo2 className="w-4 h-4 text-rose-400" />
+                    <span className="text-xs font-semibold uppercase tracking-wider">
+                        Release mouse here to cancel deletion
+                    </span>
+                </div>
+            )}
             <DialogHeader>
                 <DialogTitle className="text-lg font-bold flex items-center gap-2">
                     <Settings className="w-5 h-5 text-indigo-400" />
@@ -1339,6 +1538,9 @@ function ColumnMappingsDialogInner({
                                             onUpdate={updateDraftColumnMapping}
                                             onRemove={removeDraftColumnMapping}
                                             onClone={cloneDraftColumnMapping}
+                                            onVisibilityMouseDown={handleVisibilityMouseDown}
+                                            onDeleteMouseDown={handleDeleteMouseDown}
+                                            isPendingDelete={pendingDeleteIds.has(col.id!)}
                                         />
                                     ))}
                                     {draftMappings.length === 0 && (
@@ -1377,7 +1579,7 @@ function ColumnMappingsDialogInner({
                     </Button>
                 </div>
             </div>
-        </>
+        </div>
     );
 }
 
