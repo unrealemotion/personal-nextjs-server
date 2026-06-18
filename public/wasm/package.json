@@ -1,0 +1,15 @@
+{
+  "name": "surge-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "surge_wasm_bg.wasm",
+    "surge_wasm.js",
+    "surge_wasm.d.ts"
+  ],
+  "main": "surge_wasm.js",
+  "types": "surge_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
