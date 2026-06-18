@@ -17,7 +17,7 @@ function ensureWasmInitialized() {
 
   wasmInitPromise = (async () => {
     try {
-      await initWasm("/wasm/surge_wasm_bg.wasm");
+      await initWasm({ module_or_path: "/wasm/surge_wasm_bg.wasm" });
       wasmInitialized = true;
       console.log("Surge WASM module successfully initialized on main thread.");
     } catch (err) {

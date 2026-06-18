@@ -12,10 +12,10 @@ async function ensureWasmInitialized(): Promise<boolean> {
         try {
             if (typeof window === "undefined" && typeof self !== "undefined" && typeof self.location !== "undefined" && "postMessage" in self) {
                 // In Web Worker
-                await initWasm(`${self.location.origin}/wasm/surge_wasm_bg.wasm`);
+                await initWasm({ module_or_path: `${self.location.origin}/wasm/surge_wasm_bg.wasm` });
             } else if (typeof window !== "undefined") {
                 // Main thread
-                await initWasm("/wasm/surge_wasm_bg.wasm");
+                await initWasm({ module_or_path: "/wasm/surge_wasm_bg.wasm" });
             }
             wasmInitialized = true;
             return true;

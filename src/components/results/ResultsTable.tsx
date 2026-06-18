@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Download, Plus, Trash2, Eye, EyeOff, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play, Settings, Database, ArrowUpRight, ArrowDownLeft, Activity, AlertCircle, Clock } from "lucide-react";
+import { Download, Plus, Trash2, Eye, EyeOff, Copy, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play, Settings, Database, ArrowUpRight, ArrowDownLeft, Activity, AlertCircle, Clock, GripVertical } from "lucide-react";
 import { EtherealAiSymbol } from "@/components/agent/EtherealAiSymbol";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as xlsx from "xlsx";
@@ -32,6 +32,22 @@ import { CopyableText } from "@/components/ui/CopyableText";
 import { sendToExtension, setupExtensionRules, clearExtensionRules } from "@/lib/extension";
 import { toast } from "sonner";
 import { resolveHostnameIp, getHostname } from "@/lib/dns";
+import { useSortableStyle } from "@/lib/hooks";
+import {
+    DndContext,
+    closestCenter,
+    PointerSensor,
+    TouchSensor,
+    KeyboardSensor,
+    useSensor,
+    useSensors,
+    DragEndEvent,
+} from "@dnd-kit/core";
+import {
+    SortableContext,
+    sortableKeyboardCoordinates,
+    verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 
 
 function SearchableSelect({ value, onChange, options, placeholder, className }: {
@@ -792,6 +808,7 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
     results,
     onUpdate,
     onRemove,
+    onClone,
 }: {
     col: ColumnMapping;
     idx: number;
@@ -800,7 +817,10 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
     results: any[];
     onUpdate: (index: number, updates: Partial<ColumnMapping>) => void;
     onRemove: (index: number) => void;
+    onClone: (index: number) => void;
 }) {
+    const { attributes, listeners, setNodeRef, style } = useSortableStyle(col.id || `col_${idx}`);
+
     const stepSelectOptions = React.useMemo(() => [
         { label: "All (Last)", value: "" },
         ...templates.map((t, i) => ({ label: `Step ${i + 1}: ${t.name}`, value: t.id }))
@@ -817,7 +837,18 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
     );
 
     return (
-        <div className="flex flex-col sm:flex-row sm:space-x-2 items-stretch sm:items-center flex-wrap gap-2 sm:gap-y-2 bg-neutral-900/30 p-2.5 rounded-lg border border-white/5">
+        <div
+            ref={setNodeRef}
+            style={style}
+            className="flex flex-col sm:flex-row sm:space-x-2 items-stretch sm:items-center flex-wrap gap-2 sm:gap-y-2 bg-neutral-900/30 p-2.5 rounded-lg border border-white/5"
+        >
+            <div
+                {...attributes}
+                {...listeners}
+                className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground shrink-0 flex items-center justify-center p-1 hover:bg-white/5 rounded"
+            >
+                <GripVertical className="w-3.5 h-3.5" />
+            </div>
             <Input
                 value={col.name}
                 onChange={(e) => onUpdate(idx, { name: e.target.value })}
@@ -898,23 +929,34 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
                     Automatic Value
                 </div>
             )}
-            <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onUpdate(idx, { visible: col.visible !== false ? false : true })}
-                className={cn(
-                    "shrink-0",
-                    col.visible !== false 
-                        ? "text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/20" 
-                        : "text-muted-foreground hover:text-rose-400 hover:bg-rose-950/20"
-                )}
-                title={col.visible !== false ? "Hide column from table & export" : "Show column in table & export"}
-            >
-                {col.visible !== false ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => onRemove(idx)} className="text-muted-foreground hover:text-destructive shrink-0">
-                <Trash2 className="w-4 h-4" />
-            </Button>
+            <div className="flex items-center gap-2 sm:ml-auto shrink-0">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onClone(idx)}
+                    className="text-muted-foreground hover:text-indigo-400 hover:bg-indigo-950/20 shrink-0"
+                    title="Clone column"
+                >
+                    <Copy className="w-4 h-4" />
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onUpdate(idx, { visible: col.visible !== false ? false : true })}
+                    className={cn(
+                        "shrink-0",
+                        col.visible !== false 
+                            ? "text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/20" 
+                            : "text-muted-foreground hover:text-rose-400 hover:bg-rose-950/20"
+                    )}
+                    title={col.visible !== false ? "Hide column from table & export" : "Show column in table & export"}
+                >
+                    {col.visible !== false ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                </Button>
+                <Button variant="ghost" size="icon" onClick={() => onRemove(idx)} className="text-muted-foreground hover:text-destructive shrink-0">
+                    <Trash2 className="w-4 h-4" />
+                </Button>
+            </div>
         </div>
     );
 });
@@ -1141,11 +1183,15 @@ function ColumnMappingsDialogContent({
 function ColumnMappingRowSkeleton() {
     return (
         <div className="flex flex-col sm:flex-row sm:space-x-2 items-center flex-wrap gap-2 bg-neutral-900/30 p-2.5 rounded-lg border border-white/5 animate-pulse min-h-[58px]">
+            <div className="w-6 h-6 bg-neutral-800/40 rounded shrink-0" />
             <div className="w-full sm:w-[180px] h-9 bg-neutral-800/40 rounded-md" />
             <div className="w-full sm:w-[150px] h-9 bg-neutral-800/40 rounded-md" />
             <div className="flex-1 h-9 bg-neutral-800/40 rounded-md min-w-[120px]" />
-            <div className="w-9 h-9 bg-neutral-800/40 rounded-md shrink-0" />
-            <div className="w-9 h-9 bg-neutral-800/40 rounded-md shrink-0" />
+            <div className="flex items-center gap-2 sm:ml-auto shrink-0">
+                <div className="w-9 h-9 bg-neutral-800/40 rounded-md shrink-0" />
+                <div className="w-9 h-9 bg-neutral-800/40 rounded-md shrink-0" />
+                <div className="w-9 h-9 bg-neutral-800/40 rounded-md shrink-0" />
+            </div>
         </div>
     );
 }
@@ -1165,8 +1211,36 @@ function ColumnMappingsDialogInner({
     onSave: (mappings: ColumnMapping[]) => void;
     onClose: () => void;
 }) {
-    const [draftMappings, setDraftMappings] = useState<ColumnMapping[]>(() => initialMappings);
+    const [draftMappings, setDraftMappings] = useState<ColumnMapping[]>(() => 
+        initialMappings.map((m, i) => ({
+            ...m,
+            id: m.id || `col_${Math.random().toString(36).substring(2, 10)}_${i}`
+        }))
+    );
     const [isReady, setIsReady] = useState(false);
+
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+        useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    );
+
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+        if (over && active.id !== over.id) {
+            setDraftMappings((prev) => {
+                const oldIndex = prev.findIndex((m) => m.id === active.id);
+                const newIndex = prev.findIndex((m) => m.id === over.id);
+                if (oldIndex !== -1 && newIndex !== -1) {
+                    const newMappings = [...prev];
+                    const [removed] = newMappings.splice(oldIndex, 1);
+                    newMappings.splice(newIndex, 0, removed);
+                    return newMappings;
+                }
+                return prev;
+            });
+        }
+    };
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -1201,6 +1275,32 @@ function ColumnMappingsDialogInner({
         setDraftMappings((prev) => prev.filter((_, i) => i !== index));
     }, []);
 
+    const cloneDraftColumnMapping = useCallback((index: number) => {
+        setDraftMappings((prev) => {
+            if (index < 0 || index >= prev.length) return prev;
+            const original = prev[index];
+            
+            // Parse base name by removing any trailing " (N)" suffix
+            const match = original.name.match(/(.+?)\s*\((\d+)\)$/);
+            const baseName = match ? match[1].trim() : original.name.trim();
+            
+            // Find the smallest suffix number starting from 1 that is not taken
+            let suffix = 1;
+            while (prev.some(m => m.name === `${baseName} (${suffix})`)) {
+                suffix++;
+            }
+            
+            const clone = {
+                ...original,
+                id: `col_${Math.random().toString(36).substring(2, 10)}`,
+                name: `${baseName} (${suffix})`
+            };
+            const newMappings = [...prev];
+            newMappings.splice(index + 1, 0, clone);
+            return newMappings;
+        });
+    }, []);
+
     return (
         <>
             <DialogHeader>
@@ -1220,25 +1320,35 @@ function ColumnMappingsDialogInner({
                             <ColumnMappingRowSkeleton key={i} />
                         ))
                     ) : (
-                        <>
-                            {draftMappings.map((col, idx) => (
-                                <ColumnMappingRow
-                                    key={col.id || idx}
-                                    col={col}
-                                    idx={idx}
-                                    originalHeaders={originalHeaders}
-                                    templates={templates}
-                                    results={results}
-                                    onUpdate={updateDraftColumnMapping}
-                                    onRemove={removeDraftColumnMapping}
-                                />
-                            ))}
-                            {draftMappings.length === 0 && (
-                                <div className="text-center py-8 text-sm text-muted-foreground">
-                                    No columns mapped. Click "Add Column" below to map a new column.
+                        <DndContext
+                            id="dnd-context-mappings"
+                            sensors={sensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={handleDragEnd}
+                        >
+                            <SortableContext items={draftMappings.map(m => m.id || "")} strategy={verticalListSortingStrategy}>
+                                <div className="space-y-2">
+                                    {draftMappings.map((col, idx) => (
+                                        <ColumnMappingRow
+                                            key={col.id || idx}
+                                            col={col}
+                                            idx={idx}
+                                            originalHeaders={originalHeaders}
+                                            templates={templates}
+                                            results={results}
+                                            onUpdate={updateDraftColumnMapping}
+                                            onRemove={removeDraftColumnMapping}
+                                            onClone={cloneDraftColumnMapping}
+                                        />
+                                    ))}
+                                    {draftMappings.length === 0 && (
+                                        <div className="text-center py-8 text-sm text-muted-foreground">
+                                            No columns mapped. Click "Add Column" below to map a new column.
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </>
+                            </SortableContext>
+                        </DndContext>
                     )}
                 </div>
             </div>
