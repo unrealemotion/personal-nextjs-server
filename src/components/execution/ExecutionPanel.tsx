@@ -22,10 +22,14 @@ export function ExecutionPanel() {
     const throttleDelayMs = useStore(store, (state) => state.throttleDelayMs);
     const rowIterations = useStore(store, (state) => state.rowIterations);
     const concurrency = useStore(store, (state) => state.concurrency ?? 2);
+    const results = useStore(store, (state) => state.results);
     const [isRunning, setIsRunning] = useState(false);
     const [progress, setProgress] = useState(0);
     const [isPaused, setIsPaused] = useState(false);
     const abortControllerRef = useRef<AbortController | null>(null);
+
+    const pausedCount = results.filter(r => r.status === "paused").length;
+    const hasPausedRows = pausedCount > 0;
 
 
     const totalRows = fileData.length;
@@ -92,6 +96,35 @@ export function ExecutionPanel() {
         resumeBulkExecution();
         setIsPaused(false);
         toast.info("Execution resumed");
+    };
+
+    const handleResumePausedRun = async () => {
+        if (!canRun) return;
+        setIsRunning(true);
+        // Calculate initial progress based on completed rows
+        const completed = results.filter(r => r.status === "success" || r.status === "error").length;
+        const total = results.length;
+        setProgress(total > 0 ? Math.round((completed / total) * 100) : 0);
+        setIsPaused(false);
+        abortControllerRef.current = new AbortController();
+
+        try {
+            await runBulkExecution(
+                Math.max(1, concurrency),
+                (completedCount, totalCount) => {
+                    setProgress(Math.round((completedCount / totalCount) * 100));
+                },
+                undefined,
+                abortControllerRef.current.signal,
+                true // isResume
+            );
+        } catch (err: any) {
+            toast.error(err?.message || "Execution engine crashed");
+        } finally {
+            setIsRunning(false);
+            setIsPaused(false);
+            abortControllerRef.current = null;
+        }
     };
 
 
@@ -209,7 +242,7 @@ export function ExecutionPanel() {
                         </div>
                     </div>
 
-                    <div className="flex space-x-3 pt-1">
+                    <div className="flex flex-col sm:flex-row gap-3 pt-1 w-full">
                         {!isRunning ? (
                             <>
                                 <Button
@@ -221,6 +254,17 @@ export function ExecutionPanel() {
                                     <FlaskConical className="w-4 h-4 mr-2 text-primary" />
                                     Test Row 1
                                 </Button>
+
+                                {hasPausedRows && (
+                                    <Button
+                                        className="flex-1 h-11 bg-amber-600 hover:bg-amber-700 text-white shadow-lg shadow-amber-600/20 transition-all"
+                                        disabled={!canRun}
+                                        onClick={handleResumePausedRun}
+                                    >
+                                        <Play className="w-4 h-4 mr-2" />
+                                        Resume Run ({pausedCount} left)
+                                    </Button>
+                                )}
 
                                 <Button
                                     className="flex-1 h-11 shadow-lg shadow-primary/20 bg-primary hover:bg-primary/90 text-primary-foreground transition-all"

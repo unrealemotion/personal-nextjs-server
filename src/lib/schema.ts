@@ -47,7 +47,7 @@ export type StepResult = BaseExecutionFields & {
 export type ExecutionResult = BaseExecutionFields & {
   rowId: number;
   iteration?: number;
-  status: "pending" | "success" | "error";
+  status: "pending" | "success" | "error" | "paused";
   steps: StepResult[];
   timestamp?: string;
   active?: boolean;

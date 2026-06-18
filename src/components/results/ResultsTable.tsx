@@ -29,9 +29,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { stripJsonComments } from "@/lib/executor-utils";
 import { CopyableText } from "@/components/ui/CopyableText";
-import { sendToExtension, setupExtensionRules, clearExtensionRules } from "@/lib/extension";
+import { setupExtensionRules, clearExtensionRules } from "@/lib/extension";
 import { toast } from "sonner";
-import { resolveHostnameIp, getHostname } from "@/lib/dns";
+import { resolveHostnameIp } from "@/lib/dns";
 import { useSortableStyle } from "@/lib/hooks";
 import {
     DndContext,
@@ -726,6 +726,76 @@ function ColumnHeaderWithFilter({
     );
 }
 
+function TableHeaderCell(info: any) {
+    const meta = info.column.columnDef.meta as any;
+    if (!meta) return null;
+    const tableMeta = info.table.options.meta as any;
+    const rawTableData = tableMeta?.rawTableData || [];
+    return (
+        <ColumnHeaderWithFilter
+            colId={meta.colId}
+            colName={meta.colName}
+            rawTableData={rawTableData}
+        />
+    );
+}
+
+function TableColumnCell(info: any) {
+    const meta = info.column.columnDef.meta as any;
+    if (!meta) return null;
+    return <TableCellRenderer col={meta.col} value={info.getValue()} />;
+}
+
+function RowNumberCell({ row }: any) {
+    const rowNum = row.original.__id + 1;
+    const iter = row.original.__iteration ?? 1;
+    return (
+        <div className="font-mono text-xs font-bold text-foreground/80 select-none">
+            {rowNum}#{iter}
+        </div>
+    );
+}
+
+const VirtualizedRow = React.memo(function VirtualizedRow({
+    row,
+    columns,
+    onRowClick,
+    measuredRowRef,
+    isFirst,
+}: {
+    row: any;
+    columns: any[];
+    onRowClick: (row: any) => void;
+    measuredRowRef: any;
+    isFirst: boolean;
+}) {
+    void columns;
+    return (
+        <TableRow
+            ref={isFirst ? measuredRowRef : undefined}
+            data-state={row.getIsSelected() && "selected"}
+            className={cn(
+                "cursor-pointer",
+                row.original.__isModified && "bg-yellow-500/10 hover:bg-yellow-500/20 data-[state=selected]:bg-yellow-500/20"
+            )}
+            onClick={() => onRowClick(row.original)}
+        >
+            {row.getVisibleCells().map((cell: any) => (
+                <TableCell key={cell.id}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </TableCell>
+            ))}
+        </TableRow>
+    );
+}, (prevProps, nextProps) => {
+    return (
+        prevProps.row.original === nextProps.row.original &&
+        prevProps.row.getIsSelected() === nextProps.row.getIsSelected() &&
+        prevProps.isFirst === nextProps.isFirst &&
+        prevProps.columns === nextProps.columns
+    );
+});
+
 const sourceConfig: Record<string, {
     label: string;
     bgColor: string;
@@ -1004,17 +1074,18 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
 
 const ResultsTableView = React.memo(function ResultsTableView({
     data,
+    rawTableData,
     columns,
     tableFilterConfig,
     onRowClick,
 }: {
     data: any[];
+    rawTableData: any[];
     columns: ColumnDef<any>[];
     tableFilterConfig: TableFilterConfig;
     onRowClick: (row: any) => void;
 }) {
 
-    // eslint-disable-next-line react-hooks/incompatible-library
     const table = useReactTable({
         data,
         columns,
@@ -1023,12 +1094,79 @@ const ResultsTableView = React.memo(function ResultsTableView({
         autoResetPageIndex: false,
         initialState: {
             pagination: { pageSize: 20 },
+        },
+        meta: {
+            rawTableData
         }
     });
 
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const [scrollTop, setScrollTop] = useState(0);
+    const [containerHeight, setContainerHeight] = useState(600);
+    const [rowHeight, setRowHeight] = useState(38);
+    const measuredRowRef = useRef<HTMLTableRowElement | null>(null);
+
+    // Sync scroll and container height
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+
+        const handleScroll = () => {
+            setScrollTop(container.scrollTop);
+        };
+
+        container.addEventListener("scroll", handleScroll, { passive: true });
+        setScrollTop(container.scrollTop);
+
+        const resizeObserver = new ResizeObserver(() => {
+            setContainerHeight(container.clientHeight);
+        });
+        resizeObserver.observe(container);
+
+        return () => {
+            container.removeEventListener("scroll", handleScroll);
+            resizeObserver.disconnect();
+        };
+    }, []);
+
+    // Scroll to top when filters change
     useEffect(() => {
         table.setPageIndex(0);
+        if (containerRef.current) {
+            containerRef.current.scrollTop = 0;
+        }
     }, [tableFilterConfig.searchQuery, tableFilterConfig.columnFilters, table]);
+
+    // Scroll to top when page changes
+    const pageIndex = table.getState().pagination.pageIndex;
+    useEffect(() => {
+        if (containerRef.current) {
+            containerRef.current.scrollTop = 0;
+        }
+    }, [pageIndex]);
+
+    // Measure row height dynamically
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => {
+        if (measuredRowRef.current) {
+            const height = measuredRowRef.current.getBoundingClientRect().height;
+            if (height > 0 && Math.abs(height - rowHeight) > 0.5) {
+                setRowHeight(height);
+            }
+        }
+    });
+
+    const rows = table.getRowModel().rows || [];
+    const totalRows = rows.length;
+    const overscan = 15;
+    const safeRowHeight = Math.max(1, rowHeight);
+
+    const startIndex = Math.max(0, Math.floor(scrollTop / safeRowHeight) - overscan);
+    const endIndex = Math.min(totalRows - 1, Math.floor((scrollTop + containerHeight) / safeRowHeight) + overscan);
+
+    const visibleRows = rows.slice(startIndex, endIndex + 1);
+    const paddingTop = startIndex * safeRowHeight;
+    const paddingBottom = Math.max(0, (totalRows - 1 - endIndex) * safeRowHeight);
 
     return (
         <div className="space-y-4">
@@ -1080,6 +1218,7 @@ const ResultsTableView = React.memo(function ResultsTableView({
             {/* Data Table */}
             <div className="relative rounded-md border w-full">
                 <Table 
+                    containerRef={containerRef}
                     className="transition-opacity duration-300"
                     wrapperClassName="max-h-[600px] min-h-[450px] overflow-auto"
                 >
@@ -1100,30 +1239,40 @@ const ResultsTableView = React.memo(function ResultsTableView({
                         ))}
                     </TableHeader>
                     <TableBody>
-                        {table.getRowModel().rows?.length ? (
-                            table.getRowModel().rows.map((row) => (
-                                <TableRow
-                                    key={row.id}
-                                    data-state={row.getIsSelected() && "selected"}
-                                    className={cn(
-                                        "cursor-pointer",
-                                        row.original.__isModified && "bg-yellow-500/10 hover:bg-yellow-500/20 data-[state=selected]:bg-yellow-500/20"
-                                    )}
-                                    onClick={() => onRowClick(row.original)}
-                                >
-                                    {row.getVisibleCells().map((cell) => (
-                                        <TableCell key={cell.id}>
-                                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                        </TableCell>
-                                    ))}
-                                </TableRow>
-                            ))
+                        {paddingTop > 0 && (
+                            <tr>
+                                <td colSpan={columns.length} style={{ padding: 0, border: 0 }}>
+                                    <div style={{ height: `${paddingTop}px` }} />
+                                </td>
+                            </tr>
+                        )}
+                        {visibleRows.length ? (
+                            visibleRows.map((row, index) => {
+                                const isFirst = index === 0;
+                                return (
+                                    <VirtualizedRow
+                                        key={row.id}
+                                        row={row}
+                                        columns={columns}
+                                        onRowClick={onRowClick}
+                                        measuredRowRef={measuredRowRef}
+                                        isFirst={isFirst}
+                                    />
+                                );
+                            })
                         ) : (
                             <TableRow>
                                 <TableCell colSpan={columns.length} className="h-24 text-center">
                                     No results mapped.
                                 </TableCell>
                             </TableRow>
+                        )}
+                        {paddingBottom > 0 && (
+                            <tr>
+                                <td colSpan={columns.length} style={{ padding: 0, border: 0 }}>
+                                    <div style={{ height: `${paddingBottom}px` }} />
+                                </td>
+                            </tr>
                         )}
                     </TableBody>
                 </Table>
@@ -1141,7 +1290,7 @@ const ResultsTableView = React.memo(function ResultsTableView({
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                            {[20, 50, 100].map(pageSize => (
+                            {[20, 50, 100, 500, 1000, 5000].map(pageSize => (
                                 <SelectItem key={pageSize} value={String(pageSize)}>
                                     {pageSize}
                                 </SelectItem>
@@ -1593,6 +1742,16 @@ export function ResultsTable() {
     const fileName = useStore(store, (state) => state.fileName);
     const exportExcelTrigger = useStore(store, (state) => (state as any).exportExcelTrigger);
 
+    const mappedRowCacheRef = useRef<WeakMap<any, any>>(new WeakMap());
+    const lastColumnMappingsRef = useRef(columnMappings);
+    const lastFileDataRef = useRef(fileData);
+
+    if (lastColumnMappingsRef.current !== columnMappings || lastFileDataRef.current !== fileData) {
+        mappedRowCacheRef.current = new WeakMap();
+        lastColumnMappingsRef.current = columnMappings;
+        lastFileDataRef.current = fileData;
+    }
+
     const [selectedDetail, setSelectedDetail] = useState<{ rowId: number; iteration: number } | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -1893,37 +2052,42 @@ export function ResultsTable() {
         }
     };
 
-    const activeResults = useMemo(() => {
-        const groups: Record<string, ExecutionResult[]> = {};
-        results.forEach((res) => {
+    // We want to get:
+    // 1. activeResults: the active ExecutionResult for each rowId & iteration
+    // 2. runsCountMap: number of runs per rowId & iteration
+    const { activeResults, runsCountMap } = useMemo(() => {
+        const activeMap = new Map<string, ExecutionResult>();
+        const runsCount = new Map<string, number>();
+
+        for (let i = 0; i < results.length; i++) {
+            const res = results[i];
             const key = `${res.rowId}_${res.iteration ?? 1}`;
-            if (!groups[key]) groups[key] = [];
-            groups[key].push(res);
-        });
+            
+            // Increment run count
+            runsCount.set(key, (runsCount.get(key) || 0) + 1);
 
-        const activeList: ExecutionResult[] = [];
-        Object.values(groups).forEach((list) => {
-            const activeRes = list.find((r) => r.active) || list[list.length - 1];
-            if (activeRes) {
-                activeList.push(activeRes);
+            // Update active map
+            const existing = activeMap.get(key);
+            if (!existing || res.active) {
+                activeMap.set(key, res);
             }
-        });
+        }
 
-        return activeList.sort((a, b) => {
+        const activeList = Array.from(activeMap.values()).sort((a, b) => {
             if (a.rowId !== b.rowId) return a.rowId - b.rowId;
             return (a.iteration ?? 1) - (b.iteration ?? 1);
         });
+
+        return { activeResults: activeList, runsCountMap: runsCount };
     }, [results]);
 
     const rawTableData = useMemo(() => {
-        // Pre-calculate runs count per rowId and iteration using a lookup map
-        const runsCountMap = new Map<string, number>();
-        results.forEach(r => {
-            const runKey = `${r.rowId}_${r.iteration ?? 1}`;
-            runsCountMap.set(runKey, (runsCountMap.get(runKey) || 0) + 1);
-        });
+        const cache = mappedRowCacheRef.current;
 
         return activeResults.map((res) => {
+            const cached = cache.get(res);
+            if (cached) return cached;
+
             const rowData = fileData[res.rowId] || {};
             const rowMap: Record<string, any> = {};
             const runKey = `${res.rowId}_${res.iteration ?? 1}`;
@@ -1938,9 +2102,11 @@ export function ResultsTable() {
             rowMap.__status = res.status;
             rowMap.__id = res.rowId;
             rowMap.__iteration = res.iteration;
+
+            cache.set(res, rowMap);
             return rowMap;
         });
-    }, [results, activeResults, fileData, columnMappings]);
+    }, [activeResults, runsCountMap, fileData, columnMappings]);
 
     const data = useMemo(() => {
         let filtered = [...rawTableData];
@@ -2017,15 +2183,7 @@ export function ResultsTable() {
         dynamicCols.push({
             id: "row_number",
             header: "Row #",
-            cell: ({ row }) => {
-                const rowNum = row.original.__id + 1;
-                const iter = row.original.__iteration ?? 1;
-                return (
-                    <div className="font-mono text-xs font-bold text-foreground/80 select-none">
-                        {rowNum}#{iter}
-                    </div>
-                );
-            }
+            cell: RowNumberCell
         });
  
         columnMappings.forEach((col, idx) => {
@@ -2035,19 +2193,18 @@ export function ResultsTable() {
             dynamicCols.push({
                 id: colId,
                 accessorKey: colId,
-                header: () => (
-                    <ColumnHeaderWithFilter
-                        colId={colId}
-                        colName={colName}
-                        rawTableData={rawTableData}
-                    />
-                ),
-                cell: (info) => <TableCellRenderer col={col} value={info.getValue()} />
+                header: TableHeaderCell,
+                cell: TableColumnCell,
+                meta: {
+                    colId,
+                    colName,
+                    col,
+                }
             });
         });
 
         return dynamicCols;
-    }, [columnMappings, rawTableData]);
+    }, [columnMappings]);
 
 
 
@@ -2257,6 +2414,7 @@ export function ResultsTable() {
 
                 <ResultsTableView
                     data={data}
+                    rawTableData={rawTableData}
                     columns={columns}
                     tableFilterConfig={tableFilterConfig}
                     onRowClick={handleRowClick}

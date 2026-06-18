@@ -4,9 +4,10 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Table({ className, wrapperClassName, ...props }: React.ComponentProps<"table"> & { wrapperClassName?: string }) {
+function Table({ className, wrapperClassName, containerRef, ...props }: React.ComponentProps<"table"> & { wrapperClassName?: string; containerRef?: React.Ref<HTMLDivElement> }) {
   return (
     <div
+      ref={containerRef}
       data-slot="table-container"
       className={cn("relative w-full overflow-x-auto custom-scrollbar", wrapperClassName)}
     >

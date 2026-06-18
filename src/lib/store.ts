@@ -10,8 +10,7 @@ import {
     type RequestTab,
     type ApiRequest,
     type ApiFolder,
-    type AgentProfile,
-    type Message
+    type AgentProfile
 } from "./schema";
 
 export const WELCOME_MESSAGE = `👋 Hello! I am Splurge, your AI agent. I can help you manage and troubleshoot your bulk API workflows.
@@ -239,6 +238,7 @@ export const hydrateStore = async () => {
             const nowMs = Date.now();
             resultsList = resultsList.map((r: any, idx: number) => ({
                 ...r,
+                status: r.status === "pending" ? "paused" : r.status,
                 timestamp: r.timestamp || new Date(nowMs - (resultsList.length - idx) * 1000).toISOString(),
                 active: r.active !== undefined ? r.active : true
             }));
@@ -383,6 +383,12 @@ if (typeof window !== "undefined") {
         if (isHydrated) {
             try {
                 const state = store.state;
+                // If there are running tasks or pending tasks, mark them as paused on window close
+                const results = state.results.map(r => 
+                    r.status === "pending" 
+                        ? { ...r, status: "paused" as const } 
+                        : r
+                );
                 const config = getSaveableConfigState(state);
                 const data = {
                     fileData: state.fileData,
@@ -393,7 +399,7 @@ if (typeof window !== "undefined") {
                 };
                 localStorage.setItem("surge_backup_config", JSON.stringify(config));
                 localStorage.setItem("surge_backup_data", JSON.stringify(data));
-                localStorage.setItem("surge_backup_results", JSON.stringify(state.results));
+                localStorage.setItem("surge_backup_results", JSON.stringify(results));
             } catch (err) {
                 console.warn("Failed to write beforeunload backup to localStorage:", err);
             }

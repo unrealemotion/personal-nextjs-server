@@ -1,47 +1,8 @@
 import { type RequestTemplate, type StepResult } from "./schema";
-import { resolveHostnameIp } from "./dns";
 import { executeStep, populateExecutionContext, createCancelledOrSkippedStep, ensureWasmInitialized, RustExecutionContext, type ExecutionCtx } from "./executor-utils";
 
 let isPaused = false;
 const resumeListeners: (() => void)[] = [];
-
-function pLimit(concurrency: number) {
-    const queue: Array<() => Promise<any>> = [];
-    let activeCount = 0;
-
-    const next = () => {
-        if (isPaused) {
-            const onResume = () => {
-                next();
-            };
-            resumeListeners.push(onResume);
-            return;
-        }
-        if (activeCount < concurrency && queue.length > 0) {
-            activeCount++;
-            const fn = queue.shift()!;
-            fn().finally(() => {
-                activeCount--;
-                next();
-            });
-        }
-    };
-
-    return <T>(fn: () => Promise<T>): Promise<T> => {
-        return new Promise<T>((resolve, reject) => {
-            queue.push(async () => {
-                try {
-                    const res = await fn();
-                    resolve(res);
-                } catch (err) {
-                    reject(err);
-                }
-            });
-            next();
-        });
-    };
-}
-
 
 
 let abortController: AbortController | null = null;
@@ -184,7 +145,7 @@ self.onmessage = async (e: MessageEvent) => {
     const { type } = e.data;
 
     if (type === "START") {
-        const { fileData, templates, concurrencyLimit, singleRowIndex, maxRetries, retryStatusCodes, stopOnFailure, throttleDelayMs, rowIterations = 1 } = e.data;
+        const { taskItems, total, initialCompleted, templates, concurrencyLimit, singleRowIndex, maxRetries, retryStatusCodes, stopOnFailure, throttleDelayMs } = e.data;
         isPaused = false;
         resumeListeners.length = 0;
         abortController = new AbortController();
@@ -192,26 +153,12 @@ self.onmessage = async (e: MessageEvent) => {
 
         const hasWasm = await ensureWasmInitialized();
 
-        const rowsToProcess = singleRowIndex !== undefined
-            ? (fileData[singleRowIndex] ? [{ row: fileData[singleRowIndex], index: singleRowIndex }] : [])
-            : fileData.map((row: any, index: number) => ({ row, index }));
+        let completed = initialCompleted || 0;
 
-        const total = rowsToProcess.length * rowIterations;
-        let completed = 0;
-
-        if (total === 0) {
+        if (taskItems.length === 0) {
             self.postMessage({ type: "COMPLETE" });
             return;
         }
-
-        // Flatten the task items to queue them dynamically
-        const taskItems: Array<{ row: any; index: number; iter: number; flatIdx: number }> = [];
-        rowsToProcess.forEach(({ row, index }: any) => {
-            for (let iter = 1; iter <= rowIterations; iter++) {
-                const flatIdx = index * rowIterations + iter - 1;
-                taskItems.push({ row, index, iter, flatIdx });
-            }
-        });
 
         let nextTaskIndex = 0;
         let nextAvailableStartTime = Date.now();
@@ -225,7 +172,7 @@ self.onmessage = async (e: MessageEvent) => {
                 const task = taskItems[nextTaskIndex++];
                 if (!task) break;
 
-                const { row, index, iter, flatIdx } = task;
+                const { row, index, iter } = task;
 
                 // Throttling / Rate Limiting (Token Bucket)
                 if (throttleDelayMs > 0 && singleRowIndex === undefined) {

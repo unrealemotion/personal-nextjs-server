@@ -21,7 +21,8 @@ export async function runBulkExecution(
     concurrencyLimit: number,
     onProgress?: (completed: number, total: number) => void,
     singleRowIndex?: number,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    isResume?: boolean
 ): Promise<void> {
     const state = store.state;
     const { fileData, templates, rowIterations = 1 } = state;
@@ -33,42 +34,102 @@ export async function runBulkExecution(
 
     if (rowsToProcess.length === 0) return;
 
-    // Pre-initialize results tracking as pending for all iterations
-    const initialResults: ExecutionResult[] = [];
-    rowsToProcess.forEach(({ index }) => {
+    // Flat task items
+    const allTaskItems: Array<{ row: any; index: number; iter: number; flatIdx: number }> = [];
+    rowsToProcess.forEach(({ row, index }) => {
         for (let iter = 1; iter <= rowIterations; iter++) {
-            initialResults.push({
-                rowId: index,
-                iteration: iter,
-                status: "pending",
-                statusCode: 0,
-                responseTimeMs: 0,
-                requestBody: null,
-                responseBody: null,
-                steps: [],
-                timestamp: new Date().toISOString(),
-                active: true,
-            });
+            const flatIdx = index * rowIterations + iter - 1;
+            allTaskItems.push({ row, index, iter, flatIdx });
         }
     });
 
-    if (singleRowIndex !== undefined) {
-        for (let iter = 1; iter <= rowIterations; iter++) {
-            updateResultByRowId(singleRowIndex, {
-                status: "pending",
-                statusCode: 0,
-                responseTimeMs: 0,
-                requestBody: null,
-                responseBody: null,
-                steps: [],
-                error: undefined,
-                timestamp: new Date().toISOString(),
-                active: true,
-            }, iter);
-        }
+    let taskItemsToRun = allTaskItems;
+    let initialCompleted = 0;
+
+    if (isResume) {
+        // Build a lookup map of rowId_iteration to ExecutionResult for O(1) status checks
+        const resultsMap = new Map<string, ExecutionResult>();
+        state.results.forEach(r => {
+            resultsMap.set(`${r.rowId}_${r.iteration ?? 1}`, r);
+        });
+
+        // Find which tasks are still paused or pending
+        taskItemsToRun = allTaskItems.filter(task => {
+            const res = resultsMap.get(`${task.index}_${task.iter}`);
+            const isPendingOrPaused = !res || res.status === "pending" || res.status === "paused";
+            if (!isPendingOrPaused) {
+                initialCompleted++;
+            }
+            return isPendingOrPaused;
+        });
+
+        // Set all resumed tasks status back to pending in store
+        store.setState(s => {
+            const newResults = [...s.results];
+            
+            // Build an index map of rowId_iteration to index in results array for O(1) updates
+            const indexMap = new Map<string, number>();
+            newResults.forEach((r, idx) => {
+                indexMap.set(`${r.rowId}_${r.iteration ?? 1}`, idx);
+            });
+
+            taskItemsToRun.forEach(task => {
+                const rIdx = indexMap.get(`${task.index}_${task.iter}`);
+                if (rIdx !== undefined && rIdx !== -1) {
+                    newResults[rIdx] = {
+                        ...newResults[rIdx],
+                        status: "pending",
+                        error: undefined,
+                        timestamp: new Date().toISOString(),
+                    };
+                }
+            });
+            return { ...s, results: newResults };
+        });
     } else {
-        setResults(initialResults);
+        // Pre-initialize results tracking as pending for all iterations
+        const initialResults: ExecutionResult[] = [];
+        rowsToProcess.forEach(({ index }) => {
+            for (let iter = 1; iter <= rowIterations; iter++) {
+                initialResults.push({
+                    rowId: index,
+                    iteration: iter,
+                    status: "pending",
+                    statusCode: 0,
+                    responseTimeMs: 0,
+                    requestBody: null,
+                    responseBody: null,
+                    steps: [],
+                    timestamp: new Date().toISOString(),
+                    active: true,
+                });
+            }
+        });
+
+        if (singleRowIndex !== undefined) {
+            for (let iter = 1; iter <= rowIterations; iter++) {
+                updateResultByRowId(singleRowIndex, {
+                    status: "pending",
+                    statusCode: 0,
+                    responseTimeMs: 0,
+                    requestBody: null,
+                    responseBody: null,
+                    steps: [],
+                    error: undefined,
+                    timestamp: new Date().toISOString(),
+                    active: true,
+                }, iter);
+            }
+        } else {
+            setResults(initialResults);
+        }
     }
+
+    // Build static index map of rowId_iteration to array index for O(1) updates in flushUpdates
+    const indexMap = new Map<string, number>();
+    store.state.results.forEach((r, idx) => {
+        indexMap.set(`${r.rowId}_${r.iteration ?? 1}`, idx);
+    });
 
     // Setup helper extension rules if active
     const isExtensionActive = typeof document !== "undefined" &&
@@ -187,8 +248,9 @@ export async function runBulkExecution(
                     const newResults = [...state.results];
                     updateBuffer.forEach(({ type, index, payload }) => {
                         const { iteration } = payload;
-                        const rIdx = newResults.findIndex((r) => r.rowId === index && (r.iteration ?? 1) === (iteration ?? 1));
-                        if (rIdx !== -1) {
+                        const key = `${index}_${iteration ?? 1}`;
+                        const rIdx = indexMap.get(key);
+                        if (rIdx !== undefined && rIdx !== -1) {
                             if (type === "PROGRESS") {
                                 newResults[rIdx] = { ...newResults[rIdx], ...payload };
                             } else if (type === "STEP_PROGRESS") {
@@ -322,7 +384,9 @@ export async function runBulkExecution(
             // Start execution
             worker.postMessage({
                 type: "START",
-                fileData,
+                taskItems: taskItemsToRun,
+                total: allTaskItems.length,
+                initialCompleted,
                 templates,
                 concurrencyLimit,
                 singleRowIndex,
@@ -330,7 +394,6 @@ export async function runBulkExecution(
                 retryStatusCodes: state.retryStatusCodes || "",
                 stopOnFailure: state.stopOnFailure ?? false,
                 throttleDelayMs: state.throttleDelayMs ?? 0,
-                rowIterations
             });
         });
     } finally {
