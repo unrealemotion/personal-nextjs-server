@@ -12,6 +12,16 @@ import {
     type ApiFolder,
     type AgentProfile
 } from "./schema";
+import {
+    EXTENSION_CHROME_WEB_STORE_URL,
+    LOCAL_STORAGE_KEY,
+    DEFAULT_AGENT_CONFIGS,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_THROTTLE_DELAY_MS,
+    DEFAULT_ROW_ITERATIONS,
+    DEFAULT_STOP_ON_FAILURE
+} from "./config";
 
 export const WELCOME_MESSAGE = `👋 Hello! I am Splurge, your AI agent. I can help you manage and troubleshoot your bulk API workflows.
 
@@ -20,7 +30,7 @@ Here is what I can do:
 - **Adjust Requests & Settings**: Update URLs, headers, concurrency, retries, and rate limits.
 - **Manage Data & Variables**: Search your CSV/Excel dataset, correct typos, and map variables.
 - **Configure & Export Grid**: Set table columns, apply filters, and export results to Excel.
-- **Verify Extension**: Ensure the [Chrome Extension Helper](https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf) is active to bypass CORS rules.
+- **Verify Extension**: Ensure the [Chrome Extension Helper](${EXTENSION_CHROME_WEB_STORE_URL}) is active to bypass CORS rules.
 
 How can I help you today?`;
 
@@ -47,8 +57,6 @@ import {
 
 export type { VariableType };
 export { generateId, createDefaultApiRequest, saveCheckpoint, loadCheckpoint, deleteCheckpoint };
-
-const LOCAL_STORAGE_KEY = "surge_api_workspace";
 
 const initialTemplate = createDefaultTemplate();
 
@@ -79,12 +87,12 @@ const defaultState: AppState = {
     templates: [initialTemplate],
     activeTemplateId: initialTemplate.id,
     results: [],
-    maxRetries: 0,
+    maxRetries: DEFAULT_MAX_RETRIES,
     retryStatusCodes: "",
-    stopOnFailure: false,
-    throttleDelayMs: 0,
-    rowIterations: 1,
-    concurrency: 2,
+    stopOnFailure: DEFAULT_STOP_ON_FAILURE,
+    throttleDelayMs: DEFAULT_THROTTLE_DELAY_MS,
+    rowIterations: DEFAULT_ROW_ITERATIONS,
+    concurrency: DEFAULT_CONCURRENCY,
     columnMappings: [
         { id: "col_status", name: "Status Code", source: "status", path: "" },
         { id: "col_error", name: "Error", source: "error", path: "" },
@@ -104,16 +112,9 @@ const defaultState: AppState = {
     apiTabs: [],
     activeTabId: null,
     agentProfiles: [
-        {
-            id: "default-gemini",
-            name: "Gemini 2.5 Flash",
-            provider: "gemini",
-            apiKey: "",
-            endpoint: "https://generativelanguage.googleapis.com/v1beta/models/",
-            model: "gemini-2.5-flash"
-        }
+        DEFAULT_AGENT_CONFIGS.gemini
     ],
-    activeAgentProfileId: "default-gemini",
+    activeAgentProfileId: DEFAULT_AGENT_CONFIGS.gemini.id,
     agentChatMessages: [
         {
             id: "welcome",

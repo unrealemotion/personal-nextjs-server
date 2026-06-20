@@ -23,6 +23,7 @@ import {
 } from "@/lib/store";
 import { addItemToCollectionTree, findItemInCollections } from "@/lib/utils";
 import { stripJsonComments } from "@/lib/executor-utils";
+import { EXTENSION_CHROME_WEB_STORE_URL } from "@/lib/config";
 import { simulateRowExecutionChain } from "@/lib/agent-executor";
 import { runBulkExecution } from "@/lib/executor";
 import { executeFrontendRequest } from "@/lib/frontend-executor";
@@ -220,10 +221,10 @@ export function useSurgeAgentTools() {
                             document.documentElement.getAttribute("data-surge-extension-active") === "true";
                         return {
                             connected: active,
-                            installationUrl: "https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf",
+                            installationUrl: EXTENSION_CHROME_WEB_STORE_URL,
                             message: active 
                                 ? "The Surge API Request Helper chrome extension is connected and active. You can run requests without CORS issues!"
-                                : "The extension is NOT connected or inactive. To install it, go to the [Chrome Web Store](https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf). If already installed, open browser extensions settings (chrome://extensions/), locate the Surge API Request Helper extension, verify that it says \"Enabled\" and not blocked (check if browser settings/policies customize allowed/blocking extensions), and reload the page tab to activate it."
+                                : `The extension is NOT connected or inactive. To install it, go to the [Chrome Web Store](${EXTENSION_CHROME_WEB_STORE_URL}). If already installed, open browser extensions settings (chrome://extensions/), locate the Surge API Request Helper extension, verify that it says "Enabled" and not blocked (check if browser settings/policies customize allowed/blocking extensions), and reload the page tab to activate it.`
                         };
                     }
                     case "read_console_logs": {

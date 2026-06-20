@@ -1,3 +1,5 @@
+import { EXTENSION_CHROME_WEB_STORE_URL } from "@/lib/config";
+
 export const GLOBAL_TOOLS = [
     {
         type: "function",
@@ -56,11 +58,11 @@ check_extension_connection
    - Capabilities: Checks if the Surge API Request Helper Chrome extension is connected and active.
    - When to use: When requests fail with CORS errors, connection failures, or "FAILED TO FETCH" errors, or when checking connection status.
    - Tips:
-     - ALWAYS format links as compact markdown hyperlinks with descriptive labels (e.g., \`[Chrome Web Store](https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf)\`). Never output raw/unformatted URLs in your text responses.
+     - ALWAYS format links as compact markdown hyperlinks with descriptive labels (e.g., \`[Chrome Web Store](${EXTENSION_CHROME_WEB_STORE_URL})\`). Never output raw/unformatted URLs in your text responses.
      - If the tool returns connected: true, confirm to the user that the extension is successfully connected and active.
-     - If the tool returns connected: false, you MUST instruct the user to access the [Chrome Web Store](https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf) to install/enable it.
+     - If the tool returns connected: false, you MUST instruct the user to access the [Chrome Web Store](${EXTENSION_CHROME_WEB_STORE_URL}) to install/enable it.
      - Share the following steps to install and enable:
-       1. Access the [Chrome Web Store](https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf) extension page.
+       1. Access the [Chrome Web Store](${EXTENSION_CHROME_WEB_STORE_URL}) extension page.
        2. Click "Add to Chrome" (or "Get" if using Microsoft Edge) to install the extension.
        3. Open extension settings (chrome://extensions/ or edge://extensions/), verify that the "Surge API Request Helper" extension is toggled to Enabled and not blocked by policies.
        4. Reload the current page tab to activate the connection.

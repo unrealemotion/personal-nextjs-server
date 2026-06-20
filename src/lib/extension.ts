@@ -1,4 +1,5 @@
 import { getHostname } from "./dns";
+import { EXTENSION_SETUP_RULES_TIMEOUT_MS, EXTENSION_CLEAR_RULES_TIMEOUT_MS } from "./config";
 
 export function sendToExtension(payload: any, timeoutMs: number = 0, abortSignal?: AbortSignal): Promise<any> {
     return new Promise((resolve) => {
@@ -83,7 +84,7 @@ export async function setupExtensionRules(
             urlFilter,
             headers: extHeaders,
             initiatorOrigin: window.location.origin
-        }, 10000);
+        }, EXTENSION_SETUP_RULES_TIMEOUT_MS);
         if (res && res.success) {
             return res.ruleId;
         } else if (res && res.error) {
@@ -100,7 +101,7 @@ export async function clearExtensionRules(ruleId: number, contextName: string = 
         await sendToExtension({
             action: "clearRequestRules",
             ruleId
-        }, 5000);
+        }, EXTENSION_CLEAR_RULES_TIMEOUT_MS);
     } catch (e) {
         console.warn(`Failed to clear extension rules for ${contextName}:`, e);
     }

@@ -5,19 +5,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { type AgentProfile, type ToolDefinition } from "./types";
+import { DEFAULT_AGENT_CONFIGS } from "@/lib/config";
 
 const DEFAULT_CONFIGS: Record<"gemini" | "openai" | "custom", { endpoint: string; model: string }> = {
     gemini: {
-        endpoint: "https://generativelanguage.googleapis.com/v1beta/models/",
-        model: "gemini-2.5-flash"
+        endpoint: DEFAULT_AGENT_CONFIGS.gemini.endpoint,
+        model: DEFAULT_AGENT_CONFIGS.gemini.model
     },
     openai: {
-        endpoint: "https://api.openai.com/v1",
-        model: "gpt-4o-mini"
+        endpoint: DEFAULT_AGENT_CONFIGS.openai.endpoint,
+        model: DEFAULT_AGENT_CONFIGS.openai.model
     },
     custom: {
-        endpoint: "http://localhost:11434/v1",
-        model: "llama3"
+        endpoint: DEFAULT_AGENT_CONFIGS.custom.endpoint,
+        model: DEFAULT_AGENT_CONFIGS.custom.model
     }
 };
 

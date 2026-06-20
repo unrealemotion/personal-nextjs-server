@@ -33,9 +33,12 @@ import {
     DialogClose,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
-
-// Threshold version: versions older than this will prompt the user to update the extension.
-const MIN_REQUIRED_EXTENSION_VERSION = "1.0.2";
+import {
+    MIN_REQUIRED_EXTENSION_VERSION,
+    EXTENSION_CHROME_WEB_STORE_FULL_URL,
+    EXTENSION_PROBE_VERSION_TIMEOUT_MS,
+    EXTENSION_PROBE_FALLBACK_TIMEOUT_MS,
+} from "@/lib/config";
 
 function isVersionOlderThan(current: string | null, target: string): boolean {
     if (!current) return true; // Treat null/undefined (older versions) as outdated
@@ -102,7 +105,7 @@ export default function SurgePage() {
             if (active && !version) {
                 // Tier 2: Try direct version query message (for v1.0.3+)
                 try {
-                    const res = await sendToExtension({ action: "getVersion" }, 150);
+                    const res = await sendToExtension({ action: "getVersion" }, EXTENSION_PROBE_VERSION_TIMEOUT_MS);
                     if (res && res.success && res.version) {
                         console.log(`[Extension Probe - ${caller}] Direct getVersion query succeeded:`, res.version);
                         version = res.version;
@@ -114,13 +117,13 @@ export default function SurgePage() {
                 // Tier 3: Probe fallback via fetchProxy (for v1.0.1 / store v1.0.2)
                 if (!version) {
                     try {
-                        const res = await sendToExtension({ action: "fetchProxy", url: "" }, 500);
+                        const res = await sendToExtension({ action: "fetchProxy", url: "" }, EXTENSION_PROBE_FALLBACK_TIMEOUT_MS);
                         if (res && res.error === "Extension timeout") {
                             console.log(`[Extension Probe - ${caller}] Probe timed out. Treating as v1.0.0 (outdated).`);
                             version = "1.0.0";
                         } else {
-                            console.log(`[Extension Probe - ${caller}] Probe succeeded. Treating as v1.0.2 (compatible).`);
-                            version = "1.0.2";
+                            console.log(`[Extension Probe - ${caller}] Probe succeeded. Treating as v${MIN_REQUIRED_EXTENSION_VERSION} (compatible).`);
+                            version = MIN_REQUIRED_EXTENSION_VERSION;
                         }
                     } catch (err) {
                         console.warn(`[Extension Probe - ${caller}] Probe fallback failed:`, err);
@@ -231,7 +234,7 @@ export default function SurgePage() {
                                         <TooltipContent className="bg-neutral-950 border border-amber-500/20 text-white text-xs px-3 py-1.5 rounded-lg shadow-2xl max-w-xs leading-relaxed">
                                             <div className="flex flex-col gap-1 font-sans">
                                                 <span className="font-bold text-amber-400">Extension Update Available!</span>
-                                                <span>Please update to version 1.0.2 or newer to enable all features. Click here to learn how.</span>
+                                                <span>Please update to version {MIN_REQUIRED_EXTENSION_VERSION} or newer to enable all features. Click here to learn how.</span>
                                             </div>
                                         </TooltipContent>
                                     </Tooltip>
@@ -239,7 +242,7 @@ export default function SurgePage() {
                             )
                         ) : (
                             <a
-                                href="https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf?hl=en-US&utm_source=ext_sidebar"
+                                href={EXTENSION_CHROME_WEB_STORE_FULL_URL}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 hover:border-indigo-500/50 transition-all cursor-pointer group shrink-0"
@@ -356,11 +359,11 @@ export default function SurgePage() {
                                 {browserInfo.name} normally updates extensions automatically in the background, but this rollout can take up to 24–48 hours to reach your browser.
                             </p>
                             <p className="font-semibold text-white/90">
-                                To update immediately to version 1.0.2 (or latest) and use all features:
+                                To update immediately to version {MIN_REQUIRED_EXTENSION_VERSION} (or latest) and use all features:
                             </p>
                             <ol className="list-decimal pl-4 space-y-2 text-white/80">
                                 <li>
-                                    Open the <a href="https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf?hl=en-US&utm_source=ext_sidebar" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 font-bold underline cursor-pointer">Chrome Web Store Page</a>.
+                                    Open the <a href={EXTENSION_CHROME_WEB_STORE_FULL_URL} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 font-bold underline cursor-pointer">Chrome Web Store Page</a>.
                                 </li>
                                 <li>
                                     Click <strong>Remove from {browserInfo.short}</strong> {browserInfo.isEdge ? "(or Remove if prompted)" : ""} to uninstall the older version.
@@ -376,7 +379,7 @@ export default function SurgePage() {
                             <Button variant="ghost" size="sm" className="text-xs hover:bg-white/5 text-white/80">Close</Button>
                         </DialogClose>
                         <a
-                            href="https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf?hl=en-US&utm_source=ext_sidebar"
+                            href={EXTENSION_CHROME_WEB_STORE_FULL_URL}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 cursor-pointer transition-colors shadow-md shadow-indigo-600/35"

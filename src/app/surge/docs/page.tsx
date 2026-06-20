@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import { EXTENSION_CHROME_WEB_STORE_FULL_URL } from "@/lib/config";
 import {
     UploadCloud,
     PenTool,
@@ -191,7 +192,7 @@ export default function DocsPage() {
 
                             <div className="flex justify-center">
                                 <a
-                                    href="https://chromewebstore.google.com/detail/surge-api-request-helper/opidpbaclhjhjppolfpflbloikhflnlf?hl=en-US&utm_source=ext_sidebar"
+                                    href={EXTENSION_CHROME_WEB_STORE_FULL_URL}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition-all shadow-lg shadow-indigo-500/20"
