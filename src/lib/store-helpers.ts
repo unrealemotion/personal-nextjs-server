@@ -52,9 +52,9 @@ export function generateId(): string {
     return Math.random().toString(36).substring(2, 10);
 }
 
-export function createDefaultTemplate(name?: string): RequestTemplate {
+export function createDefaultTemplate(name?: string, id?: string): RequestTemplate {
     return {
-        id: generateId(),
+        id: id || generateId(),
         name: name || "Request 1",
         method: "GET",
         url: "",

@@ -58,7 +58,7 @@ import {
 export type { VariableType };
 export { generateId, createDefaultApiRequest, saveCheckpoint, loadCheckpoint, deleteCheckpoint };
 
-const initialTemplate = createDefaultTemplate();
+const initialTemplate = createDefaultTemplate("Request 1", "step_default");
 
 const defaultState: AppState = {
     originalData: [

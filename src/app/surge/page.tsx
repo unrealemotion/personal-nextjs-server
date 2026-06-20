@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useEffect } from "react";
+import React, { useEffect } from "react";
 import { useStore } from "@tanstack/react-store";
 import { FileUploader } from "@/components/uploader/FileUploader";
 import { RequestDesigner } from "@/components/editor/RequestDesigner";
@@ -8,7 +8,7 @@ import { ExecutionPanel } from "@/components/execution/ExecutionPanel";
 import { ResultsTable } from "@/components/results/ResultsTable";
 import { ApiClientWorkspace } from "@/components/api-client/ApiClientWorkspace";
 import dynamic from "next/dynamic";
-
+ 
 const AgentChatPanel = dynamic(
     () => import("@/components/agent/AgentChatPanel").then((mod) => mod.AgentChatPanel),
     { ssr: false }
@@ -17,7 +17,6 @@ import { Download, Upload, Trash2, AlertTriangle } from "lucide-react";
 import { EtherealAiSymbol } from "@/components/agent/EtherealAiSymbol";
 import { exportState, importState, resetStore, hydrateStore, store, setCurrentView } from "@/lib/store";
 import { useLocalTransition } from "@/lib/transitions";
-import { readFileAsText } from "@/lib/file-utils";
 import { useFileImporter } from "@/lib/hooks";
 import { LoadingTransition } from "@/components/layout/LoadingTransition";
 import { Button } from "@/components/ui/button";
@@ -58,6 +57,7 @@ function isVersionOlderThan(current: string | null, target: string): boolean {
 export default function SurgePage() {
     const currentView = useStore(store, (state) => state.currentView || "api_client");
     const [isPending, startLocalTransition] = useLocalTransition();
+    const [mounted, setMounted] = React.useState(false);
 
     const [isExtensionActive, setIsExtensionActive] = React.useState(false);
     const [extensionVersion, setExtensionVersion] = React.useState<string | null>(null);
@@ -81,6 +81,7 @@ export default function SurgePage() {
                 short: isEdge ? "Edge" : "Chrome",
                 isEdge
             });
+            setMounted(true);
         }
     }, []);
 
@@ -97,18 +98,23 @@ export default function SurgePage() {
 
     useEffect(() => {
         hydrateStore();
+        let resolvedVersion: string | null = null;
+        let hasProbed = false;
+
         const checkExtension = async (caller: string) => {
             const activeAttr = document.documentElement.getAttribute("data-surge-extension-active");
-            let version = document.documentElement.getAttribute("data-surge-extension-version");
+            let version = document.documentElement.getAttribute("data-surge-extension-version") || resolvedVersion;
             const active = activeAttr === "true";
             
-            if (active && !version) {
+            if (active && !version && !hasProbed) {
+                hasProbed = true;
                 // Tier 2: Try direct version query message (for v1.0.3+)
                 try {
                     const res = await sendToExtension({ action: "getVersion" }, EXTENSION_PROBE_VERSION_TIMEOUT_MS);
                     if (res && res.success && res.version) {
                         console.log(`[Extension Probe - ${caller}] Direct getVersion query succeeded:`, res.version);
                         version = res.version;
+                        resolvedVersion = res.version;
                     }
                 } catch (e) {
                     console.warn(`[Extension Probe - ${caller}] Direct version query failed:`, e);
@@ -121,13 +127,16 @@ export default function SurgePage() {
                         if (res && res.error === "Extension timeout") {
                             console.log(`[Extension Probe - ${caller}] Probe timed out. Treating as v1.0.0 (outdated).`);
                             version = "1.0.0";
+                            resolvedVersion = "1.0.0";
                         } else {
                             console.log(`[Extension Probe - ${caller}] Probe succeeded. Treating as v${MIN_REQUIRED_EXTENSION_VERSION} (compatible).`);
                             version = MIN_REQUIRED_EXTENSION_VERSION;
+                            resolvedVersion = MIN_REQUIRED_EXTENSION_VERSION;
                         }
                     } catch (err) {
                         console.warn(`[Extension Probe - ${caller}] Probe fallback failed:`, err);
                         version = "1.0.0";
+                        resolvedVersion = "1.0.0";
                     }
                 }
             }
@@ -164,6 +173,14 @@ export default function SurgePage() {
             console.error("Failed to read file:", err);
         }
     );
+
+    if (!mounted) {
+        return (
+            <div className="min-h-screen flex flex-col relative bg-background text-foreground font-sans justify-center items-center">
+                <LoadingTransition local={false} isLoading={true} />
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen flex flex-col relative bg-background text-foreground font-sans selection:bg-primary/20">

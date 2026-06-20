@@ -60,6 +60,7 @@ export function sendToExtension(payload: any, timeoutMs: number = 0, abortSignal
         }
 
         window.postMessage({
+            target: "surge-extension",
             source: "surge-page",
             requestId,
             payload

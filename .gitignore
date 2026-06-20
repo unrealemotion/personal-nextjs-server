@@ -46,4 +46,7 @@ package-lock.json
 
 # rust
 /src/lib/surge-wasm/target/
-/src/lib/surge-wasm/Cargo.lock
+/src/lib/surge-wasm/Cargo.lock
+
+/docs
+/plans
