@@ -205,7 +205,7 @@ export async function runBulkExecution(
                     urlFilter,
                     headers,
                     initiatorOrigin: window.location.origin
-                });
+                }, 10000);
                 if (res && res.success) {
                     extensionRuleIds.push(res.ruleId);
                 } else if (res && res.error) {
@@ -224,7 +224,7 @@ export async function runBulkExecution(
                     await sendToExtension({
                         action: "clearRequestRules",
                         ruleId
-                    });
+                    }, 5000);
                 } catch (e) {
                     console.warn("Failed to clear extension rules:", e);
                 }
@@ -358,6 +358,30 @@ export async function runBulkExecution(
                                 response: { success: false, error: err.message }
                             });
                         });
+                    } else if (payload.action === "fetchProxy") {
+                        const isExtensionActive = typeof document !== "undefined" &&
+                            document.documentElement.getAttribute("data-surge-extension-active") === "true";
+                        if (isExtensionActive) {
+                            sendToExtension(payload, 15000, abortSignal).then(response => {
+                                worker.postMessage({
+                                    type: "RESPONSE_MAIN_THREAD",
+                                    reqId,
+                                    response
+                                });
+                            }).catch((err: any) => {
+                                worker.postMessage({
+                                    type: "RESPONSE_MAIN_THREAD",
+                                    reqId,
+                                    response: { success: false, error: err.message }
+                                });
+                            });
+                        } else {
+                            worker.postMessage({
+                                type: "RESPONSE_MAIN_THREAD",
+                                reqId,
+                                response: { success: false, error: "Extension not active" }
+                            });
+                        }
                     }
                 } else if (type === "COMPLETE") {
                     if (throttleTimeout) {

@@ -373,7 +373,8 @@ export async function executeStep(
     retryStatusCodes: string,
     abortSignal?: AbortSignal,
     setupExtensionRulesCallback?: (url: string, headers: Record<string, string>) => Promise<number | null>,
-    clearExtensionRulesCallback?: (ruleId: number) => Promise<void>
+    clearExtensionRulesCallback?: (ruleId: number) => Promise<void>,
+    fetchProxyCallback?: (url: string, options: any) => Promise<any>
 ): Promise<StepResult> {
     let url = interpolate(template.url, row);
 
@@ -526,32 +527,80 @@ export async function executeStep(
                     fetchOpts.body = fetchBody;
                 }
 
-                const response = await fetch(url, fetchOpts);
-                stepResult.statusCode = response.status;
-                stepResult.responseType = response.type;
-                stepResult.responseRedirected = response.redirected;
-                stepResult.responseStatusText = response.statusText;
+                let response;
+                let isProxied = false;
+                let proxyResult: any = null;
 
-                const responseHeaders: Record<string, string> = {};
-                response.headers.forEach((val, key) => {
-                    responseHeaders[key] = val;
-                });
-                stepResult.responseHeaders = responseHeaders;
+                try {
+                    response = await fetch(url, fetchOpts);
+                } catch (fetchErr: any) {
+                    if (fetchErr.name === "AbortError") {
+                        throw fetchErr;
+                    }
+                    if (fetchProxyCallback) {
+                        console.warn("Worker fetch failed. Retrying via extension fetchProxy...", fetchErr);
+                        const headersObj: Record<string, string> = {};
+                        headers.forEach((val, key) => {
+                            headersObj[key] = val;
+                        });
+                        const proxyOpts: any = {
+                            method: template.method,
+                            headers: headersObj,
+                            body: typeof fetchBody === "string" ? fetchBody : fetchBody
+                        };
+                        const proxyRes = await fetchProxyCallback(url, proxyOpts);
+                        if (proxyRes && proxyRes.success) {
+                            isProxied = true;
+                            proxyResult = proxyRes;
+                        } else {
+                            throw new Error(proxyRes?.error || "Extension proxy fetch failed.");
+                        }
+                    } else {
+                        throw fetchErr;
+                    }
+                }
+
+                if (isProxied && proxyResult) {
+                    stepResult.statusCode = proxyResult.status;
+                    stepResult.responseType = "cors";
+                    stepResult.responseRedirected = false;
+                    stepResult.responseStatusText = proxyResult.statusText || ("HTTP " + proxyResult.status);
+                    stepResult.responseHeaders = proxyResult.headers || {};
+                    stepResult.responseBody = proxyResult.body;
+                    try {
+                        const parsed = JSON.parse(proxyResult.body);
+                        stepResult.responseBody = parsed;
+                    } catch {}
+                    if (proxyResult.status < 200 || proxyResult.status >= 300) {
+                        stepResult.error = "HTTP " + proxyResult.status;
+                    }
+                } else if (response) {
+                    stepResult.statusCode = response.status;
+                    stepResult.responseType = response.type;
+                    stepResult.responseRedirected = response.redirected;
+                    stepResult.responseStatusText = response.statusText;
+
+                    const responseHeaders: Record<string, string> = {};
+                    response.headers.forEach((val, key) => {
+                        responseHeaders[key] = val;
+                    });
+                    stepResult.responseHeaders = responseHeaders;
+
+                    const contentType = response.headers.get("content-type");
+                    if (contentType && contentType.includes("application/json")) {
+                        stepResult.responseBody = await response.json();
+                    } else {
+                        stepResult.responseBody = await response.text();
+                    }
+
+                    if (!response.ok) {
+                        stepResult.error = "HTTP " + response.status;
+                    }
+                }
 
                 try {
                     stepResult.ipAddress = await resolveHostnameIp(url);
                 } catch {}
-
-                const contentType = response.headers.get("content-type");
-                if (contentType && contentType.includes("application/json")) {
-                    stepResult.responseBody = await response.json();
-                } else {
-                    stepResult.responseBody = await response.text();
-                }
-
-                if (!response.ok) {
-                    stepResult.error = `HTTP ${response.status}`;
-                }
             } catch (error: any) {
                 if (error.name === 'AbortError') {
                     stepResult.error = "Execution Cancelled by User";

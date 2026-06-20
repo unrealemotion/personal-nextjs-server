@@ -1,6 +1,6 @@
 import { store } from "./store";
 import { runPreRequestScript, runTestScript, resolveVariables } from "./sandbox";
-import { setupExtensionRules, clearExtensionRules } from "./extension";
+import { setupExtensionRules, clearExtensionRules, sendToExtension } from "./extension";
 import { stripJsonComments } from "./executor-utils";
 import { type ApiRequest, type KeyValuePair, type ApiCollection, type Environment } from "./schema";
 import { findParentCollection, getRawLanguageContentType } from "./utils";
@@ -224,7 +224,9 @@ export async function executeFrontendRequest(
         }
 
         const startTime = performance.now();
-        let fetchRes;
+        let fetchRes: Response | undefined;
+        let isProxied = false;
+        let proxyResult: any = null;
         try {
             fetchRes = await fetch(interpolatedUrl, {
                 method: request.method,
@@ -233,6 +235,37 @@ export async function executeFrontendRequest(
                 mode: "cors",
                 signal: abortSignal
             });
+        } catch (fetchErr: any) {
+            if (fetchErr.name === "AbortError") {
+                throw fetchErr;
+            }
+            if (isExtensionActive) {
+                console.warn("Standard fetch failed. Retrying via extension fetchProxy...", fetchErr);
+                const headersObj: Record<string, string> = {};
+                headers.forEach((val, key) => {
+                    headersObj[key] = val;
+                });
+                const proxyOpts: any = {
+                    method: request.method,
+                    headers: headersObj,
+                };
+                if (request.method !== "GET" && request.method !== "HEAD" && fetchBody !== null && fetchBody !== undefined) {
+                    proxyOpts.body = typeof fetchBody === "string" ? fetchBody : fetchBody;
+                }
+                const proxyRes = await sendToExtension({
+                    action: "fetchProxy",
+                    url: interpolatedUrl,
+                    options: proxyOpts
+                }, 15000, abortSignal);
+                if (proxyRes && proxyRes.success) {
+                    isProxied = true;
+                    proxyResult = proxyRes;
+                } else {
+                    throw new Error(proxyRes?.error || "Extension proxy fetch failed.");
+                }
+            } else {
+                throw fetchErr;
+            }
         } finally {
             if (extensionRuleId !== null) {
                 await clearExtensionRules(extensionRuleId);
@@ -240,20 +273,31 @@ export async function executeFrontendRequest(
         }
         const endTime = performance.now();
 
-        const text = await fetchRes.text();
-        const resHeadersMap: Record<string, string> = {};
-        fetchRes.headers.forEach((val, key) => {
-            resHeadersMap[key] = val;
-        });
-
-        const initialResponse = {
-            status: fetchRes.status,
-            statusText: fetchRes.statusText,
-            timeMs: Math.round(endTime - startTime),
-            sizeBytes: text.length,
-            body: text,
-            headers: resHeadersMap,
-        };
+        let initialResponse;
+        if (isProxied && proxyResult) {
+            initialResponse = {
+                status: proxyResult.status,
+                statusText: proxyResult.statusText || ("HTTP " + proxyResult.status),
+                timeMs: Math.round(endTime - startTime),
+                sizeBytes: proxyResult.body ? proxyResult.body.length : 0,
+                body: proxyResult.body || "",
+                headers: proxyResult.headers || {},
+            };
+        } else {
+            const text = await fetchRes!.text();
+            const resHeadersMap: Record<string, string> = {};
+            fetchRes!.headers.forEach((val, key) => {
+                resHeadersMap[key] = val;
+            });
+            initialResponse = {
+                status: fetchRes!.status,
+                statusText: fetchRes!.statusText,
+                timeMs: Math.round(endTime - startTime),
+                sizeBytes: text.length,
+                body: text,
+                headers: resHeadersMap,
+            };
+        }
 
         const { testResults } = executeTestScripts(
             request.testScript,

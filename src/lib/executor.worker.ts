@@ -32,6 +32,15 @@ const setupExtensionRulesCallback = async (url: string, headers: Record<string, 
     return res && res.success ? res.ruleId : null;
 };
 
+const fetchProxyCallback = async (url: string, options: any): Promise<any> => {
+    const res = await requestFromMainThread({
+        action: "fetchProxy",
+        url,
+        options
+    });
+    return res;
+};
+
 const clearExtensionRulesCallback = async (ruleId: number): Promise<void> => {
     await requestFromMainThread({
         action: "clearRequestRules",
@@ -85,7 +94,8 @@ async function executeRowSteps(
                 retryStatusCodes,
                 signal,
                 setupExtensionRulesCallback,
-                clearExtensionRulesCallback
+                clearExtensionRulesCallback,
+                setupExtensionRulesCallback ? fetchProxyCallback : undefined
             );
             steps.push(stepResult);
 

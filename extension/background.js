@@ -18,10 +18,15 @@ async function performProxyFetch(url, options, contextLabel) {
     }
     const res = await fetch(url, options);
     const text = await res.text();
+    const headers = {};
+    res.headers.forEach((val, key) => {
+      headers[key] = val;
+    });
     return {
       success: true,
       status: res.status,
       statusText: res.statusText,
+      headers: headers,
       body: text
     };
   } catch (err) {
@@ -58,7 +63,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         { header: "Access-Control-Allow-Headers", operation: "set", value: "Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie, *" }
       ];
 
-      const condition = {};
+      const condition = {
+        resourceTypes: ["xmlhttprequest"]
+      };
 
       // If urlFilter is '*' or empty, omit it so it matches all requests (safe since rule is short-lived)
       if (urlFilter && urlFilter !== "*") {

@@ -83,7 +83,7 @@ export async function setupExtensionRules(
             urlFilter,
             headers: extHeaders,
             initiatorOrigin: window.location.origin
-        });
+        }, 10000);
         if (res && res.success) {
             return res.ruleId;
         } else if (res && res.error) {
@@ -100,7 +100,7 @@ export async function clearExtensionRules(ruleId: number, contextName: string = 
         await sendToExtension({
             action: "clearRequestRules",
             ruleId
-        });
+        }, 5000);
     } catch (e) {
         console.warn(`Failed to clear extension rules for ${contextName}:`, e);
     }
