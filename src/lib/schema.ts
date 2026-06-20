@@ -18,6 +18,7 @@ export const requestTemplateSchema = z.object({
     })
   ).optional(),
   body: z.any().optional(),
+  enabled: z.boolean().optional(),
 });
 
 export type RequestTemplate = z.infer<typeof requestTemplateSchema>;

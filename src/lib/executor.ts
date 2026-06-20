@@ -167,7 +167,7 @@ export async function runBulkExecution(
             // Group by hostname
             const hostnameRules: Record<string, Array<{ name: string; value: string }>> = {};
 
-            templates.forEach(template => {
+            templates.filter(t => t.enabled !== false).forEach(template => {
                 const resolvedUrl = interpolateString(template.url);
                 let hostname = "*";
                 try {
@@ -387,7 +387,7 @@ export async function runBulkExecution(
                 taskItems: taskItemsToRun,
                 total: allTaskItems.length,
                 initialCompleted,
-                templates,
+                templates: templates.filter(t => t.enabled !== false),
                 concurrencyLimit,
                 singleRowIndex,
                 maxRetries: state.maxRetries ?? 0,

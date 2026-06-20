@@ -66,6 +66,7 @@ export function createDefaultTemplate(name?: string): RequestTemplate {
             formdata: [],
             urlencoded: [],
         },
+        enabled: true,
     };
 }
 

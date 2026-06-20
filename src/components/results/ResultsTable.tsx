@@ -542,6 +542,16 @@ function ColumnHeaderWithFilter({
         return Array.from(values).sort();
     }, [rawTableData, colId, popoverOpen]);
 
+    const valueCounts = useMemo(() => {
+        if (!popoverOpen) return {} as Record<string, number>;
+        const counts: Record<string, number> = {};
+        rawTableData.forEach(row => {
+            const val = String(row[colId] ?? "");
+            counts[val] = (counts[val] || 0) + 1;
+        });
+        return counts;
+    }, [rawTableData, colId, popoverOpen]);
+
     const handleSort = (direction: "asc" | "desc" | null) => {
         setTableFilterConfig({ sortBy: direction ? colId : null, sortOrder: direction });
     };
@@ -699,13 +709,18 @@ function ColumnHeaderWithFilter({
                                             onCheckedChange={() => toggleValueLocal(val)}
                                             className="w-3.5 h-3.5"
                                         />
-                                        <span 
-                                            className="truncate max-w-[140px] cursor-pointer select-none" 
-                                            title={val}
-                                            onClick={() => toggleValueLocal(val)}
-                                        >
-                                            {val === "" ? <em className="text-muted-foreground/60">(Blank)</em> : val}
-                                        </span>
+                                        <div className="flex-grow flex items-center justify-between min-w-0 pr-1 select-none">
+                                            <span 
+                                                className="truncate max-w-[110px] cursor-pointer" 
+                                                title={val}
+                                                onClick={() => toggleValueLocal(val)}
+                                            >
+                                                {val === "" ? <em className="text-muted-foreground/60">(Blank)</em> : val}
+                                            </span>
+                                            <span className="text-[10px] text-muted-foreground/80 font-mono ml-1 shrink-0">
+                                                ({valueCounts[val] ?? 0})
+                                            </span>
+                                        </div>
                                     </div>
                                 ))
                             ) : (
@@ -1072,6 +1087,9 @@ const ColumnMappingRow = React.memo(function ColumnMappingRow({
     );
 });
 
+const sharedCoreRowModel = getCoreRowModel();
+const sharedPaginationRowModel = getPaginationRowModel();
+
 const ResultsTableView = React.memo(function ResultsTableView({
     data,
     rawTableData,
@@ -1089,8 +1107,8 @@ const ResultsTableView = React.memo(function ResultsTableView({
     const table = useReactTable({
         data,
         columns,
-        getCoreRowModel: getCoreRowModel(),
-        getPaginationRowModel: getPaginationRowModel(),
+        getCoreRowModel: sharedCoreRowModel,
+        getPaginationRowModel: sharedPaginationRowModel,
         autoResetPageIndex: false,
         initialState: {
             pagination: { pageSize: 20 },
@@ -1226,7 +1244,7 @@ const ResultsTableView = React.memo(function ResultsTableView({
                         {table.getHeaderGroups().map((headerGroup) => (
                             <TableRow key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
-                                    <TableHead key={header.id}>
+                                    <TableHead key={header.id} className="sticky top-0 bg-neutral-950/95 z-20 shadow-[0_1px_0_0_rgba(255,255,255,0.05)]">
                                         {header.isPlaceholder
                                             ? null
                                             : flexRender(

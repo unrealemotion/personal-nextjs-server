@@ -3,7 +3,7 @@
 import React, { useCallback, useRef, useEffect } from "react";
 import Editor from "@monaco-editor/react";
 import { useStore } from "@tanstack/react-store";
-import { store, updateTemplate, addTemplate, removeTemplate, setActiveTemplate, reorderTemplates } from "@/lib/store";
+import { store, updateTemplate, updateTemplateById, addTemplate, removeTemplate, setActiveTemplate, reorderTemplates } from "@/lib/store";
 import { 
     processTemplateForFormatting, 
     setupMonacoJsonEditor, 
@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { Plus, Trash2, Copy, GripVertical, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Copy, GripVertical, ChevronDown, CheckSquare, Square } from "lucide-react";
 import { parseCurl, generateCurl, generateFetch, generateAxios, generatePython } from "@/lib/curl";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
@@ -57,16 +57,20 @@ interface SortableStepProps {
     onSelect: () => void;
     onRemove: () => void;
     canRemove: boolean;
+    onToggleEnabledMouseDown: (tmplId: string, currentEnabled: boolean) => void;
 }
 
-function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove }: SortableStepProps) {
+function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove, onToggleEnabledMouseDown }: SortableStepProps) {
     const { attributes, listeners, setNodeRef, style } = useSortableStyle(tmpl.id);
 
     return (
         <div
             ref={setNodeRef}
             style={style}
-            className={`flex items-center space-x-2 px-2 py-2 rounded-md border cursor-pointer transition-all group ${isActive
+            data-step-id={tmpl.id}
+            className={`flex items-center space-x-2 px-2 py-2 rounded-md border cursor-pointer transition-all group ${
+                tmpl.enabled === false ? "opacity-50 border-dashed bg-muted/20 text-muted-foreground" : ""
+            } ${isActive
                 ? "bg-primary/10 border-primary/50 shadow-sm"
                 : "bg-background/50 border-border/50 hover:border-primary/30 hover:bg-muted/30"
                 }`}
@@ -80,6 +84,26 @@ function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove }: Sor
             >
                 <GripVertical className="w-3.5 h-3.5" />
             </div>
+
+            <Button
+                variant="ghost"
+                size="icon"
+                className="w-6 h-6 text-muted-foreground hover:text-foreground shrink-0"
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onToggleEnabledMouseDown(tmpl.id, tmpl.enabled !== false);
+                }}
+            >
+                {tmpl.enabled !== false ? (
+                    <CheckSquare className="w-3.5 h-3.5 text-indigo-400" />
+                ) : (
+                    <Square className="w-3.5 h-3.5" />
+                )}
+            </Button>
+
             <div className="flex-1 min-w-0 overflow-hidden">
                 <p className="text-xs font-semibold truncate">{tmpl.name}</p>
                 <p className="text-[10px] text-muted-foreground font-mono truncate">{tmpl.method} {tmpl.url || "No URL"}</p>
@@ -98,14 +122,17 @@ function SortableStepItem({ tmpl, isActive, onSelect, onRemove, canRemove }: Sor
     );
 }
 
-function SortableMobileStep({ tmpl, isActive, onSelect, onRemove, canRemove }: SortableStepProps) {
+function SortableMobileStep({ tmpl, isActive, onSelect, onRemove, canRemove, onToggleEnabledMouseDown }: SortableStepProps) {
     const { attributes, listeners, setNodeRef, style } = useSortableStyle(tmpl.id);
 
     return (
         <div
             ref={setNodeRef}
             style={style}
-            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border text-xs whitespace-nowrap cursor-pointer transition-all shrink-0 ${isActive
+            data-step-id={tmpl.id}
+            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border text-xs whitespace-nowrap cursor-pointer transition-all shrink-0 ${
+                tmpl.enabled === false ? "opacity-50 border-dashed bg-muted/20 text-muted-foreground" : ""
+            } ${isActive
                 ? "bg-primary/10 border-primary/50 shadow-sm"
                 : "bg-background/50 border-border/50"
                 }`}
@@ -119,6 +146,24 @@ function SortableMobileStep({ tmpl, isActive, onSelect, onRemove, canRemove }: S
             >
                 <GripVertical className="w-3 h-3" />
             </div>
+
+            <button
+                className="text-muted-foreground hover:text-foreground shrink-0"
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onToggleEnabledMouseDown(tmpl.id, tmpl.enabled !== false);
+                }}
+            >
+                {tmpl.enabled !== false ? (
+                    <CheckSquare className="w-3.5 h-3.5 text-indigo-400" />
+                ) : (
+                    <Square className="w-3.5 h-3.5" />
+                )}
+            </button>
+
             <span className="font-semibold truncate max-w-[100px]">{tmpl.name}</span>
             {canRemove && (
                 <button
@@ -138,12 +183,78 @@ export function RequestDesigner() {
     const headers = useStore(store, (state) => state.headers);
     const template = templates.find(t => t.id === activeTemplateId) || templates[0];
 
+    const dragEnabledRef = useRef<{ active: boolean; value: boolean } | null>(null);
+    const mouseUpCleanupRef = useRef<(() => void) | null>(null);
+
+    const preventDefaultDrag = useCallback((e: DragEvent) => {
+        e.preventDefault();
+    }, []);
+
+    const disableSelectionAndDrag = useCallback(() => {
+        document.body.style.userSelect = "none";
+        document.body.style.webkitUserSelect = "none";
+        window.addEventListener("dragstart", preventDefaultDrag);
+    }, [preventDefaultDrag]);
+
+    const restoreSelectionAndDrag = useCallback(() => {
+        document.body.style.userSelect = "";
+        document.body.style.webkitUserSelect = "";
+        window.removeEventListener("dragstart", preventDefaultDrag);
+    }, [preventDefaultDrag]);
+
+    useEffect(() => {
+        return () => {
+            if (mouseUpCleanupRef.current) mouseUpCleanupRef.current();
+            restoreSelectionAndDrag();
+        };
+    }, [restoreSelectionAndDrag]);
+
+    const handleToggleEnabledMouseDown = useCallback((tmplId: string, currentEnabled: boolean) => {
+        const targetValue = !currentEnabled;
+        dragEnabledRef.current = { active: true, value: targetValue };
+        disableSelectionAndDrag();
+        
+        updateTemplateById(tmplId, { enabled: targetValue });
+
+        const handlePointerMove = (e: PointerEvent) => {
+            if (!dragEnabledRef.current?.active) return;
+            const elem = document.elementFromPoint(e.clientX, e.clientY);
+            const rowEl = elem?.closest("[data-step-id]");
+            if (rowEl) {
+                const stepId = rowEl.getAttribute("data-step-id");
+                if (stepId) {
+                    const tmpl = store.state.templates.find(t => t.id === stepId);
+                    if (tmpl && (tmpl.enabled !== false) !== targetValue) {
+                        updateTemplateById(stepId, { enabled: targetValue });
+                    }
+                }
+            }
+        };
+
+        const handlePointerUp = () => {
+            dragEnabledRef.current = null;
+            restoreSelectionAndDrag();
+            window.removeEventListener("pointermove", handlePointerMove, true);
+            window.removeEventListener("pointerup", handlePointerUp, true);
+            mouseUpCleanupRef.current = null;
+        };
+        
+        if (mouseUpCleanupRef.current) {
+            mouseUpCleanupRef.current();
+        }
+        
+        window.addEventListener("pointermove", handlePointerMove, true);
+        window.addEventListener("pointerup", handlePointerUp, true);
+        mouseUpCleanupRef.current = handlePointerUp;
+    }, [disableSelectionAndDrag, restoreSelectionAndDrag]);
+
     const getStepProps = (tmpl: RequestTemplate) => ({
         tmpl,
         isActive: tmpl.id === activeTemplateId,
         onSelect: () => setActiveTemplate(tmpl.id),
         onRemove: () => removeTemplate(tmpl.id),
         canRemove: templates.length > 1,
+        onToggleEnabledMouseDown: handleToggleEnabledMouseDown,
     });
 
 

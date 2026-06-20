@@ -33,7 +33,7 @@ export function ExecutionPanel() {
 
 
     const totalRows = fileData.length;
-    const canRun = totalRows > 0 && templates.some(t => t.url.trim().length > 0);
+    const canRun = totalRows > 0 && templates.filter(t => t.enabled !== false).some(t => t.url.trim().length > 0);
 
     const handleRun = async () => {
         if (!canRun) return;

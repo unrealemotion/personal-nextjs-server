@@ -599,7 +599,7 @@ export const removeTemplate = (id: string) => {
     });
 };
 
-const updateTemplateById = (id: string, updates: Partial<RequestTemplate>) => {
+export const updateTemplateById = (id: string, updates: Partial<RequestTemplate>) => {
     store.setState((state) => ({
         ...state,
         templates: state.templates.map(t =>
