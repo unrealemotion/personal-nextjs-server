@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   title: "UnrealEmo's Tools",
   description: "A meticulously crafted collection of utilities for modern web development.",
   icons: {
-    icon: "/icon.svg",
+    icon: "/favicon.png",
   },
 };
 
