@@ -20,16 +20,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Download, Plus, Trash2, Eye, EyeOff, Copy, Undo2, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play, Settings, Database, ArrowUpRight, ArrowDownLeft, Activity, AlertCircle, Clock, GripVertical } from "lucide-react";
+import { Download, Plus, Trash2, Eye, EyeOff, Copy, Undo2, ChevronsUpDown, Check, ArrowUp, ArrowDown, ListFilter, Loader2, Play, Settings, Database, ArrowUpRight, ArrowDownLeft, Activity, AlertCircle, Clock, GripVertical, Braces } from "lucide-react";
 import { EtherealAiSymbol } from "@/components/agent/EtherealAiSymbol";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as xlsx from "xlsx";
 import Editor from "@monaco-editor/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { stripJsonComments } from "@/lib/executor-utils";
+import { stripJsonComments, normalizeKey } from "@/lib/executor-utils";
 import { CopyableText } from "@/components/ui/CopyableText";
-import { setupExtensionRules, clearExtensionRules } from "@/lib/extension";
+import { setupExtensionRules, clearExtensionRules, sendToExtension } from "@/lib/extension";
 import { toast } from "sonner";
 import { resolveHostnameIp } from "@/lib/dns";
 import { useSortableStyle } from "@/lib/hooks";
@@ -97,22 +97,120 @@ function SearchableSelect({ value, onChange, options, placeholder, className }: 
     );
 }
 
-const pathSegmentsCache = new Map<string, string[]>();
-function getSegments(path: string): string[] {
+type PathSegment =
+    | { type: "property"; key: string }
+    | { type: "index"; index: number }
+    | { type: "filter"; key: string; value: string };
+
+const pathSegmentsCache = new Map<string, PathSegment[]>();
+
+function parsePath(path: string): PathSegment[] {
     let segments = pathSegmentsCache.get(path);
-    if (!segments) {
-        const normalizedPath = path.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
-        segments = normalizedPath.split('.');
-        pathSegmentsCache.set(path, segments);
+    if (segments) return segments;
+
+    segments = [];
+    let i = 0;
+    const len = path.length;
+
+    while (i < len) {
+        if (path[i] === ".") {
+            i++;
+            continue;
+        }
+
+        if (path[i] === "[") {
+            let bracketCount = 1;
+            let j = i + 1;
+            while (j < len && bracketCount > 0) {
+                if (path[j] === "[") bracketCount++;
+                else if (path[j] === "]") bracketCount--;
+                j++;
+            }
+            const content = path.substring(i + 1, j - 1).trim();
+            i = j;
+
+            if (/^\d+$/.test(content)) {
+                segments.push({ type: "index", index: parseInt(content, 10) });
+            } else {
+                const match = content.match(/^([a-zA-Z0-9_$.]+)\s*==?\s*(.*)$/);
+                if (match) {
+                    const filterKey = match[1];
+                    let filterVal = match[2].trim();
+                    if ((filterVal.startsWith('"') && filterVal.endsWith('"')) ||
+                        (filterVal.startsWith("'") && filterVal.endsWith("'"))) {
+                        filterVal = filterVal.substring(1, filterVal.length - 1);
+                    }
+                    segments.push({
+                        type: "filter",
+                        key: filterKey,
+                        value: filterVal
+                    });
+                } else {
+                    let key = content;
+                    if ((key.startsWith('"') && key.endsWith('"')) ||
+                        (key.startsWith("'") && key.endsWith("'"))) {
+                        key = key.substring(1, key.length - 1);
+                    }
+                    segments.push({ type: "property", key });
+                }
+            }
+        } else {
+            let j = i;
+            while (j < len && path[j] !== "." && path[j] !== "[") {
+                j++;
+            }
+            const key = path.substring(i, j).trim();
+            if (key) {
+                segments.push({ type: "property", key });
+            }
+            i = j;
+        }
     }
+
+    pathSegmentsCache.set(path, segments);
     return segments;
+}
+
+function evaluateSegments(obj: any, segments: PathSegment[], lenient: boolean = false): any {
+    let current = obj;
+    for (const segment of segments) {
+        if (current === null || current === undefined) {
+            return undefined;
+        }
+        if (segment.type === "property") {
+            current = current[segment.key];
+        } else if (segment.type === "index") {
+            if (!Array.isArray(current)) {
+                return undefined;
+            }
+            current = current[segment.index];
+        } else if (segment.type === "filter") {
+            if (!Array.isArray(current)) {
+                return undefined;
+            }
+            const { key, value } = segment;
+            let found = current.find((item: any) => {
+                if (!item || typeof item !== "object") {
+                    return false;
+                }
+                const itemVal = getValueByPath(item, key, lenient);
+                return itemVal !== undefined && String(itemVal) === value;
+            });
+
+            if (found === undefined && lenient && current.length > 0) {
+                found = current[0];
+            }
+            current = found;
+        }
+    }
+    return current;
 }
 
 function getByDotNotation(obj: any, path: string): string {
     if (!obj || !path) return "";
     try {
-        const segments = getSegments(path);
-        const value = segments.reduce((acc, part) => acc && acc[part], obj);
+        const segments = parsePath(path);
+        const value = evaluateSegments(obj, segments);
         if (value === undefined || value === null) return "";
         if (typeof value === "object") return JSON.stringify(value);
         return String(value);
@@ -126,18 +224,12 @@ type SuggestionItem = {
     value: string;
 };
 
-function getValueByPath(obj: any, path: string): any {
+function getValueByPath(obj: any, path: string, lenient: boolean = false): any {
     if (!obj) return undefined;
     if (!path) return obj;
     try {
-        const normalizedPath = path.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
-        const parts = normalizedPath.split('.');
-        let current = obj;
-        for (const part of parts) {
-            if (current === null || current === undefined) return undefined;
-            current = current[part];
-        }
-        return current;
+        const segments = parsePath(path);
+        return evaluateSegments(obj, segments, lenient);
     } catch {
         return undefined;
     }
@@ -191,29 +283,105 @@ function mapResponseColumn(col: ColumnMapping, res: ExecutionResult): string {
     return res.status === "pending" ? "..." : "";
 }
 
+function flattenObject(obj: any, prefix: string, res: Record<string, any> = {}): Record<string, any> {
+    if (obj === null || obj === undefined) return res;
+    if (typeof obj !== "object") {
+        res[prefix] = obj;
+        return res;
+    }
+    if (Array.isArray(obj)) {
+        obj.forEach((val, i) => {
+            flattenObject(val, `${prefix}.${i}`, res);
+        });
+    } else {
+        Object.keys(obj).forEach(key => {
+            flattenObject(obj[key], `${prefix}.${key}`, res);
+        });
+    }
+    return res;
+}
+
+function interpolatePath(path: string, res: ExecutionResult, rowData: any): string {
+    if (!path || !path.includes("{{")) return path;
+
+    const jsCtx: Record<string, any> = { ...rowData };
+    const steps = res.steps || [];
+    steps.forEach((step, idx) => {
+        const prefixStep = `Step ${idx}`;
+        const prefixName = step.stepName ? step.stepName.trim() : "";
+
+        const storeFields = (prefix: string) => {
+            jsCtx[`${prefix}.status`] = step.statusCode;
+            jsCtx[`${prefix}.response_time`] = step.responseTimeMs;
+            if (step.error) {
+                jsCtx[`${prefix}.error`] = step.error;
+            }
+            if (step.responseBody !== undefined && step.responseBody !== null) {
+                flattenObject(step.responseBody, `${prefix}.response`, jsCtx);
+            }
+            if (step.requestBody !== undefined && step.requestBody !== null) {
+                flattenObject(step.requestBody, `${prefix}.request.body`, jsCtx);
+            }
+            if (step.requestParams) {
+                Object.entries(step.requestParams).forEach(([k, v]) => {
+                    jsCtx[`${prefix}.request.params.${k}`] = v;
+                });
+            }
+            if (step.requestHeaders) {
+                Object.entries(step.requestHeaders).forEach(([k, v]) => {
+                    jsCtx[`${prefix}.request.headers.${k}`] = v;
+                });
+            }
+            if (step.responseHeaders) {
+                Object.entries(step.responseHeaders).forEach(([k, v]) => {
+                    jsCtx[`${prefix}.response.headers.${k}`] = v;
+                });
+            }
+        };
+
+        storeFields(prefixStep);
+        if (prefixName) {
+            storeFields(prefixName);
+        }
+    });
+
+    return path.replace(/\{\{(.+?)\}\}/g, (_, key) => {
+        const trimmedKey = key.trim();
+        const matchedKey = Object.keys(jsCtx).find(k => k.trim().toLowerCase() === trimmedKey.toLowerCase());
+        if (matchedKey !== undefined) {
+            const value = jsCtx[matchedKey];
+            return value !== undefined ? String(value) : "";
+        }
+        return "";
+    });
+}
+
 function mapColumnValue(col: ColumnMapping, idx: number, res: ExecutionResult, rowData: any, isModified: boolean): any {
-    if (col.source === "status") {
+    const resolvedPath = interpolatePath(col.path, res, rowData);
+    const resolvedCol = { ...col, path: resolvedPath };
+
+    if (resolvedCol.source === "status") {
         return res.status === "pending" ? "Pending" : res.statusCode;
     }
-    if (col.source === "error") {
+    if (resolvedCol.source === "error") {
         return res.error || "";
     }
-    if (col.source === "response_time") {
-        return mapResponseTimeColumn(col, res);
+    if (resolvedCol.source === "response_time") {
+        return mapResponseTimeColumn(resolvedCol, res);
     }
-    if (col.source === "variable") {
-        return rowData[col.path] ?? "";
+    if (resolvedCol.source === "variable") {
+        return rowData[resolvedCol.path] ?? "";
     }
-    if (col.source === "request_body") {
-        return mapRequestBodyColumn(col, res);
+    if (resolvedCol.source === "request_body") {
+        return mapRequestBodyColumn(resolvedCol, res);
     }
-    if (col.source === "request_param") {
-        return mapRequestParamColumn(col, res, rowData);
+    if (resolvedCol.source === "request_param") {
+        return mapRequestParamColumn(resolvedCol, res, rowData);
     }
-    if (col.source === "response") {
-        return mapResponseColumn(col, res);
+    if (resolvedCol.source === "response") {
+        return mapResponseColumn(resolvedCol, res);
     }
-    if (col.source === "modified") {
+    if (resolvedCol.source === "modified") {
         return isModified ? "modified" : "original";
     }
     return "";
@@ -299,19 +467,70 @@ function getJsonBodiesForMapping(col: ColumnMapping, results: ExecutionResult[])
 function getChildrenForPath(bodies: any[], path: string): string[] {
     const keysSet = new Set<string>();
     bodies.forEach((body) => {
-        const val = getValueByPath(body, path);
+        const val = getValueByPath(body, path, true);
         const children = getValueChildren(val);
         children.forEach(child => keysSet.add(child));
     });
     return Array.from(keysSet);
 }
 
-function getSuggestionsForInput(inputVal: string, bodies: any[]): SuggestionItem[] {
+function getArrayItemKeys(bodies: any[], path: string): string[] {
+    const keysSet = new Set<string>();
+    bodies.forEach((body) => {
+        const val = getValueByPath(body, path, true);
+        if (Array.isArray(val)) {
+            val.forEach(item => {
+                if (item && typeof item === "object") {
+                    Object.keys(item).forEach(key => keysSet.add(key));
+                }
+            });
+        }
+    });
+    return Array.from(keysSet);
+}
+
+function getSuggestionsForInput(inputVal: string, bodies: any[], excelHeaders: string[] = []): SuggestionItem[] {
     const suggestions: SuggestionItem[] = [];
     const trimmed = inputVal.trim();
 
-    // 1. If it's a valid path, suggest its children prefixed with a dot
-    if (trimmed) {
+    // 1. Handle double brace variable interpolation: e.g. "data[email={{" or "data[email={{em"
+    const lastOpenBraceIdx = trimmed.lastIndexOf("{{");
+    const lastCloseBraceIdx = trimmed.lastIndexOf("}}");
+    if (lastOpenBraceIdx !== -1 && lastOpenBraceIdx > lastCloseBraceIdx) {
+        const varPrefix = trimmed.substring(lastOpenBraceIdx + 2);
+        excelHeaders.forEach(header => {
+            if (header.toLowerCase().startsWith(varPrefix.toLowerCase())) {
+                suggestions.push({
+                    label: `{{${header}}}`,
+                    value: trimmed.substring(0, lastOpenBraceIdx) + `{{${header}}}`
+                });
+            }
+        });
+        return suggestions;
+    }
+
+    // 2. Handle bracket opening for array filtering: e.g. "list1[" or "list1[item"
+    const lastBracketIdx = trimmed.lastIndexOf("[");
+    const lastCloseBracketIdx = trimmed.lastIndexOf("]");
+    if (lastBracketIdx !== -1 && lastBracketIdx > lastCloseBracketIdx) {
+        const parentPath = trimmed.substring(0, lastBracketIdx);
+        const filterPrefix = trimmed.substring(lastBracketIdx + 1);
+        if (!filterPrefix.includes("=")) {
+            const itemKeys = getArrayItemKeys(bodies, parentPath);
+            itemKeys.forEach(key => {
+                if (key.toLowerCase().startsWith(filterPrefix.toLowerCase())) {
+                    suggestions.push({
+                        label: key,
+                        value: `${parentPath}[${key}=`
+                    });
+                }
+            });
+            return suggestions;
+        }
+    }
+
+    // 3. If it's a valid path (and doesn't end with a dot), suggest its children prefixed with a dot
+    if (trimmed && !trimmed.endsWith(".")) {
         const children = getChildrenForPath(bodies, trimmed);
         children.forEach(child => {
             suggestions.push({
@@ -321,7 +540,7 @@ function getSuggestionsForInput(inputVal: string, bodies: any[]): SuggestionItem
         });
     }
 
-    // 2. Parse parent path and filter based on last dot
+    // 4. Parse parent path and filter based on last dot
     const lastDotIdx = trimmed.lastIndexOf(".");
     let parentPath = "";
     let filter = trimmed;
@@ -361,11 +580,15 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
     const [highlightedIndex, setHighlightedIndex] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
+    const overlayRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     // Sync localValue with prop value from parent
     useEffect(() => {
         setLocalValue(value);
     }, [value]);
+
+    const excelHeaders = useStore(store, (state) => state.headers || []);
 
     const bodies = useMemo(() => {
         if (!isOpen) return [];
@@ -375,8 +598,32 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
     // Use localValue to calculate suggestions
     const suggestions = useMemo(() => {
         if (!isOpen) return [];
-        return getSuggestionsForInput(localValue, bodies);
-    }, [localValue, bodies, isOpen]);
+        return getSuggestionsForInput(localValue, bodies, excelHeaders);
+    }, [localValue, bodies, excelHeaders, isOpen]);
+
+    // Parse variables and check if they exist in excelHeaders
+    const allVars = useMemo(() => {
+        if (!localValue) return [];
+        const matches = localValue.match(/\{\{(.+?)\}\}/g);
+        if (!matches) return [];
+
+        const uniqueKeys = Array.from(new Set(matches.map(m => m.slice(2, -2).trim())));
+        const normHeaders = excelHeaders.map(h => normalizeKey(h));
+
+        return uniqueKeys.map(key => {
+            const normKey = normalizeKey(key);
+            const isDefined = normHeaders.includes(normKey);
+            return {
+                key,
+                isDefined,
+                source: isDefined ? "Excel Column" : "Missing"
+            };
+        });
+    }, [localValue, excelHeaders]);
+
+    const missingVars = allVars.filter(v => !v.isDefined);
+    const hasVariables = allVars.length > 0;
+    const hasMissing = missingVars.length > 0;
 
     useEffect(() => {
         setHighlightedIndex(0);
@@ -423,6 +670,12 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
         }, 300); // 300ms debounce during continuous typing
     };
 
+    const handleScroll = () => {
+        if (inputRef.current && overlayRef.current) {
+            overlayRef.current.scrollLeft = inputRef.current.scrollLeft;
+        }
+    };
+
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -464,15 +717,70 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
         }
     };
 
+    const renderHighlightedText = () => {
+        if (!localValue) return <span className="text-neutral-500">{placeholder}</span>;
+
+        const parts: React.ReactNode[] = [];
+        const regex = /(\{\{.+?\}\})/g;
+        let lastIndex = 0;
+        let match;
+        const normHeaders = excelHeaders.map(h => normalizeKey(h));
+
+        while ((match = regex.exec(localValue)) !== null) {
+            if (match.index > lastIndex) {
+                parts.push(localValue.substring(lastIndex, match.index));
+            }
+
+            const rawVar = match[0];
+            const varName = rawVar.slice(2, -2).trim();
+            const normKey = normalizeKey(varName);
+            const isDefined = normHeaders.includes(normKey);
+
+            parts.push(
+                <span
+                    key={match.index}
+                    className={cn(
+                        "font-mono rounded-sm",
+                        isDefined
+                            ? "text-emerald-400 bg-emerald-500/10"
+                            : "text-red-400 bg-red-500/10"
+                    )}
+                >
+                    {rawVar}
+                </span>
+            );
+
+            lastIndex = regex.lastIndex;
+        }
+
+        if (lastIndex < localValue.length) {
+            parts.push(localValue.substring(lastIndex));
+        }
+
+        return parts;
+    };
+
     return (
         <div ref={containerRef} className="relative flex-1 min-w-[120px]">
+            {/* Highlights Overlay */}
+            <div
+                ref={overlayRef}
+                className="absolute inset-0 px-3 py-1.5 border border-transparent font-mono text-sm whitespace-pre overflow-hidden pointer-events-none flex items-center"
+                style={{ color: "rgb(229, 229, 229)" }}
+            >
+                {renderHighlightedText()}
+            </div>
+            {/* Input Element */}
             <Input
+                ref={inputRef}
                 value={localValue}
                 onChange={(e) => handleLocalValueChange(e.target.value)}
                 onFocus={() => setIsOpen(true)}
                 onKeyDown={handleKeyDown}
+                onScroll={handleScroll}
                 placeholder={placeholder}
-                className="w-full font-mono text-sm"
+                className="w-full font-mono text-sm bg-transparent text-transparent caret-white"
+                style={{ caretColor: "white" }}
             />
             {isOpen && suggestions.length > 0 && (
                 <div className="absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto custom-scrollbar z-50 bg-neutral-950/95 backdrop-blur-md text-popover-foreground border border-white/10 rounded-md shadow-lg py-1 font-mono text-xs">
@@ -1989,37 +2297,90 @@ export function ResultsTable() {
                 extensionRuleId = await setupExtensionRules(url, reqHeaders, "rerun");
             }
 
+            let isProxied = false;
+            let proxyResult: any = null;
+
             try {
                 try {
-                    const res = await fetch(url, {
-                        method: editMethod,
-                        headers,
-                        body: bodyInit
-                    });
+                    try {
+                        const res = await fetch(url, {
+                            method: editMethod,
+                            headers,
+                            body: bodyInit
+                        });
 
-                    statusCode = res.status;
-                    responseStatusText = res.statusText;
-                    responseType = res.type;
-                    responseRedirected = res.redirected;
+                        statusCode = res.status;
+                        responseStatusText = res.statusText;
+                        responseType = res.type;
+                        responseRedirected = res.redirected;
 
-                    res.headers.forEach((val, key) => {
-                        responseHeaders[key] = val;
-                    });
+                        res.headers.forEach((val, key) => {
+                            responseHeaders[key] = val;
+                        });
+
+                        const contentType = res.headers.get("content-type");
+                        if (contentType && contentType.includes("application/json")) {
+                            responseBody = await res.json();
+                        } else {
+                            responseBody = await res.text();
+                        }
+
+                        if (!res.ok) {
+                            errorMsg = `HTTP ${res.status}`;
+                        }
+                    } catch (fetchErr: any) {
+                        if (isExtensionActive) {
+                            console.warn("Standard fetch failed. Retrying via extension fetchProxy...", fetchErr);
+                            const proxyOpts: any = {
+                                method: editMethod,
+                                headers: reqHeaders,
+                            };
+                            if (editMethod !== "GET" && editMethod !== "HEAD" && bodyInit !== null && bodyInit !== undefined) {
+                                proxyOpts.body = typeof bodyInit === "string" ? bodyInit : JSON.stringify(bodyInit);
+                            }
+                            const proxyRes = await sendToExtension({
+                                action: "fetchProxy",
+                                url,
+                                options: proxyOpts
+                            }, 15000);
+                            if (proxyRes && proxyRes.success) {
+                                isProxied = true;
+                                proxyResult = proxyRes;
+                            } else {
+                                throw new Error(proxyRes?.error || "Extension proxy fetch failed.");
+                            }
+                        } else {
+                            throw fetchErr;
+                        }
+                    }
+
+                    if (isProxied && proxyResult) {
+                        statusCode = proxyResult.status;
+                        responseStatusText = proxyResult.statusText || ("HTTP " + proxyResult.status);
+                        responseBody = proxyResult.body || "";
+
+                        if (typeof responseBody === "string") {
+                            try {
+                                const parsed = JSON.parse(responseBody);
+                                responseBody = parsed;
+                            } catch {
+                                // Keep as string
+                            }
+                        }
+
+                        if (proxyResult.headers) {
+                            Object.entries(proxyResult.headers).forEach(([key, val]) => {
+                                responseHeaders[key.toLowerCase()] = String(val);
+                            });
+                        }
+                        if (statusCode < 200 || statusCode >= 300) {
+                            errorMsg = `HTTP ${statusCode}`;
+                        }
+                    }
 
                     try {
                         ipAddress = await resolveHostnameIp(url);
                     } catch {}
-
-                    const contentType = res.headers.get("content-type");
-                    if (contentType && contentType.includes("application/json")) {
-                        responseBody = await res.json();
-                    } else {
-                        responseBody = await res.text();
-                    }
-
-                    if (!res.ok) {
-                        errorMsg = `HTTP ${res.status}`;
-                    }
                 } finally {
                     if (extensionRuleId !== null) {
                         await clearExtensionRules(extensionRuleId, "rerun");
