@@ -652,6 +652,7 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
     const [localValue, setLocalValue] = useState(value);
     const [isOpen, setIsOpen] = useState(false);
     const [highlightedIndex, setHighlightedIndex] = useState(0);
+    const [cursorPos, setCursorPos] = useState<number | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const overlayRef = useRef<HTMLDivElement>(null);
@@ -669,11 +670,12 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
         return getJsonBodiesForMapping(col, results);
     }, [col, results, isOpen]);
 
-    // Use localValue to calculate suggestions
+    // Use localValue up to the cursor position to calculate suggestions
     const suggestions = useMemo(() => {
         if (!isOpen) return [];
-        return getSuggestionsForInput(localValue, bodies, excelHeaders);
-    }, [localValue, bodies, excelHeaders, isOpen]);
+        const inputValForSuggestions = cursorPos !== null ? localValue.substring(0, cursorPos) : localValue;
+        return getSuggestionsForInput(inputValForSuggestions, bodies, excelHeaders);
+    }, [localValue, cursorPos, bodies, excelHeaders, isOpen]);
 
     // Parse variables and check if they exist in excelHeaders
     const allVars = useMemo(() => {
@@ -734,8 +736,9 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
     }, [onChange]);
 
     // Debounce updates while typing
-    const handleLocalValueChange = (newVal: string) => {
+    const handleLocalValueChange = (newVal: string, selectionStart: number | null) => {
         setLocalValue(newVal);
+        setCursorPos(selectionStart);
         setIsOpen(true);
 
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -749,6 +752,23 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
             overlayRef.current.scrollLeft = inputRef.current.scrollLeft;
         }
     };
+
+    const applySuggestion = useCallback((selectedValue: string) => {
+        const suffix = cursorPos !== null ? localValueRef.current.substring(cursorPos) : "";
+        const newValue = selectedValue + suffix;
+        setLocalValue(newValue);
+        commitValue(newValue);
+
+        const newCursorPos = selectedValue.length;
+        setCursorPos(newCursorPos);
+
+        setTimeout(() => {
+            if (inputRef.current) {
+                inputRef.current.focus();
+                inputRef.current.setSelectionRange(newCursorPos, newCursorPos);
+            }
+        }, 10);
+    }, [cursorPos, commitValue]);
 
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
@@ -780,8 +800,7 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
             e.preventDefault();
             const selected = suggestions[highlightedIndex];
             if (selected) {
-                setLocalValue(selected.value);
-                commitValue(selected.value);
+                applySuggestion(selected.value);
             } else {
                 commitValue(localValue);
             }
@@ -848,8 +867,14 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
             <Input
                 ref={inputRef}
                 value={localValue}
-                onChange={(e) => handleLocalValueChange(e.target.value)}
-                onFocus={() => setIsOpen(true)}
+                onChange={(e) => handleLocalValueChange(e.target.value, e.target.selectionStart)}
+                onFocus={(e) => {
+                    setCursorPos(e.target.selectionStart);
+                    setIsOpen(true);
+                }}
+                onSelect={(e: any) => {
+                    setCursorPos(e.target.selectionStart);
+                }}
                 onKeyDown={handleKeyDown}
                 onScroll={handleScroll}
                 placeholder={placeholder}
@@ -863,16 +888,15 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
                             key={s.value}
                             type="button"
                             onClick={() => {
-                                setLocalValue(s.value);
-                                commitValue(s.value);
-                                containerRef.current?.querySelector("input")?.focus();
+                                applySuggestion(s.value);
+                                setIsOpen(false);
                             }}
                             className={cn(
-                                "w-full text-left px-3 py-1.5 hover:bg-white/10 hover:text-white flex items-center justify-between cursor-pointer border-0 bg-transparent text-white/80",
-                                highlightedIndex === idx && "bg-white/10 text-white"
+                                "w-full text-left px-3 py-1.5 hover:bg-neutral-900 focus:bg-neutral-900 focus:outline-none transition-colors",
+                                idx === highlightedIndex && "bg-neutral-900"
                             )}
                         >
-                            <span>{s.label}</span>
+                            {s.label}
                         </button>
                     ))}
                 </div>
