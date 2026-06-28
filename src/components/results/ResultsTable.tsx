@@ -235,6 +235,80 @@ function getValueByPath(obj: any, path: string, lenient: boolean = false): any {
     }
 }
 
+function getJsonPathForLine(model: any, lineNumber: number, column: number): string | null {
+    const lines: string[] = [];
+    for (let i = 1; i <= lineNumber; i++) {
+        lines.push(model.getLineContent(i));
+    }
+
+    const targetLine = lines[lineNumber - 1];
+    const targetIndent = targetLine.search(/\S/);
+    if (targetIndent === -1) return null;
+
+    const keyMatch = targetLine.match(/"([^"]+)":/);
+    let currentKey = keyMatch ? keyMatch[1] : null;
+
+    let expectedIndent = targetIndent - 2;
+    let currentLineNum = lineNumber - 1;
+
+    const segments: { key: string; isArray: boolean; arrayIndex?: number }[] = [];
+    if (currentKey) {
+        segments.unshift({ key: currentKey, isArray: false });
+    }
+
+    while (expectedIndent >= 0 && currentLineNum > 0) {
+        const line = lines[currentLineNum - 1];
+        const indent = line.search(/\S/);
+
+        if (indent === expectedIndent) {
+            const parentKeyMatch = line.match(/"([^"]+)":/);
+            const isArray = line.trim().endsWith("[");
+
+            if (parentKeyMatch) {
+                const parentKey = parentKeyMatch[1];
+                if (isArray) {
+                    let arrayIndex = 0;
+                    let openBrackets = 0;
+                    for (let i = currentLineNum + 1; i < lineNumber; i++) {
+                        const l = lines[i - 1].trim();
+                        const lIndent = lines[i - 1].search(/\S/);
+                        if (lIndent === expectedIndent + 2) {
+                            if (l === "{" || l === "[" || (!l.startsWith("}") && !l.startsWith("]"))) {
+                                if (openBrackets === 0) {
+                                    arrayIndex++;
+                                }
+                            }
+                        }
+                        for (const char of l) {
+                            if (char === "{" || char === "[") openBrackets++;
+                            if (char === "}" || char === "]") openBrackets--;
+                        }
+                    }
+                    segments.unshift({ key: parentKey, isArray: true, arrayIndex });
+                } else {
+                    segments.unshift({ key: parentKey, isArray: false });
+                }
+            }
+            expectedIndent -= 2;
+        }
+        currentLineNum--;
+    }
+
+    let path = "";
+    segments.forEach((seg, idx) => {
+        if (idx === 0) {
+            path = seg.key;
+        } else {
+            path += "." + seg.key;
+        }
+        if (seg.isArray && seg.arrayIndex !== undefined) {
+            path += `[${seg.arrayIndex}]`;
+        }
+    });
+
+    return path;
+}
+
 function getValueChildren(val: any): string[] {
     if (val === null || val === undefined) return [];
     if (Array.isArray(val)) {
@@ -3312,6 +3386,71 @@ export function ResultsTable() {
                                                                 allowComments: true,
                                                                 comments: "ignore",
                                                                 trailingCommas: "ignore",
+                                                            });
+                                                            let hoverDecorations: string[] = [];
+
+                                                            editor.onMouseMove((e: any) => {
+                                                                const isCtrl = e.event.ctrlKey || e.event.metaKey;
+                                                                const position = e.target.position;
+
+                                                                if (isCtrl && position) {
+                                                                    const model = editor.getModel();
+                                                                    if (model) {
+                                                                        const word = model.getWordAtPosition(position);
+                                                                        if (word) {
+                                                                            const newDecorations = [
+                                                                                {
+                                                                                    range: new monaco.Range(
+                                                                                        position.lineNumber,
+                                                                                        word.startColumn,
+                                                                                        position.lineNumber,
+                                                                                        word.endColumn
+                                                                                    ),
+                                                                                    options: {
+                                                                                        inlineClassName: "text-indigo-400 underline cursor-pointer font-bold",
+                                                                                    }
+                                                                                }
+                                                                            ];
+                                                                            hoverDecorations = editor.deltaDecorations(hoverDecorations, newDecorations);
+                                                                            return;
+                                                                        }
+                                                                    }
+                                                                }
+
+                                                                if (hoverDecorations.length > 0) {
+                                                                    hoverDecorations = editor.deltaDecorations(hoverDecorations, []);
+                                                                }
+                                                            });
+
+                                                            editor.onMouseLeave(() => {
+                                                                if (hoverDecorations.length > 0) {
+                                                                    hoverDecorations = editor.deltaDecorations(hoverDecorations, []);
+                                                                }
+                                                            });
+
+                                                            editor.onMouseDown((e: any) => {
+                                                                if (e.event.leftButton && (e.event.ctrlKey || e.event.metaKey)) {
+                                                                    const position = e.target.position;
+                                                                    if (position) {
+                                                                        const model = editor.getModel();
+                                                                        if (model) {
+                                                                            const path = getJsonPathForLine(model, position.lineNumber, position.column);
+                                                                            if (path) {
+                                                                                const newMapping: ColumnMapping = {
+                                                                                    id: "col_" + Math.random().toString(36).substring(2, 9),
+                                                                                    name: path.split('.').pop()?.replace(/\[\d+\]/g, "") || "New Column",
+                                                                                    source: "response",
+                                                                                    path: path,
+                                                                                    stepId: "stepId" in currentStep ? currentStep.stepId : undefined,
+                                                                                    visible: true
+                                                                                };
+                                                                                const updated = [...store.state.columnMappings, newMapping];
+                                                                                setColumnMappings(updated);
+                                                                                toast.success(`Added "${path}" to column mappings`);
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
                                                             });
                                                         }}
                                                         options={{
