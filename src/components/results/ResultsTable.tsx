@@ -599,8 +599,8 @@ function getSuggestionsForInput(inputVal: string, bodies: any[], excelHeaders: s
                     });
                 }
             });
-            return suggestions;
         }
+        return suggestions;
     }
 
     // 3. If it's a valid path (and doesn't end with a dot), suggest its children prefixed with a dot
@@ -673,6 +673,9 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
     // Use localValue up to the cursor position to calculate suggestions
     const suggestions = useMemo(() => {
         if (!isOpen) return [];
+        if (cursorPos !== null && localValue.substring(cursorPos).startsWith("}}")) {
+            return [];
+        }
         const inputValForSuggestions = cursorPos !== null ? localValue.substring(0, cursorPos) : localValue;
         return getSuggestionsForInput(inputValForSuggestions, bodies, excelHeaders);
     }, [localValue, cursorPos, bodies, excelHeaders, isOpen]);
@@ -882,7 +885,10 @@ function PathAutocompleteInput({ value, onChange, placeholder, col, results }: P
                 style={{ caretColor: "white" }}
             />
             {isOpen && suggestions.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto custom-scrollbar z-50 bg-neutral-950/95 backdrop-blur-md text-popover-foreground border border-white/10 rounded-md shadow-lg py-1 font-mono text-xs">
+                <div
+                    className="absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto custom-scrollbar z-50 bg-neutral-950/95 backdrop-blur-md text-popover-foreground border border-white/10 rounded-md shadow-lg py-1 font-mono text-xs"
+                    style={{ overscrollBehavior: "contain" }}
+                >
                     {suggestions.map((s, idx) => (
                         <button
                             key={s.value}
@@ -2085,7 +2091,10 @@ function ColumnMappingsDialogInner({
                 </DialogDescription>
             </DialogHeader>
             
-            <div className="flex-grow overflow-y-auto custom-scrollbar pr-1 py-4 space-y-4 min-h-0 border-t border-b border-white/5 my-2">
+            <div
+                className="flex-grow overflow-y-auto custom-scrollbar pr-1 py-4 space-y-4 min-h-0 border-t border-b border-white/5 my-2"
+                style={{ overscrollBehavior: "contain" }}
+            >
                 <div className="space-y-3">
                     {!isReady ? (
                         Array.from({ length: 4 }).map((_, i) => (
