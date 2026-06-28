@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Play, Loader2, StopCircle, FlaskConical } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast-provider";
 
 export function ExecutionPanel() {
     const fileData = useStore(store, (state) => state.fileData);

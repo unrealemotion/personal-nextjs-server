@@ -17,7 +17,7 @@ import {
 import { EtherealAiSymbol } from "@/components/agent/EtherealAiSymbol";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast-provider";
 import { computeSemanticDiff, getJSONStructure, normalizeJSONOrder, getSharedValueStructure, type SemanticDiff } from "@/lib/flattener";
 import { readFileAsText } from "@/lib/file-utils";
 

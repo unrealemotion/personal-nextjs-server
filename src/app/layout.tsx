@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
-import { Toaster } from "@/components/ui/sonner";
+import { ToastProvider, Toaster } from "@/components/ui/toast-provider";
 import { LoadingTransition } from "@/components/layout/LoadingTransition";
 
 export default function RootLayout({
@@ -214,6 +214,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
       >
+        <ToastProvider>
         <LoadingTransition />
         <Script
           strategy="afterInteractive"
@@ -233,7 +234,8 @@ export default function RootLayout({
           {children}
         </main>
         <Footer />
-        <Toaster theme="dark" position="top-right" />
+        <Toaster />
+        </ToastProvider>
       </body>
     </html>
   );

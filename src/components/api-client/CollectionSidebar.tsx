@@ -30,7 +30,7 @@ import {
     FilePlus
 } from "lucide-react";
 import { type ApiCollection, type ApiFolder, type ApiRequest } from "@/lib/schema";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast-provider";
 
 export function getMethodColor(method: string): string {
     const m = (method || "GET").toUpperCase();

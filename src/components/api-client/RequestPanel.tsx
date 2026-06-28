@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Plus, X, Save, Trash2, Send, Terminal, Code, Settings, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { type ApiRequest, type KeyValuePair, type ApiCollection, type ApiFolder } from "@/lib/schema";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast-provider";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { 
     cn, 

@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Trash2, Check, Settings, Eye, EyeOff, Search, Globe, Copy } from "lucide-react";
 import { type Environment, type EnvVariable } from "@/lib/schema";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast-provider";
 
 function InlineEditableText({
     value,

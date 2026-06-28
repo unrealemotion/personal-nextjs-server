@@ -23,7 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Trash2, Copy, GripVertical, ChevronDown, CheckSquare, Square } from "lucide-react";
 import { parseCurl, generateCurl, generateFetch, generateAxios, generatePython } from "@/lib/curl";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast-provider";
 import {
     DndContext,
     closestCenter,

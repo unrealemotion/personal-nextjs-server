@@ -14,7 +14,7 @@ import {
     WELCOME_MESSAGE
 } from "@/lib/store";
 import { sendToExtension } from "@/lib/extension";
-import { toast as sonnerToast } from "sonner";
+import { toast as sonnerToast } from "@/components/ui/toast-provider";
 
 import { AgentProvider } from "./standalone/AgentContext";
 import { AgentChatPanel as StandaloneAgentChatPanel } from "./standalone/AgentChatPanel";

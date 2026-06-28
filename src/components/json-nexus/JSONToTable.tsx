@@ -30,7 +30,7 @@ import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast-provider";
 import * as XLSX from "xlsx";
 import Editor from "@monaco-editor/react";
 import { jsonToTableData, getColumnsFromRows } from "@/lib/flattener";

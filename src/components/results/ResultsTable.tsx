@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 import { stripJsonComments, normalizeKey } from "@/lib/executor-utils";
 import { CopyableText } from "@/components/ui/CopyableText";
 import { setupExtensionRules, clearExtensionRules, sendToExtension } from "@/lib/extension";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast-provider";
 import { resolveHostnameIp } from "@/lib/dns";
 import { useSortableStyle } from "@/lib/hooks";
 import {
